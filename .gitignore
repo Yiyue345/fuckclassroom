@@ -1,0 +1,7 @@
+.venv/
+.idea/
+.playwright-mcp/
+__pycache__/
+*.py[cod]
+data/
+.env
