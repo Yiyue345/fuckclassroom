@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>我的课程</title>
+    <style>
+      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
+      main { box-sizing: border-box; max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
+      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
+      h1 { margin: 0; font-size: 26px; }
+      a { color: #2563eb; text-decoration: none; }
+      .notice { border: 1px solid #f0c2c2; background: #fff5f5; color: #9b1c1c; border-radius: 8px; padding: 14px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+      .card { border: 1px solid #d8dee6; border-radius: 8px; background: #fff; padding: 16px; }
+      .title { margin: 0 0 10px; font-size: 17px; font-weight: 650; }
+      .meta { margin: 6px 0; color: #64748b; font-size: 14px; }
+      .actions { margin-top: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>我的课程</h1>
+        <a href="/">登录状态</a>
+      </header>
+
+      {% if error %}
+        <p class="notice">{{ error }}</p>
+      {% else %}
+        <section class="grid">
+          {% for course in courses %}
+            <article class="card">
+              <p class="title">{{ course.title }}</p>
+              <p class="meta">教师：{{ course.teacher or "未知" }}</p>
+              <p class="meta">类型：{{ course.type }} / {{ course.model }}</p>
+              <p class="meta">时间：{{ course.start_at }} - {{ course.end_at }}</p>
+              <div class="actions">
+                <a href="/courses/{{ course.id }}">查看课次与资源</a>
+              </div>
+            </article>
+          {% endfor %}
+        </section>
+      {% endif %}
+    </main>
+  </body>
+</html>

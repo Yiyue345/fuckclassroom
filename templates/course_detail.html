@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>课程资源</title>
+    <style>
+      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
+      main { box-sizing: border-box; max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
+      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
+      h1 { margin: 0; font-size: 24px; }
+      h2 { margin: 0 0 10px; font-size: 18px; }
+      a { color: #2563eb; text-decoration: none; }
+      .notice { border: 1px solid #f0c2c2; background: #fff5f5; color: #9b1c1c; border-radius: 8px; padding: 14px; }
+      .lesson { border: 1px solid #d8dee6; border-radius: 8px; background: #fff; padding: 16px; margin-bottom: 14px; }
+      .meta { margin: 5px 0; color: #64748b; font-size: 14px; }
+      .resources { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+      .resource { border: 1px solid #d8dee6; border-radius: 6px; padding: 8px 10px; background: #fbfcfd; }
+      .muted { color: #64748b; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>{{ detail.course.title if detail else "课程资源" }}</h1>
+        <a href="/courses">返回课程</a>
+      </header>
+
+      {% if error %}
+        <p class="notice">{{ error }}</p>
+      {% elif detail %}
+        {% for lesson in detail.lessons %}
+          <article class="lesson">
+            <h2>{{ lesson.title }}</h2>
+            <p class="meta">状态：{{ lesson.status_label or "未知" }}　教师：{{ lesson.lecturer or detail.course.teacher or "未知" }}</p>
+            <p class="meta">时间：{{ lesson.start_at }} - {{ lesson.end_at }}　时长：{{ lesson.duration_seconds or 0 }} 秒</p>
+            <div class="resources">
+              {% for resource in lesson.resources %}
+                <span class="resource">
+                  {% if resource.is_downloadable %}
+                    <a href="{{ resource.url }}" target="_blank" rel="noreferrer">{{ resource.title }}</a>
+                  {% else %}
+                    {{ resource.title }}
+                  {% endif %}
+                  {% if resource.status %}<span class="muted">({{ resource.status }})</span>{% endif %}
+                </span>
+              {% endfor %}
+              {% if not lesson.resources %}
+                <span class="muted">暂无资源</span>
+              {% endif %}
+            </div>
+          </article>
+        {% endfor %}
+      {% endif %}
+    </main>
+  </body>
+</html>

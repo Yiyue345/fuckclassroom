@@ -133,7 +133,7 @@ class LoginSessionService:
                 context = browser.new_context(storage_state=str(self.config.storage_state_path))
                 page = context.new_page()
                 page.goto(self.config.site_url, wait_until="domcontentloaded", timeout=30_000)
-                page.wait_for_load_state("networkidle", timeout=10_000)
+                page.wait_for_timeout(3_000)
                 final_url = page.url
                 browser.close()
         except PlaywrightTimeoutError:
