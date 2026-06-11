@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>文字提取与总结</title>
+    <style>
+      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
+      main { box-sizing: border-box; max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
+      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
+      nav { display: flex; gap: 12px; flex-wrap: wrap; }
+      h1 { margin: 0; font-size: 24px; }
+      h2 { margin: 24px 0 10px; font-size: 18px; }
+      a { color: #2563eb; text-decoration: none; }
+      pre { white-space: pre-wrap; word-wrap: break-word; border: 1px solid #d8dee6; border-radius: 8px; background: #fff; padding: 16px; max-height: 520px; overflow: auto; }
+      .notice { border: 1px solid #f0c2c2; background: #fff5f5; color: #9b1c1c; border-radius: 8px; padding: 14px; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
+      button { border: 1px solid #2563eb; border-radius: 6px; background: #2563eb; color: #fff; padding: 8px 12px; cursor: pointer; }
+      .muted { color: #64748b; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>文字提取与总结</h1>
+        <nav>
+          <a href="/settings">设置</a>
+          <a href="/courses/{{ course_id }}">返回课程</a>
+        </nav>
+      </header>
+
+      {% if error %}
+        <p class="notice">{{ error }}</p>
+      {% endif %}
+
+      <div class="actions">
+        <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/extract">
+          <button type="submit">重新提取文字</button>
+        </form>
+        <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/summarize">
+          <button type="submit">生成 AI 总结</button>
+        </form>
+      </div>
+
+      {% if not outputs %}
+        <p class="muted">还没有提取结果。</p>
+      {% endif %}
+
+      {% if outputs.get("summary.md") %}
+        <h2>AI 总结</h2>
+        <pre>{{ outputs.get("summary.md") }}</pre>
+      {% endif %}
+
+      {% if outputs.get("combined.md") %}
+        <h2>合并文本</h2>
+        <pre>{{ outputs.get("combined.md") }}</pre>
+      {% endif %}
+
+      {% if outputs.get("ppt_ocr.md") %}
+        <h2>课件 OCR</h2>
+        <pre>{{ outputs.get("ppt_ocr.md") }}</pre>
+      {% endif %}
+
+      {% if outputs.get("transcript.md") %}
+        <h2>平台转写</h2>
+        <pre>{{ outputs.get("transcript.md") }}</pre>
+      {% endif %}
+    </main>
+  </body>
+</html>

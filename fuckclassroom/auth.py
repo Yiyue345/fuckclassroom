@@ -12,6 +12,8 @@ from .config import AppConfig
 
 CLASSROOM_HOST = "classroom.guet.edu.cn"
 CAS_HOST = "cas.guet.edu.cn"
+COURSE_PROBE_PATH = "/personal/courseapi/vlabpassportapi/v1/account-profile/course?nowpage=1&per-page=1"
+LOGIN_PROBE_INTERVAL_MS = 5_000
 
 
 @dataclass(frozen=True)
@@ -88,7 +90,7 @@ class LoginSessionService:
                 page = context.new_page()
                 page.goto(self.config.site_url, wait_until="domcontentloaded")
 
-                final_url = self._wait_for_classroom_page(page, PlaywrightTimeoutError)
+                final_url = self._wait_for_authenticated_classroom(page, PlaywrightTimeoutError)
                 context.storage_state(path=str(self.config.storage_state_path))
                 browser.close()
         except PlaywrightTimeoutError:
@@ -135,6 +137,7 @@ class LoginSessionService:
                 page.goto(self.config.site_url, wait_until="domcontentloaded", timeout=30_000)
                 page.wait_for_timeout(3_000)
                 final_url = page.url
+                authenticated = self._is_authenticated_classroom(page)
                 browser.close()
         except PlaywrightTimeoutError:
             status = SessionStatus(False, "访问平台超时，可能是网络或会话问题")
@@ -150,7 +153,7 @@ class LoginSessionService:
             status = SessionStatus(False, "会话已失效，需要重新登录", final_url=final_url)
             self._write_login_status("failed", status.message, final_url)
             return status
-        if host == CLASSROOM_HOST:
+        if host == CLASSROOM_HOST and authenticated:
             meta = self._read_json(self.config.session_meta_path, default={})
             storage_state = self._read_json(self.config.storage_state_path, default={})
             cookies = storage_state.get("cookies", [])
@@ -162,6 +165,10 @@ class LoginSessionService:
                 cookie_count=len(cookies),
             )
             self._write_login_status("succeeded", status.message, final_url)
+            return status
+        if host == CLASSROOM_HOST:
+            status = SessionStatus(False, "会话已失效或平台认证失败，需要重新登录", final_url=final_url)
+            self._write_login_status("failed", status.message, final_url)
             return status
         status = SessionStatus(False, f"登录后跳转到了未知站点：{host}", final_url=final_url)
         self._write_login_status("failed", status.message, final_url)
@@ -176,22 +183,49 @@ class LoginSessionService:
             if path.exists():
                 path.unlink()
 
-    def _wait_for_classroom_page(self, page: Any, timeout_error: type[Exception]) -> str:
-        deadline_ms = self.config.login_timeout_seconds * 1000
-        page.wait_for_function(
-            """
-            () => {
-              const host = window.location.hostname;
-              return host === "classroom.guet.edu.cn";
-            }
-            """,
-            timeout=deadline_ms,
-        )
-        final_url = page.url
-        host = urlparse(final_url).hostname or ""
+    def _wait_for_authenticated_classroom(self, page: Any, timeout_error: type[Exception]) -> str:
+        deadline = datetime.now(timezone.utc).timestamp() + self.config.login_timeout_seconds
+        last_url = page.url
+        while datetime.now(timezone.utc).timestamp() < deadline:
+            if page.is_closed():
+                raise timeout_error("登录窗口已关闭")
+            last_url = page.url
+            host = urlparse(last_url).hostname or ""
+            if host == CLASSROOM_HOST and self._is_authenticated_classroom(page):
+                return last_url
+            self._write_login_status("running", "等待学校认证完成，检测到课程接口可访问后会自动保存会话", last_url)
+            page.wait_for_timeout(LOGIN_PROBE_INTERVAL_MS)
+        raise timeout_error(f"CAS login did not finish before timeout, last url: {last_url}")
+
+    @staticmethod
+    def _is_authenticated_classroom(page: Any) -> bool:
+        host = urlparse(page.url).hostname or ""
         if host != CLASSROOM_HOST:
-            raise timeout_error("CAS login did not finish on classroom host")
-        return final_url
+            return False
+        try:
+            return bool(
+                page.evaluate(
+                    """
+                    async (path) => {
+                      const response = await fetch(path, {
+                        credentials: "include",
+                        headers: { Accept: "application/json" }
+                      });
+                      const text = await response.text();
+                      if (!response.ok) return false;
+                      try {
+                        const payload = JSON.parse(text);
+                        return payload && (payload.status === 200 || payload.code === 1000);
+                      } catch (_) {
+                        return false;
+                      }
+                    }
+                    """,
+                    COURSE_PROBE_PATH,
+                )
+            )
+        except Exception:
+            return False
 
     def _write_session_meta(self, final_url: str) -> None:
         self._ensure_auth_dir()

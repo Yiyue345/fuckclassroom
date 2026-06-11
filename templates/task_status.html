@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ task.title }}</title>
+    <style>
+      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
+      main { box-sizing: border-box; max-width: 720px; margin: 0 auto; padding: 32px 20px; }
+      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
+      h1 { margin: 0; font-size: 26px; }
+      a { color: #2563eb; text-decoration: none; }
+      .panel { border: 1px solid #d8dee6; border-radius: 8px; background: #fff; padding: 18px; }
+      .bar { height: 12px; border-radius: 999px; background: #e5e7eb; overflow: hidden; }
+      .bar span { display: block; height: 100%; width: 0; background: #2563eb; transition: width .2s ease; }
+      .status { display: flex; justify-content: space-between; gap: 12px; margin: 14px 0 8px; color: #475569; }
+      .message { margin: 12px 0 0; }
+      .error { border: 1px solid #f0c2c2; background: #fff5f5; color: #9b1c1c; border-radius: 8px; padding: 12px; }
+      .actions { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>{{ task.title }}</h1>
+        <a href="/courses">返回课程</a>
+      </header>
+
+      <section class="panel">
+        <div class="bar"><span id="bar"></span></div>
+        <div class="status">
+          <span id="status">{{ task.status }}</span>
+          <span id="progress">{{ task.progress }}%</span>
+        </div>
+        <p id="message" class="message">{{ task.message }}</p>
+        <p id="error" class="error hidden"></p>
+        <div id="actions" class="actions hidden">
+          <a id="result-link" href="#">查看结果</a>
+        </div>
+      </section>
+    </main>
+    <script>
+      const taskId = "{{ task.id }}";
+      const autoOpen = {{ "true" if auto_open_outputs else "false" }};
+      let opened = false;
+
+      async function refresh() {
+        const response = await fetch(`/api/tasks/${taskId}`);
+        if (!response.ok) {
+          return;
+        }
+        const task = await response.json();
+        document.getElementById("bar").style.width = `${task.progress}%`;
+        document.getElementById("progress").textContent = `${task.progress}%`;
+        document.getElementById("status").textContent = task.status;
+        document.getElementById("message").textContent = task.message || "";
+
+        const error = document.getElementById("error");
+        if (task.error) {
+          error.textContent = task.error;
+          error.classList.remove("hidden");
+        }
+
+        if (task.result_url) {
+          const actions = document.getElementById("actions");
+          const link = document.getElementById("result-link");
+          link.href = task.result_url;
+          actions.classList.remove("hidden");
+          if (autoOpen && task.status === "succeeded" && !opened) {
+            opened = true;
+            window.location.href = task.result_url;
+          }
+        }
+
+        if (task.status === "running") {
+          window.setTimeout(refresh, 1000);
+        }
+      }
+
+      refresh();
+    </script>
+  </body>
+</html>

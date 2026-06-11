@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>抓包记录</title>
+    <style>
+      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
+      main { box-sizing: border-box; max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
+      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
+      nav { display: flex; gap: 12px; flex-wrap: wrap; }
+      h1 { margin: 0; font-size: 26px; }
+      a { color: #2563eb; text-decoration: none; }
+      pre { white-space: pre-wrap; word-wrap: break-word; border: 1px solid #d8dee6; border-radius: 8px; background: #fff; padding: 16px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>{{ name }}</h1>
+        <nav>
+          <a href="/selection/captures">返回记录</a>
+          <a href="/selection">选课辅助</a>
+        </nav>
+      </header>
+      <pre>{{ content }}</pre>
+    </main>
+  </body>
+</html>

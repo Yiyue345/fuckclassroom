@@ -5,3 +5,7 @@ __pycache__/
 *.py[cod]
 data/
 .env
+
+AGENTS.md
+CLAUDE.md
+.claude/

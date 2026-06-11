@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>选课接口抓包记录</title>
+    <style>
+      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
+      main { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 32px 20px; }
+      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
+      nav { display: flex; gap: 12px; flex-wrap: wrap; }
+      h1 { margin: 0; font-size: 26px; }
+      a { color: #2563eb; text-decoration: none; }
+      table { width: 100%; border-collapse: collapse; border: 1px solid #d8dee6; background: #fff; border-radius: 8px; overflow: hidden; }
+      th, td { border-bottom: 1px solid #edf0f3; padding: 10px 12px; text-align: left; }
+      th { color: #475569; font-size: 14px; background: #fbfcfd; }
+      .muted { color: #64748b; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>选课接口抓包记录</h1>
+        <nav>
+          <a href="/selection">返回选课辅助</a>
+          <a href="/">系统选择</a>
+        </nav>
+      </header>
+
+      {% if not captures %}
+        <p class="muted">还没有抓包记录。</p>
+      {% else %}
+        <table>
+          <thead>
+            <tr>
+              <th>记录</th>
+              <th>请求数</th>
+              <th>更新时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for capture in captures %}
+              <tr>
+                <td><a href="/selection/captures/{{ capture.name }}">{{ capture.name }}</a></td>
+                <td>{{ capture.request_count }}</td>
+                <td>{{ capture.updated_at }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </main>
+  </body>
+</html>

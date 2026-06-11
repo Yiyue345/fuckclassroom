@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>选课信息缓存</title>
+    <style>
+      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
+      main { box-sizing: border-box; max-width: 1180px; margin: 0 auto; padding: 32px 20px; }
+      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
+      nav { display: flex; gap: 12px; flex-wrap: wrap; }
+      h1 { margin: 0; font-size: 26px; }
+      h2 { margin: 0 0 12px; font-size: 18px; }
+      a { color: #2563eb; text-decoration: none; }
+      .panel { border: 1px solid #d8dee6; border-radius: 8px; background: #fff; padding: 18px; margin-bottom: 14px; }
+      .meta { display: flex; flex-wrap: wrap; gap: 12px 22px; color: #64748b; margin: 8px 0 0; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      button { border: 1px solid #2563eb; border-radius: 6px; background: #2563eb; color: #fff; padding: 9px 14px; cursor: pointer; }
+      .empty { color: #64748b; line-height: 1.7; }
+      .table-wrap { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; min-width: 980px; }
+      th, td { border-bottom: 1px solid #e5eaf0; padding: 10px 8px; text-align: left; vertical-align: top; }
+      th { color: #475569; font-weight: 600; background: #f8fafc; position: sticky; top: 0; }
+      td { line-height: 1.5; }
+      .course { font-weight: 600; }
+      .muted { color: #64748b; font-size: 13px; }
+      .tag { display: inline-block; border: 1px solid #c8d1dc; border-radius: 999px; padding: 2px 8px; color: #475569; font-size: 12px; }
+      .tag.selected { border-color: #16a34a; color: #15803d; background: #f0fdf4; }
+      @media (max-width: 720px) {
+        header { display: block; }
+        nav { margin-top: 12px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>选课信息缓存</h1>
+        <nav>
+          <a href="/">系统选择</a>
+          <a href="/selection">选课辅助</a>
+          <a href="/selection/captures">抓包记录</a>
+        </nav>
+      </header>
+
+      <section class="panel">
+        <h2>缓存状态</h2>
+        <div class="actions">
+          <form method="post" action="/selection/info/refresh">
+            <button type="submit">刷新选课信息</button>
+          </form>
+        </div>
+        <div class="meta">
+          <span>{{ session.message }}</span>
+          <span>更新时间：{{ info.updated_at or "尚未刷新" }}</span>
+          <span>批次：{{ info.turn_id or "未知" }}</span>
+          <span>课程数：{{ info.courses|length }}</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>培养方案可选课</h2>
+        {% if not info.courses %}
+          <p class="empty">还没有缓存的选课信息。点击“刷新选课信息”后，程序会用已保存的 WebVPN 会话读取当前选课批次。</p>
+        {% else %}
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>课程</th>
+                  <th>教学班</th>
+                  <th>教师</th>
+                  <th>上课时间</th>
+                  <th>人数</th>
+                  <th>属性</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for course in info.courses %}
+                  <tr>
+                    <td>
+                      <div class="course">{{ course.course_name or "未命名课程" }}</div>
+                      <div class="muted">{{ course.course_code or "无课程代码" }}{% if course.credits is not none %} · {{ course.credits }} 学分{% endif %}</div>
+                    </td>
+                    <td>
+                      <div>{{ course.lesson_name or "未公布" }}</div>
+                      <div class="muted">{{ course.lesson_code or "无教学班代码" }}</div>
+                    </td>
+                    <td>{{ course.teachers }}</td>
+                    <td>{{ course.time }}</td>
+                    <td>
+                      {% if course.selected_count is not none or course.max_count is not none %}
+                        {{ course.selected_count if course.selected_count is not none else "?" }}/{{ course.max_count if course.max_count is not none else "?" }}
+                      {% else %}
+                        未公布
+                      {% endif %}
+                    </td>
+                    <td>
+                      <div>{{ course.course_property or "未公布" }}</div>
+                      <div class="muted">{{ course.course_type or "" }}</div>
+                      <div class="muted">{{ course.campus or "" }}</div>
+                    </td>
+                    <td>
+                      {% if course.is_selected %}
+                        <span class="tag selected">已选</span>
+                      {% else %}
+                        <span class="tag">可选</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

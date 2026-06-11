@@ -90,10 +90,18 @@
         color: #64748b;
         line-height: 1.7;
       }
+
+      .top-link {
+        display: inline-block;
+        margin-bottom: 16px;
+        color: #2563eb;
+        text-decoration: none;
+      }
     </style>
   </head>
   <body>
     <main>
+      <a class="top-link" href="/">返回系统选择</a>
       <h1>课程录制助手</h1>
       <section class="panel">
         <div class="row">
@@ -121,6 +129,12 @@
           <form method="get" action="/courses">
             <button type="submit">查看课程</button>
           </form>
+          <form method="get" action="/downloads">
+            <button type="submit">下载文件</button>
+          </form>
+          <form method="get" action="/settings">
+            <button type="submit">设置</button>
+          </form>
           <form method="post" action="/auth/start">
             <button class="primary" type="submit">打开网页登录</button>
           </form>
@@ -133,7 +147,7 @@
         </div>
 
         {% if login_run.state == "running" %}
-          <p class="hint">登录窗口正在等待学校认证完成。本页可稍后刷新查看结果。</p>
+          <p class="hint">登录窗口正在等待学校认证完成。检测到课程接口可访问后会自动保存会话，本页可稍后刷新查看结果。</p>
         {% endif %}
       </section>
     </main>
