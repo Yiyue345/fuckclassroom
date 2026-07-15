@@ -1,79 +1,65 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>课程资源</title>
-    <style>
-      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
-      main { box-sizing: border-box; max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
-      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
-      nav { display: flex; gap: 12px; flex-wrap: wrap; }
-      h1 { margin: 0; font-size: 24px; }
-      h2 { margin: 0 0 10px; font-size: 18px; }
-      a { color: #2563eb; text-decoration: none; }
-      .notice { border: 1px solid #f0c2c2; background: #fff5f5; color: #9b1c1c; border-radius: 8px; padding: 14px; }
-      .lesson { border: 1px solid #d8dee6; border-radius: 8px; background: #fff; padding: 16px; margin-bottom: 14px; }
-      .meta { margin: 5px 0; color: #64748b; font-size: 14px; }
-      .resources { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-      .resource { border: 1px solid #d8dee6; border-radius: 6px; padding: 8px 10px; background: #fbfcfd; }
-      .muted { color: #64748b; }
-      .downloaded { color: #166534; font-size: 13px; margin-left: 6px; }
-      .lesson-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-      button { border: 1px solid #c8d1dc; border-radius: 6px; background: #fff; padding: 8px 10px; cursor: pointer; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>{{ detail.course.title if detail else "课程资源" }}</h1>
-        <nav>
-          <a href="/downloads">下载文件</a>
-          <a href="/settings">设置</a>
-          <a href="/courses">返回课程</a>
-        </nav>
-      </header>
+{% extends "base.html" %}
+{% set active_system = "classroom" %}
+{% set active_nav = "courses" %}
 
-      {% if error %}
-        <p class="notice">{{ error }}</p>
-      {% elif detail %}
+{% block title %}{{ detail.course.title if detail else "课程资源" }} · 学业助手{% endblock %}
+{% block breadcrumb_parent %}<a href="/courses">我的课程</a>{% endblock %}
+{% block page_title %}{{ detail.course.title if detail else "课程资源" }}{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>{{ detail.course.title if detail else "课程资源" }}</h1>
+      {% if detail %}<p class="page-description">{{ detail.course.teacher or "未知教师" }} · {{ detail.course.type }} · {{ detail.course.model }}</p>{% endif %}
+    </div>
+    <div class="head-actions">
+      <a class="btn" href="/courses"><svg class="icon"><use href="/static/icons.svg#arrow-left"></use></svg>返回课程</a>
+      <form method="post" action="/courses/{{ detail.course.id if detail else course_id }}/refresh"><button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>刷新资源</button></form>
+    </div>
+  </div>
+
+  {% if refreshed %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>课程资源已刷新。</span></div>{% endif %}
+  {% if refresh_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>刷新失败：{{ refresh_error }}</span></div>{% endif %}
+  {% if error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>{% endif %}
+
+  {% if detail %}
+    {% set counts = namespace(replay=0, ppt=0, transcript=0) %}
+    {% for lesson in detail.lessons %}{% for resource in lesson.resources %}{% if resource.kind == "ppt" %}{% set counts.ppt = counts.ppt + 1 %}{% elif resource.kind == "transcript" %}{% set counts.transcript = counts.transcript + 1 %}{% else %}{% set counts.replay = counts.replay + 1 %}{% endif %}{% endfor %}{% endfor %}
+    <section class="surface">
+      <div class="course-summary">
+        <div><h2>课程资源</h2><div class="summary-meta"><span>{{ detail.lessons|length }} 个课次</span><span>{{ counts.replay }} 个回放</span><span>{{ counts.ppt }} 份课件</span><span>{{ counts.transcript }} 份转写</span></div></div>
+        <span class="status green"><span class="tiny-dot"></span>进入页面时已同步</span>
+      </div>
+      <div class="lesson-list">
+        <div class="lesson-head"><span>课次</span><span>课堂</span><span>可用资源</span><span>状态</span><span></span></div>
         {% for lesson in detail.lessons %}
-          <article class="lesson">
-            <h2>{{ lesson.title }}</h2>
-            <p class="meta">状态：{{ lesson.status_label or "未知" }}　教师：{{ lesson.lecturer or detail.course.teacher or "未知" }}</p>
-            <p class="meta">时间：{{ lesson.start_at }} - {{ lesson.end_at }}　时长：{{ lesson.duration_seconds or 0 }} 秒</p>
-            <div class="resources">
+          <article class="lesson-row">
+            <div class="lesson-number">{{ "%02d"|format(loop.index) }}</div>
+            <div><div class="row-title">{{ lesson.title }}</div><div class="row-sub">{{ lesson.start_at or "时间未公布" }}{% if lesson.lecturer or detail.course.teacher %} · {{ lesson.lecturer or detail.course.teacher }}{% endif %}{% if lesson.duration_seconds %} · {{ lesson.duration_seconds // 60 }} 分钟{% endif %}</div></div>
+            <div class="resource-line">
               {% for resource in lesson.resources %}
-                <span class="resource">
-                  {% set download_key = lesson.id ~ ":" ~ resource.kind %}
+                {% set download_key = lesson.id ~ ":" ~ resource.kind %}
+                {% if resource.kind == "ppt" or resource.kind == "transcript" %}
                   {% if resource.is_downloadable %}
-                    {% if resource.kind == "ppt" or resource.kind == "transcript" %}
-                      <a href="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/download/{{ resource.kind }}">{{ resource.title }}</a>
-                      {% if download_key in downloaded_exports %}<span class="downloaded">已下载</span>{% endif %}
-                    {% else %}
-                      <a href="{{ resource.url }}" target="_blank" rel="noreferrer">{{ resource.title }}</a>
-                    {% endif %}
-                  {% else %}
-                    {{ resource.title }}
-                  {% endif %}
-                  {% if resource.status %}<span class="muted">({{ resource.status }})</span>{% endif %}
-                </span>
-              {% endfor %}
-              {% if not lesson.resources %}
-                <span class="muted">暂无资源</span>
-              {% endif %}
+                    <a class="resource-chip{% if download_key in downloaded_exports %} ready{% endif %}" href="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/download/{{ resource.kind }}" title="{{ resource.title }}">
+                      <svg class="icon small"><use href="/static/icons.svg#{% if resource.kind == 'ppt' %}presentation{% else %}captions{% endif %}"></use></svg>{{ "PPT" if resource.kind == "ppt" else "转写" }}
+                    </a>
+                  {% else %}<span class="resource-chip">{{ resource.title }}</span>{% endif %}
+                {% elif resource.is_downloadable %}
+                  <a class="resource-chip ready" href="{{ resource.url }}" target="_blank" rel="noreferrer"><svg class="icon small"><use href="/static/icons.svg#play"></use></svg>{{ resource.title }}</a>
+                {% else %}<span class="resource-chip">{{ resource.title }}</span>{% endif %}
+              {% else %}<span class="muted">暂无资源</span>{% endfor %}
+            </div>
+            <div>
+              {% if lesson.status_label %}<span class="status {% if '完成' in lesson.status_label or '结束' in lesson.status_label %}green{% else %}gray{% endif %}">{{ lesson.status_label }}</span>{% else %}<span class="status gray">状态未知</span>{% endif %}
             </div>
             <div class="lesson-actions">
-              <form method="post" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/extract">
-                <button type="submit">提取文字</button>
-              </form>
-              <form method="get" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/outputs">
-                <button type="submit">查看结果</button>
-              </form>
+              <form method="post" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/extract"><button class="btn small" type="submit"><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg>提取文字</button></form>
+              <a class="btn small icon-only" href="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/outputs" title="查看提取结果"><svg class="icon small"><use href="/static/icons.svg#file-text"></use></svg></a>
             </div>
           </article>
-        {% endfor %}
-      {% endif %}
-    </main>
-  </body>
-</html>
+        {% else %}<div class="empty-state"><div><svg class="icon"><use href="/static/icons.svg#book-open"></use></svg><p>暂无课次</p></div></div>{% endfor %}
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

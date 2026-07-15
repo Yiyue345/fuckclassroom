@@ -1,155 +1,84 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>课程录制助手</title>
-    <style>
-      :root {
-        color-scheme: light;
-        font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
-        background: #f7f8fa;
-        color: #1f2933;
-      }
+{% extends "base.html" %}
+{% set active_system = "classroom" %}
+{% set active_nav = "overview" %}
 
-      body {
-        margin: 0;
-      }
+{% block title %}课程录播 · 学业助手{% endblock %}
+{% block page_title %}概览{% endblock %}
 
-      main {
-        box-sizing: border-box;
-        max-width: 760px;
-        margin: 0 auto;
-        padding: 40px 20px;
-      }
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>课程录播</h1>
+      <p class="page-description">最近课程、下载文件和文字提取任务集中在这里。</p>
+    </div>
+    <div class="head-actions">
+      <form method="post" action="/auth/verify"><button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>验证会话</button></form>
+      <a class="btn primary" href="/courses">浏览全部课程</a>
+    </div>
+  </div>
 
-      h1 {
-        margin: 0 0 24px;
-        font-size: 28px;
-        font-weight: 650;
-      }
+  {% if course_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ course_error }}</span></div>{% endif %}
 
-      .panel {
-        border: 1px solid #d8dee6;
-        border-radius: 8px;
-        background: #ffffff;
-        padding: 24px;
-      }
+  <section class="stat-band">
+    <div class="stat"><div class="stat-label">当前课程</div><div class="stat-value">{{ courses|length }}</div><div class="stat-foot">按默认学期加载</div></div>
+    <div class="stat"><div class="stat-label">本地文件</div><div class="stat-value">{{ files|length }}</div><div class="stat-foot">课件、转写与提取结果</div></div>
+    <div class="stat"><div class="stat-label">进行中任务</div><div class="stat-value">{{ running_task_count }}</div><div class="stat-foot">OCR、总结或资源刷新</div></div>
+    <div class="stat"><div class="stat-label">最近完成</div><div class="stat-value">{{ completed_task_count }}</div><div class="stat-foot">本次运行期间</div></div>
+  </section>
 
-      .row {
-        display: flex;
-        justify-content: space-between;
-        gap: 16px;
-        padding: 12px 0;
-        border-bottom: 1px solid #edf0f3;
-      }
+  <div class="section dashboard-grid">
+    <section>
+      <div class="section-head"><h2>最近课程</h2><a class="link-button" href="/courses">查看全部 <span>→</span></a></div>
+      <div class="surface list recent-table">
+        <div class="list-header"><span>课程</span><span>教师</span><span>时间</span><span></span></div>
+        {% for course in courses[:4] %}
+          <a class="list-row" href="/courses/{{ course.id }}">
+            <div><div class="row-title">{{ course.title }}</div><div class="row-sub">{{ course.type }} · {{ course.model }}</div></div>
+            <div class="cell">{{ course.teacher or "未知教师" }}</div>
+            <div class="cell">{{ course.start_at or "未公布" }}</div>
+            <div class="cell action"><span class="link-button">查看</span></div>
+          </a>
+        {% else %}
+          <div class="empty-state"><div><svg class="icon"><use href="/static/icons.svg#book-open"></use></svg><p>{% if session.is_logged_in %}暂无课程数据{% else %}登录后显示课程{% endif %}</p></div></div>
+        {% endfor %}
+      </div>
+    </section>
 
-      .row:last-child {
-        border-bottom: 0;
-      }
+    <section>
+      <div class="section-head"><h2>任务与结果</h2><a class="link-button" href="/tasks">任务中心 <span>→</span></a></div>
+      <div class="surface task-stack">
+        {% for task in recent_tasks %}
+          <a class="task-item" href="/tasks/{{ task.id }}">
+            <div class="task-top">
+              <div><div class="task-title">{{ task.title }}</div><div class="task-meta">{{ task.message }} · {{ task.updated_at }}</div></div>
+              {% if task.status == "succeeded" %}<span class="status green">完成</span>{% elif task.status == "failed" %}<span class="status red">失败</span>{% else %}<span class="status blue">{{ task.progress }}%</span>{% endif %}
+            </div>
+            {% if task.status == "running" %}<div class="progress"><span style="width: {{ task.progress }}%"></span></div>{% endif %}
+          </a>
+        {% else %}
+          <div class="empty-state"><div><svg class="icon"><use href="/static/icons.svg#list-todo"></use></svg><p>暂时没有任务</p></div></div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
 
-      .label {
-        color: #64748b;
-      }
-
-      .value {
-        text-align: right;
-        overflow-wrap: anywhere;
-      }
-
-      .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin-top: 22px;
-      }
-
-      button {
-        min-height: 38px;
-        border: 1px solid #c8d1dc;
-        border-radius: 6px;
-        background: #ffffff;
-        color: #1f2933;
-        padding: 0 14px;
-        cursor: pointer;
-      }
-
-      button.primary {
-        border-color: #2563eb;
-        background: #2563eb;
-        color: #ffffff;
-      }
-
-      button.danger {
-        border-color: #d14343;
-        color: #b42318;
-      }
-
-      .hint {
-        margin-top: 18px;
-        color: #64748b;
-        line-height: 1.7;
-      }
-
-      .top-link {
-        display: inline-block;
-        margin-bottom: 16px;
-        color: #2563eb;
-        text-decoration: none;
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <a class="top-link" href="/">返回系统选择</a>
-      <h1>课程录制助手</h1>
-      <section class="panel">
-        <div class="row">
-          <span class="label">会话状态</span>
-          <strong class="value">{{ "已保存" if session.is_logged_in else "未登录" }}</strong>
+  <section class="section" id="session">
+    <div class="section-head"><h2>登录会话</h2><span class="status {% if session.is_logged_in %}green{% else %}red{% endif %}"><span class="tiny-dot"></span>{{ "已保存" if session.is_logged_in else "未登录" }}</span></div>
+    <div class="session-overview">
+      <div class="surface session-details">
+        <div class="session-state"><span class="session-dot {% if session.is_logged_in %}valid{% else %}invalid{% endif %}"></span><div><strong>{{ session.message }}</strong><span>登录任务：{{ login_run.message }}</span></div></div>
+        <div class="detail-grid">
+          <div class="detail-item"><label>保存时间</label><strong>{{ session.saved_at or "无" }}</strong></div>
+          <div class="detail-item"><label>Cookie 数量</label><strong>{{ session.cookie_count }}</strong></div>
+          <div class="detail-item"><label>任务状态</label><strong>{{ login_run.state }}</strong></div>
+          <div class="detail-item"><label>最后页面</label><strong title="{{ session.final_url or '' }}">{{ session.final_url or "无" }}</strong></div>
         </div>
-        <div class="row">
-          <span class="label">说明</span>
-          <span class="value">{{ session.message }}</span>
-        </div>
-        <div class="row">
-          <span class="label">Cookie 数量</span>
-          <span class="value">{{ session.cookie_count }}</span>
-        </div>
-        <div class="row">
-          <span class="label">保存时间</span>
-          <span class="value">{{ session.saved_at or "无" }}</span>
-        </div>
-        <div class="row">
-          <span class="label">登录任务</span>
-          <span class="value">{{ login_run.state }} - {{ login_run.message }}</span>
-        </div>
-
-        <div class="actions">
-          <form method="get" action="/courses">
-            <button type="submit">查看课程</button>
-          </form>
-          <form method="get" action="/downloads">
-            <button type="submit">下载文件</button>
-          </form>
-          <form method="get" action="/settings">
-            <button type="submit">设置</button>
-          </form>
-          <form method="post" action="/auth/start">
-            <button class="primary" type="submit">打开网页登录</button>
-          </form>
-          <form method="post" action="/auth/verify">
-            <button type="submit">验证会话</button>
-          </form>
-          <form method="post" action="/auth/logout">
-            <button class="danger" type="submit">清除会话</button>
-          </form>
-        </div>
-
-        {% if login_run.state == "running" %}
-          <p class="hint">登录窗口正在等待学校认证完成。检测到课程接口可访问后会自动保存会话，本页可稍后刷新查看结果。</p>
-        {% endif %}
-      </section>
-    </main>
-  </body>
-</html>
+      </div>
+      <div class="surface session-actions">
+        <form method="post" action="/auth/start"><button class="btn primary" type="submit"><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>打开网页登录</button></form>
+        <form method="post" action="/auth/verify"><button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>验证保存会话</button></form>
+        <form method="post" action="/auth/logout" data-confirm="确认清除课程录播登录会话？"><button class="btn danger" type="submit"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除登录会话</button></form>
+      </div>
+    </div>
+  </section>
+{% endblock %}

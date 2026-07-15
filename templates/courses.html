@@ -1,76 +1,47 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>我的课程</title>
-    <style>
-      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
-      main { box-sizing: border-box; max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
-      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
-      nav { display: flex; gap: 12px; flex-wrap: wrap; }
-      h1 { margin: 0; font-size: 26px; }
-      a { color: #2563eb; text-decoration: none; }
-      form.filter { display: flex; gap: 10px; align-items: center; margin: 0 0 20px; }
-      label { color: #64748b; font-size: 14px; }
-      select, button { border: 1px solid #c8d1dc; border-radius: 6px; background: #fff; padding: 8px 10px; }
-      button { cursor: pointer; }
-      .notice { border: 1px solid #f0c2c2; background: #fff5f5; color: #9b1c1c; border-radius: 8px; padding: 14px; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
-      .card { border: 1px solid #d8dee6; border-radius: 8px; background: #fff; padding: 16px; }
-      .title { margin: 0 0 10px; font-size: 17px; font-weight: 650; }
-      .meta { margin: 6px 0; color: #64748b; font-size: 14px; }
-      .actions { margin-top: 14px; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>我的课程</h1>
-        <nav>
-          <a href="/downloads">下载文件</a>
-          <a href="/settings">设置</a>
-          <a href="/classroom">登录状态</a>
-          <a href="/">系统选择</a>
-        </nav>
-      </header>
+{% extends "base.html" %}
+{% set active_system = "classroom" %}
+{% set active_nav = "courses" %}
 
-      {% if error %}
-        <p class="notice">{{ error }}</p>
-      {% endif %}
-      {% if term_error %}
-        <p class="notice">{{ term_error }}</p>
-      {% endif %}
-      {% if not error %}
-        <form class="filter" method="get" action="/courses">
-          <label for="term_id">学期</label>
-          <select id="term_id" name="term_id">
-            <option value="" {% if not selected_term_id %}selected{% endif %}>全部课程</option>
-            {% for term in terms %}
-              <option value="{{ term.id }}" {% if selected_term_id == term.id %}selected{% endif %}>
-                {{ term.year }} 第 {{ term.season }} 学期{% if term.current %}（当前）{% endif %}
-              </option>
-            {% endfor %}
-          </select>
-          <button type="submit">筛选</button>
-        </form>
+{% block title %}我的课程 · 学业助手{% endblock %}
+{% block page_title %}我的课程{% endblock %}
 
-        <section class="grid">
-          {% for course in courses %}
-            <article class="card">
-              <p class="title">{{ course.title }}</p>
-              <p class="meta">教师：{{ course.teacher or "未知" }}</p>
-              <p class="meta">类型：{{ course.type }} / {{ course.model }}</p>
-              <p class="meta">时间：{{ course.start_at }} - {{ course.end_at }}</p>
-              <div class="actions">
-                <a href="/courses/{{ course.id }}">查看课次与资源</a>
-              </div>
-            </article>
-          {% else %}
-            <p class="meta">当前筛选条件下没有课程。</p>
+{% block content %}
+  <div class="page-head">
+    <div><h1>我的课程</h1><p class="page-description">按学期浏览课程，并进入课次查看回放、课件和提取结果。</p></div>
+    <div class="head-actions"><a class="btn" href="/settings#courses"><svg class="icon"><use href="/static/icons.svg#settings"></use></svg>课程设置</a></div>
+  </div>
+
+  {% if error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>{% endif %}
+  {% if term_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ term_error }}</span></div>{% endif %}
+
+  {% if not error %}
+    <form class="toolbar" method="get" action="/courses">
+      <div class="toolbar-left">
+        <div class="search"><svg class="icon"><use href="/static/icons.svg#search"></use></svg><input class="input" type="search" placeholder="搜索课程或教师" data-filter-input="#course-list"></div>
+        <select class="select" name="term_id" style="width: 230px">
+          <option value="" {% if not selected_term_id %}selected{% endif %}>全部学期</option>
+          {% for term in terms %}
+            <option value="{{ term.id }}" {% if selected_term_id == term.id %}selected{% endif %}>{{ term.year }} 第 {{ term.season }} 学期{% if term.current %}（当前）{% endif %}</option>
           {% endfor %}
-        </section>
-      {% endif %}
-    </main>
-  </body>
-</html>
+        </select>
+        <button class="btn" type="submit">应用筛选</button>
+      </div>
+      <div class="toolbar-right"><span class="section-meta">共 {{ courses|length }} 门课程</span></div>
+    </form>
+
+    <section class="surface list course-table" id="course-list">
+      <div class="list-header"><span>课程</span><span>教师</span><span>课程时间</span><span>类型</span><span></span></div>
+      {% for course in courses %}
+        <div class="list-row" data-filter-row>
+          <div><div class="row-title">{{ course.title }}</div><div class="row-sub">{{ course.model or "普通课程" }}</div></div>
+          <div class="cell"><strong>{{ course.teacher or "未知教师" }}</strong></div>
+          <div class="cell">{{ course.start_at or "未公布" }}{% if course.end_at %}<div class="row-sub">至 {{ course.end_at }}</div>{% endif %}</div>
+          <div class="cell"><span class="status gray">{{ course.type or "课程" }}</span></div>
+          <div class="cell action"><a class="btn small primary" href="/courses/{{ course.id }}">查看资源</a></div>
+        </div>
+      {% else %}
+        <div class="empty-state"><div><svg class="icon"><use href="/static/icons.svg#book-open"></use></svg><p>当前筛选条件下没有课程</p></div></div>
+      {% endfor %}
+    </section>
+  {% endif %}
+{% endblock %}

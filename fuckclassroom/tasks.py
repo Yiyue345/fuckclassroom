@@ -58,6 +58,11 @@ class TaskManager:
         state = self.get(task_id)
         return asdict(state) if state else None
 
+    def list_recent(self, limit: int = 20) -> list[TaskState]:
+        with self._lock:
+            tasks = sorted(self._tasks.values(), key=lambda state: state.created_at, reverse=True)
+            return tasks[: max(0, limit)]
+
     def _run(
         self,
         task_id: str,

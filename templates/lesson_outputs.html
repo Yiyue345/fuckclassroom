@@ -1,70 +1,38 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>文字提取与总结</title>
-    <style>
-      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
-      main { box-sizing: border-box; max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
-      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
-      nav { display: flex; gap: 12px; flex-wrap: wrap; }
-      h1 { margin: 0; font-size: 24px; }
-      h2 { margin: 24px 0 10px; font-size: 18px; }
-      a { color: #2563eb; text-decoration: none; }
-      pre { white-space: pre-wrap; word-wrap: break-word; border: 1px solid #d8dee6; border-radius: 8px; background: #fff; padding: 16px; max-height: 520px; overflow: auto; }
-      .notice { border: 1px solid #f0c2c2; background: #fff5f5; color: #9b1c1c; border-radius: 8px; padding: 14px; }
-      .actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
-      button { border: 1px solid #2563eb; border-radius: 6px; background: #2563eb; color: #fff; padding: 8px 12px; cursor: pointer; }
-      .muted { color: #64748b; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>文字提取与总结</h1>
-        <nav>
-          <a href="/settings">设置</a>
-          <a href="/courses/{{ course_id }}">返回课程</a>
-        </nav>
-      </header>
+{% extends "base.html" %}
+{% set active_system = "classroom" %}
+{% set active_nav = "tasks" %}
 
-      {% if error %}
-        <p class="notice">{{ error }}</p>
-      {% endif %}
+{% block title %}文字提取与总结 · 学业助手{% endblock %}
+{% block breadcrumb_parent %}<a href="/courses/{{ course_id }}">课程资源</a>{% endblock %}
+{% block page_title %}文字提取与总结{% endblock %}
 
-      <div class="actions">
-        <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/extract">
-          <button type="submit">重新提取文字</button>
-        </form>
-        <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/summarize">
-          <button type="submit">生成 AI 总结</button>
-        </form>
-      </div>
+{% block content %}
+  <div class="page-head">
+    <div><h1>文字提取与总结</h1><p class="page-description">课件 OCR、平台转写、合并文本和 AI 总结。</p></div>
+    <div class="head-actions"><a class="btn" href="/courses/{{ course_id }}"><svg class="icon"><use href="/static/icons.svg#arrow-left"></use></svg>返回课程</a></div>
+  </div>
 
-      {% if not outputs %}
-        <p class="muted">还没有提取结果。</p>
-      {% endif %}
+  {% if error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>{% endif %}
 
-      {% if outputs.get("summary.md") %}
-        <h2>AI 总结</h2>
-        <pre>{{ outputs.get("summary.md") }}</pre>
-      {% endif %}
+  <div class="output-actions">
+    <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/extract"><button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#scan-text"></use></svg>重新提取</button></form>
+    <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/summarize"><button class="btn primary" type="submit"><svg class="icon"><use href="/static/icons.svg#sparkles"></use></svg>生成 AI 总结</button></form>
+  </div>
 
-      {% if outputs.get("combined.md") %}
-        <h2>合并文本</h2>
-        <pre>{{ outputs.get("combined.md") }}</pre>
-      {% endif %}
+  {% if not outputs %}
+    <section class="surface empty-state"><div><svg class="icon"><use href="/static/icons.svg#file-text"></use></svg><p>还没有提取结果</p></div></section>
+  {% endif %}
 
-      {% if outputs.get("ppt_ocr.md") %}
-        <h2>课件 OCR</h2>
-        <pre>{{ outputs.get("ppt_ocr.md") }}</pre>
-      {% endif %}
-
-      {% if outputs.get("transcript.md") %}
-        <h2>平台转写</h2>
-        <pre>{{ outputs.get("transcript.md") }}</pre>
-      {% endif %}
-    </main>
-  </body>
-</html>
+  {% if outputs.get("summary.md") %}
+    <section class="surface output-section"><header><h2>AI 总结</h2><span class="status blue"><svg class="icon small"><use href="/static/icons.svg#sparkles"></use></svg>Summary</span></header><div class="output-content"><pre>{{ outputs.get("summary.md") }}</pre></div></section>
+  {% endif %}
+  {% if outputs.get("combined.md") %}
+    <section class="surface output-section"><header><h2>合并文本</h2><span class="status gray">Combined</span></header><div class="output-content"><pre>{{ outputs.get("combined.md") }}</pre></div></section>
+  {% endif %}
+  {% if outputs.get("ppt_ocr.md") %}
+    <section class="surface output-section"><header><h2>课件 OCR</h2><span class="status green"><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg>OCR</span></header><div class="output-content"><pre>{{ outputs.get("ppt_ocr.md") }}</pre></div></section>
+  {% endif %}
+  {% if outputs.get("transcript.md") %}
+    <section class="surface output-section"><header><h2>平台转写</h2><span class="status gray"><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>Transcript</span></header><div class="output-content"><pre>{{ outputs.get("transcript.md") }}</pre></div></section>
+  {% endif %}
+{% endblock %}

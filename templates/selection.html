@@ -1,126 +1,45 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>WebVPN 选课辅助</title>
-    <style>
-      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
-      main { box-sizing: border-box; max-width: 920px; margin: 0 auto; padding: 32px 20px; }
-      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
-      nav { display: flex; gap: 12px; flex-wrap: wrap; }
-      h1 { margin: 0; font-size: 26px; }
-      h2 { margin: 0 0 12px; font-size: 18px; }
-      a { color: #2563eb; text-decoration: none; }
-      .panel { border: 1px solid #d8dee6; border-radius: 8px; background: #fff; padding: 18px; margin-bottom: 14px; }
-      .meta { margin: 6px 0; color: #64748b; }
-      .actions { display: flex; flex-wrap: wrap; gap: 10px; }
-      .row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-      label { display: grid; gap: 6px; color: #475569; font-size: 14px; }
-      input { box-sizing: border-box; width: 100%; border: 1px solid #c8d1dc; border-radius: 6px; padding: 9px 10px; font: inherit; }
-      button { border: 1px solid #2563eb; border-radius: 6px; background: #2563eb; color: #fff; padding: 9px 14px; cursor: pointer; }
-      button.secondary { border-color: #c8d1dc; background: #fff; color: #1f2933; }
-      button.danger { border-color: #d14343; background: #fff; color: #b42318; }
-      .hint { color: #64748b; line-height: 1.7; margin-bottom: 0; }
-      .notice { border: 1px solid #f0c2c2; background: #fff5f5; color: #9b1c1c; border-radius: 8px; padding: 12px; }
-      .check { display: flex; gap: 8px; align-items: center; margin: 14px 0; color: #475569; }
-      .check input { width: auto; }
-      @media (max-width: 720px) { .row { grid-template-columns: 1fr; } }
-    </style>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>WebVPN 选课辅助</h1>
-        <nav>
-          <a href="/">系统选择</a>
-          <a href="/classroom">课程录播</a>
-          <a href="/selection/info">选课信息</a>
-          <a href="/selection/captures">抓包记录</a>
-        </nav>
-      </header>
+{% extends "base.html" %}
+{% set active_system = "selection" %}
+{% set active_nav = "" %}
 
-      {% if select_error %}
-        <p class="notice">{{ select_error }}</p>
-      {% endif %}
+{% block title %}会话管理 · 学业助手{% endblock %}
+{% block page_title %}会话管理{% endblock %}
 
-      <section class="panel">
-        <h2>会话状态</h2>
-        <p class="meta">{{ session.message }}</p>
-        <p class="meta">保存时间：{{ session.saved_at or "无" }}</p>
-        <p class="meta">最后页面：{{ session.final_url or "无" }}</p>
-        <div class="actions">
-          <form method="post" action="/selection/login">
-            <button type="submit">登录 WebVPN</button>
-          </form>
-          <form method="post" action="/selection/open">
-            <button class="secondary" type="submit">打开本科教务</button>
-          </form>
-          <form method="post" action="/selection/open-course-select">
-            <button class="secondary" type="submit">打开选课入口</button>
-          </form>
-        </div>
-      </section>
+{% block content %}
+  <div class="page-head"><div><h1>WebVPN 与本科教务</h1><p class="page-description">管理独立的 WebVPN 登录会话和选课入口状态。</p></div><div class="head-actions"><a class="btn primary" href="/selection/info">进入选课中心</a></div></div>
 
-      <section class="panel">
-        <h2>抓取选课接口</h2>
-        <form method="post" action="/selection/capture">
-          <label>
-            抓取时长（秒）
-            <input name="duration_seconds" type="number" min="30" max="900" step="10" value="180">
-          </label>
-          <p class="hint">启动后会打开本科教务系统。请在浏览器中进入选课页面，执行查询、筛选、查看容量等操作。脚本会记录 XHR/fetch 请求并脱敏保存。</p>
-          <button type="submit">开始抓取</button>
-        </form>
-      </section>
+  {% if select_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ select_error }}</span></div>{% endif %}
 
-      <section class="panel">
-        <h2>定位课程</h2>
-        <form method="post" action="/selection/highlight">
-          <div class="row">
-            <label>
-              课程名
-              <input name="name" placeholder="例如：大学英语">
-            </label>
-            <label>
-              课程代码
-              <input name="code" placeholder="可选">
-            </label>
-            <label>
-              教师
-              <input name="teacher" placeholder="可选">
-            </label>
-          </div>
-          <p class="hint">启动后会打开选课入口，自动进入当前批次、切到全部课程并提交查询，然后高亮匹配课程，不会自动提交选课。</p>
-          <button type="submit">打开并定位</button>
-        </form>
-      </section>
+  <section class="session-overview">
+    <div class="surface session-details">
+      <div class="session-state"><span class="session-dot {% if session.is_saved and session.is_valid is not sameas false %}valid{% else %}invalid{% endif %}"></span><div><strong>{{ session.message }}</strong><span>{% if session.is_valid is sameas true %}已通过本科教务页面验证{% elif session.is_valid is sameas false %}需要重新登录 WebVPN/教务{% else %}尚未验证教务页面{% endif %}</span></div></div>
+      <div class="detail-grid">
+        <div class="detail-item"><label>保存时间</label><strong>{{ session.saved_at or "无" }}</strong></div>
+        <div class="detail-item"><label>验证时间</label><strong>{{ session.checked_at or "尚未验证" }}</strong></div>
+        <div class="detail-item" style="grid-column:1/-1"><label>最后页面</label><strong title="{{ session.final_url or '' }}">{{ session.final_url or "无" }}</strong></div>
+      </div>
+    </div>
+    <div class="surface session-actions">
+      <form method="post" action="/selection/login"><button class="btn primary" type="submit"><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>登录 WebVPN</button></form>
+      <form method="post" action="/selection/open"><button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>验证本科教务</button></form>
+      <form method="post" action="/selection/open-course-select"><button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#check-square"></use></svg>验证选课入口</button></form>
+    </div>
+  </section>
 
-      <section class="panel">
-        <h2>执行一次选课</h2>
-        <form method="post" action="/selection/select-once">
-          <div class="row">
-            <label>
-              课程名
-              <input name="name" placeholder="必须足够精确">
-            </label>
-            <label>
-              课程代码
-              <input name="code" placeholder="建议填写">
-            </label>
-            <label>
-              教师
-              <input name="teacher" placeholder="建议填写">
-            </label>
-          </div>
-          <label class="check">
-            <input type="checkbox" name="confirm_select" value="YES">
-            <span>我确认：只在找到唯一匹配课程时点击一次选课按钮</span>
-          </label>
-          <p class="hint">启动后会自动查询。若匹配到 0 条或多条，脚本只会高亮候选，不会点击。</p>
-          <button class="danger" type="submit">执行一次选课</button>
-        </form>
-      </section>
-    </main>
-  </body>
-</html>
+  <section class="section">
+    <div class="section-head"><h2>选课数据</h2></div>
+    <div class="surface session-actions" style="grid-template-columns:repeat(3,1fr)">
+      <form method="post" action="/selection/info/refresh"><input type="hidden" name="view" value="major-plan"><button class="btn primary" type="submit"><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>刷新选课信息</button></form>
+      <a class="btn" href="/selection/info">培养方案</a>
+      <a class="btn" href="/selection/info/selected">已选课程</a>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>接口记录</h2><a class="link-button" href="/selection/captures">查看记录 →</a></div>
+    <form class="surface session-actions" method="post" action="/selection/capture" style="grid-template-columns:1fr auto;align-items:end">
+      <div class="field"><label for="duration_seconds">抓取时长（秒）</label><input class="input" id="duration_seconds" name="duration_seconds" type="number" min="30" max="900" value="180"></div>
+      <button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#activity"></use></svg>开始抓取</button>
+    </form>
+  </section>
+{% endblock %}

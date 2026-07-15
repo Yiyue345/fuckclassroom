@@ -1,83 +1,39 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>下载文件</title>
-    <style>
-      body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f7f8fa; color: #1f2933; }
-      main { box-sizing: border-box; max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
-      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
-      nav { display: flex; gap: 12px; flex-wrap: wrap; }
-      h1 { margin: 0; font-size: 26px; }
-      a { color: #2563eb; text-decoration: none; }
-      table { width: 100%; border-collapse: collapse; border: 1px solid #d8dee6; background: #fff; border-radius: 8px; overflow: hidden; }
-      th, td { border-bottom: 1px solid #edf0f3; padding: 10px 12px; text-align: left; vertical-align: top; }
-      th { color: #475569; font-size: 14px; background: #fbfcfd; }
-      tr:last-child td { border-bottom: 0; }
-      .path { color: #64748b; font-size: 13px; word-break: break-all; }
-      .muted { color: #64748b; }
-      .notice { border: 1px solid #b7e4c7; background: #f0fff4; color: #166534; border-radius: 8px; padding: 12px; }
-      .error { border-color: #f0c2c2; background: #fff5f5; color: #9b1c1c; }
-      button { border: 1px solid #d14343; border-radius: 6px; background: #fff; color: #b42318; padding: 7px 10px; cursor: pointer; }
-      @media (max-width: 760px) {
-        table, thead, tbody, tr, th, td { display: block; }
-        thead { display: none; }
-        tr { border-bottom: 1px solid #edf0f3; padding: 10px 0; }
-        td { border-bottom: 0; padding: 5px 12px; }
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>下载文件</h1>
-        <nav>
-          <a href="/">系统选择</a>
-          <a href="/courses">返回课程</a>
-          <a href="/settings">设置</a>
-        </nav>
-      </header>
+{% extends "base.html" %}
+{% set active_system = "classroom" %}
+{% set active_nav = "downloads" %}
 
-      {% if deleted %}
-        <p class="notice">文件已删除。</p>
-      {% endif %}
-      {% if delete_error %}
-        <p class="notice error">删除失败：{{ delete_error }}</p>
-      {% endif %}
+{% block title %}文件管理 · 学业助手{% endblock %}
+{% block page_title %}文件管理{% endblock %}
 
-      {% if not files %}
-        <p class="muted">还没有下载文件。</p>
-      {% else %}
-        <table>
-          <thead>
-            <tr>
-              <th>文件</th>
-              <th>大小</th>
-              <th>更新时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for file in files %}
-              <tr>
-                <td>
-                  <a href="/downloads/file/{{ file.relative_path }}">{{ file.name }}</a>
-                  <div class="path">{{ file.relative_path }}</div>
-                </td>
-                <td>{{ file.size_label }}</td>
-                <td>{{ file.updated_at }}</td>
-                <td>
-                  <form method="post" action="/downloads/delete">
-                    <input type="hidden" name="relative_path" value="{{ file.relative_path }}">
-                    <button type="submit">删除</button>
-                  </form>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% endif %}
-    </main>
-  </body>
-</html>
+{% block content %}
+  <div class="page-head"><div><h1>文件管理</h1><p class="page-description">管理已下载的课件、平台转写和本地提取结果。</p></div><div class="head-actions"><span class="status blue">{{ files|length }} 个文件</span></div></div>
+
+  {% if deleted %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>文件已删除。</span></div>{% endif %}
+  {% if delete_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>删除失败：{{ delete_error }}</span></div>{% endif %}
+
+  <div class="toolbar">
+    <div class="toolbar-left"><div class="search"><svg class="icon"><use href="/static/icons.svg#search"></use></svg><input class="input" type="search" placeholder="搜索文件或路径" data-filter-input="#download-table"></div></div>
+    <div class="toolbar-right"><span class="section-meta">文件已存在时下载操作会直接复用</span></div>
+  </div>
+
+  <div class="table-wrap" id="download-table">
+    <table>
+      <thead><tr><th>文件</th><th>大小</th><th>更新时间</th><th></th></tr></thead>
+      <tbody>
+        {% for file in files %}
+          <tr data-filter-row>
+            <td><div class="table-title">{{ file.name }}</div><div class="table-subtitle mono">{{ file.relative_path }}</div></td>
+            <td>{{ file.size_label }}</td>
+            <td>{{ file.updated_at }}</td>
+            <td class="actions-cell">
+              <span class="actions" style="justify-content:flex-end">
+                <a class="btn small" href="/downloads/file/{{ file.relative_path }}"><svg class="icon small"><use href="/static/icons.svg#download"></use></svg>下载</a>
+                <form method="post" action="/downloads/delete" data-confirm="确认删除 {{ file.name }}？"><input type="hidden" name="relative_path" value="{{ file.relative_path }}"><button class="btn small danger icon-only" type="submit" title="删除"><svg class="icon small"><use href="/static/icons.svg#trash-2"></use></svg></button></form>
+              </span>
+            </td>
+          </tr>
+        {% else %}<tr><td class="table-empty" colspan="4">还没有下载文件</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}
