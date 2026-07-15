@@ -48,13 +48,33 @@ class LoginSessionService:
 
         cookies = storage_state.get("cookies", [])
         meta = self._read_json(self.config.session_meta_path, default={})
+        login_run = self.get_login_run_status()
+        is_logged_in = bool(cookies)
+        message = "已保存登录会话" if cookies else "会话文件中没有 cookie，请重新登录"
+        final_url = meta.get("final_url")
+        if cookies and login_run.state == "failed":
+            is_logged_in = False
+            message = login_run.message or "登录会话已失效，请重新登录"
+            final_url = login_run.final_url or final_url
+        elif cookies and login_run.state == "succeeded":
+            message = login_run.message or "登录会话有效"
+            final_url = login_run.final_url or final_url
         return SessionStatus(
-            is_logged_in=bool(cookies),
-            message="已保存登录会话" if cookies else "会话文件中没有 cookie，请重新登录",
-            final_url=meta.get("final_url"),
+            is_logged_in=is_logged_in,
+            message=message,
+            final_url=final_url,
             saved_at=meta.get("saved_at"),
             cookie_count=len(cookies),
         )
+
+    def record_session_verification(
+        self,
+        is_valid: bool,
+        message: str,
+        final_url: str | None = None,
+    ) -> SessionStatus:
+        self._write_login_status("succeeded" if is_valid else "failed", message, final_url)
+        return self.get_session_status()
 
     def get_login_run_status(self) -> LoginRunStatus:
         payload = self._read_json(self.config.login_status_path, default=None)

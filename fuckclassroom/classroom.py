@@ -107,6 +107,9 @@ class ClassroomClient:
         self.config = config or AppConfig()
         self.cache = JsonCache(self.config.cache_dir / "classroom")
 
+    def verify_session(self) -> None:
+        self._get_json(COURSE_LIST_PATH, {"nowpage": "1", "per-page": "1"})
+
     def list_terms(self) -> list[Term]:
         payload = self._get_json_cached("terms", TERM_LIST_PATH)
         params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
@@ -141,6 +144,14 @@ class ClassroomClient:
             f"course_detail_{course_id}",
             COURSE_DETAIL_PATH.format(course_id=course_id),
         )
+        return self._course_detail_from_payload(payload)
+
+    def refresh_course_detail(self, course_id: str) -> CourseDetail:
+        payload = self._get_json(COURSE_DETAIL_PATH.format(course_id=course_id))
+        self.cache.set(f"course_detail_{course_id}", payload)
+        return self._course_detail_from_payload(payload)
+
+    def _course_detail_from_payload(self, payload: dict[str, Any]) -> CourseDetail:
         row = self._result(payload)
         course = self._course_from_detail(row)
         lessons = [self._lesson_from_row(item, course.id) for item in row.get("subject", [])]
