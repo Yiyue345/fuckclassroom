@@ -58,15 +58,23 @@ class LessonExtractionService:
 
         warnings: list[str] = []
 
-        _report(progress, 15, "正在下载平台转写")
-        transcript_file = self._download_export(course_id, lesson_id, "transcript", work_dir)
+        _report(progress, 15, "正在检查平台转写")
+        transcript_file, transcript_from_cache = self._download_export(course_id, lesson_id, "transcript", work_dir)
+        if transcript_from_cache:
+            _report(progress, 20, "已复用本地平台转写")
+        else:
+            _report(progress, 20, "平台转写已下载")
         _report(progress, 28, "正在提取平台转写文本")
         transcript_text = extract_docx_text(transcript_file)
         transcript_path = output_dir / "transcript.md"
         transcript_path.write_text(_section("平台转写", transcript_text), encoding="utf-8")
 
-        _report(progress, 40, "正在下载课件")
-        ppt_file = self._download_export(course_id, lesson_id, "ppt", work_dir)
+        _report(progress, 40, "正在检查课件")
+        ppt_file, ppt_from_cache = self._download_export(course_id, lesson_id, "ppt", work_dir)
+        if ppt_from_cache:
+            _report(progress, 45, "已复用本地课件")
+        else:
+            _report(progress, 45, "课件已下载")
         ocr_callback = self._ocr_image if run_ocr and self._can_ocr(warnings) else None
 
         def ppt_progress(done: int, total: int, image_name: str) -> None:
@@ -148,9 +156,12 @@ class LessonExtractionService:
                 result[name] = path.read_text(encoding="utf-8")
         return result
 
-    def _download_export(self, course_id: str, lesson_id: str, kind: str, work_dir: Path) -> Path:
+    def _download_export(self, course_id: str, lesson_id: str, kind: str, work_dir: Path) -> tuple[Path, bool]:
+        target = self.classroom.get_lesson_export_target(course_id, lesson_id, kind)
+        if target.exists:
+            return target.path, True
         exported = self.classroom.download_lesson_export(course_id, lesson_id, kind)
-        return exported.saved_path
+        return exported.saved_path, exported.from_cache
 
     def _ocr_image(self, image_bytes: bytes, image_name: str) -> str:
         engine = self.config.ocr_engine
