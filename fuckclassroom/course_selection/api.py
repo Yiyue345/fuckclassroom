@@ -579,6 +579,35 @@ class SelectionApiMixin:
                 record_result=False,
             )
 
+    def get_lesson_capacity_for_batch(
+        self,
+        lesson_id: int,
+        batch: SelectionBatch,
+        course: dict[str, Any],
+        timeout_ms: int = 60_000,
+    ) -> dict[str, int | None]:
+        with self._selection_action_lock:
+            timeout_seconds = max(5.0, min(timeout_ms / 1000, 60.0))
+            opener, jar = self._selection_http_client()
+            token = self._fetch_selection_token(opener, timeout_seconds)
+            payload = self._request_selection_json(
+                opener,
+                token,
+                f"/std-count?{urlencode({'lessonIds': str(lesson_id)})}",
+                timeout_seconds=timeout_seconds,
+            )
+            selected_count = _extract_count_map(payload).get(lesson_id)
+            max_count = _safe_int(course.get("max_count"))
+            self._persist_selection_cookies(jar)
+            self._write_session_meta(batch.url)
+            self._write_session_check(
+                _session_check(True, "WebVPN/选课接口会话有效", batch.url)
+            )
+            return {
+                "selected_count": selected_count,
+                "max_count": max_count,
+            }
+
     def _run_cached_lesson_action(
         self,
         lesson_id: int,

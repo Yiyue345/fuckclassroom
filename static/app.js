@@ -314,6 +314,8 @@
       attempting: "blue",
       retrying: "blue",
       waiting_session: "blue",
+      waiting_capacity: "blue",
+      checking_capacity: "blue",
     };
     const refreshAutoJobs = async () => {
       if (!document.hidden) {
@@ -328,6 +330,8 @@
               const message = row.querySelector("[data-auto-job-message]");
               const next = row.querySelector("[data-auto-job-next]");
               const attempts = row.querySelector("[data-auto-job-attempts]");
+              const checks = row.querySelector("[data-auto-job-checks]");
+              const capacity = row.querySelector("[data-auto-job-capacity]");
               const last = row.querySelector("[data-auto-job-last]");
               if (status) {
                 status.className = "status " + (statusColors[job.status] || "gray");
@@ -336,6 +340,12 @@
               if (message) message.textContent = job.message || "";
               if (next) next.textContent = job.next_attempt_at ? ("下次 " + job.next_attempt_at) : "";
               if (attempts) attempts.textContent = String(job.attempts || 0);
+              if (checks) checks.textContent = "监测 " + String(job.capacity_checks || 0) + " 次";
+              if (capacity) {
+                capacity.textContent = job.max_count
+                  ? "人数 " + (job.last_selected_count ?? "未知") + "/" + job.max_count
+                  : "";
+              }
               if (last) last.textContent = job.last_attempt_at || "尚未提交";
             });
           }

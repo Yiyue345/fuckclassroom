@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import time
@@ -29,9 +30,15 @@ class MutableClock:
 
 
 class FakeAssistant:
-    def __init__(self, outcomes: list[Exception | None] | None = None) -> None:
+    def __init__(
+        self,
+        outcomes: list[Exception | None] | None = None,
+        capacity_results: list[dict | Exception] | None = None,
+    ) -> None:
         self.outcomes = list(outcomes or [None])
+        self.capacity_results = list(capacity_results or [])
         self.calls: list[tuple[int, SelectionBatch, dict]] = []
+        self.capacity_calls: list[tuple[int, SelectionBatch, dict]] = []
         self.called = threading.Event()
         self.called_at: float | None = None
 
@@ -49,6 +56,24 @@ class FakeAssistant:
         if outcome is not None:
             raise outcome
         return "/selection/auto"
+
+    def get_lesson_capacity_for_batch(
+        self,
+        lesson_id: int,
+        batch: SelectionBatch,
+        course: dict,
+        timeout_ms: int = 60_000,
+    ) -> dict:
+        self.capacity_calls.append((lesson_id, batch, course))
+        if self.capacity_results:
+            result = self.capacity_results.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
+        return {
+            "selected_count": course.get("selected_count"),
+            "max_count": course.get("max_count"),
+        }
 
 
 class AutoSelectionServiceTests(unittest.TestCase):
@@ -138,8 +163,7 @@ class AutoSelectionServiceTests(unittest.TestCase):
         self.assertLess(elapsed, expected_delay + 0.5)
         self.assertEqual(status, "selected")
 
-
-    def test_capacity_full_stops_without_retry(self) -> None:
+    def test_capacity_full_switches_to_vacancy_monitoring(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             assistant = FakeAssistant([RuntimeError("课程容量已满（60/60）")])
             service = self.service(directory, assistant)
@@ -152,8 +176,41 @@ class AutoSelectionServiceTests(unittest.TestCase):
             service.run_due_once()
             job = service.list_jobs()[0]
 
-        self.assertEqual(job["status"], "full")
-        self.assertIsNone(job["next_attempt_at"])
+        self.assertEqual(job["status"], "waiting_capacity")
+        self.assertIsNotNone(job["next_attempt_at"])
+        self.assertTrue(job["monitor_capacity"])
+        self.assertEqual(len(assistant.calls), 1)
+
+    def test_full_course_polls_capacity_and_selects_after_a_seat_opens(self) -> None:
+        full_course = dict(self.course, selected_count=60)
+        capacity_results = [
+            {"selected_count": 60, "max_count": 60},
+            {"selected_count": 59, "max_count": 60},
+        ]
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = FakeAssistant(capacity_results=capacity_results)
+            service = self.service(directory, assistant)
+            service.add_job(
+                88,
+                full_course,
+                self.batch(self.clock.value - timedelta(minutes=1), self.clock.value + timedelta(hours=1)),
+            )
+
+            self.assertEqual(service.list_jobs()[0]["status"], "waiting_capacity")
+            service.run_due_once()
+            waiting = service.list_jobs()[0]
+            self.assertEqual(waiting["status"], "waiting_capacity")
+            self.assertEqual(waiting["capacity_checks"], 1)
+            self.assertEqual(assistant.calls, [])
+
+            self.clock.advance(30)
+            service.run_due_once()
+            selected = service.list_jobs()[0]
+
+        self.assertEqual(selected["status"], "selected")
+        self.assertEqual(selected["capacity_checks"], 2)
+        self.assertEqual(selected["attempts"], 1)
+        self.assertEqual(selected["last_selected_count"], 59)
         self.assertEqual(len(assistant.calls), 1)
 
     def test_invalid_session_waits_then_retries(self) -> None:
@@ -192,6 +249,39 @@ class AutoSelectionServiceTests(unittest.TestCase):
             self.assertEqual(restored.list_jobs()[0]["status"], "cancelled")
             restored.delete(job.id)
             self.assertEqual(restored.list_jobs(), [])
+
+    def test_legacy_full_job_resumes_as_capacity_monitor(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            path = Path(directory) / "jobs.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "jobs": [
+                            {
+                                "id": "legacy-full",
+                                "lesson_id": 88,
+                                "student_id": 1,
+                                "turn_id": 2,
+                                "batch_label": "第一轮选课",
+                                "batch_url": "https://example.invalid/select",
+                                "start_at": (self.clock.value - timedelta(minutes=1)).isoformat(),
+                                "end_at": (self.clock.value + timedelta(hours=1)).isoformat(),
+                                "course": dict(self.course, selected_count=60),
+                                "status": "full",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            restored = self.service(directory, FakeAssistant())
+            job = restored.list_jobs()[0]
+
+        self.assertEqual(job["status"], "waiting_capacity")
+        self.assertTrue(job["monitor_capacity"])
+        self.assertIsNotNone(job["next_attempt_at"])
 
     def test_batch_end_expires_without_request(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
@@ -244,6 +334,27 @@ class CourseSelectionCapacityTests(unittest.TestCase):
                         10,
                         max_count_hint=60,
                     )
+
+    def test_capacity_monitor_uses_only_std_count_endpoint(self) -> None:
+        batch = SelectionBatch(1, 2, "第一轮选课", "https://example.invalid/select")
+        course = {"lesson_id": 88, "max_count": 60}
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = CourseSelectionAssistant(AppConfig(data_dir=Path(directory)))
+            with (
+                patch.object(assistant, "_selection_http_client", return_value=(object(), object())),
+                patch.object(assistant, "_fetch_selection_token", return_value="token"),
+                patch.object(
+                    assistant,
+                    "_request_selection_json",
+                    return_value={"data": {"88": 59}},
+                ) as request,
+                patch.object(assistant, "_persist_selection_cookies"),
+            ):
+                capacity = assistant.get_lesson_capacity_for_batch(88, batch, course)
+
+        self.assertEqual(capacity, {"selected_count": 59, "max_count": 60})
+        self.assertEqual(request.call_count, 1)
+        self.assertTrue(request.call_args.args[2].startswith("/std-count?"))
 
 
 if __name__ == "__main__":

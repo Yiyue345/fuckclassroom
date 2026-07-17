@@ -12,12 +12,21 @@ from .assistant import CourseSelectionAssistant
 from .models import SelectionBatch
 
 
-ACTIVE_STATUSES = {"scheduled", "retrying", "waiting_session", "attempting"}
+ACTIVE_STATUSES = {
+    "scheduled",
+    "retrying",
+    "waiting_session",
+    "waiting_capacity",
+    "checking_capacity",
+    "attempting",
+}
 TERMINAL_STATUSES = {"selected", "full", "failed", "expired", "cancelled"}
 STATUS_LABELS = {
     "scheduled": "等待开始",
     "attempting": "正在选课",
     "retrying": "等待重试",
+    "waiting_capacity": "等待空位",
+    "checking_capacity": "正在监测人数",
     "waiting_session": "等待登录",
     "selected": "已选上",
     "full": "课程已满",
@@ -41,6 +50,10 @@ class AutoSelectionJob:
     status: str = "scheduled"
     attempts: int = 0
     message: str = "等待选课开始"
+    capacity_checks: int = 0
+    last_selected_count: int | None = None
+    max_count: int | None = None
+    monitor_capacity: bool = False
     next_attempt_at: str | None = None
     last_attempt_at: str | None = None
     created_at: str = ""
@@ -66,12 +79,14 @@ class AutoSelectionService:
         *,
         retry_seconds: float = 5.0,
         session_retry_seconds: float = 30.0,
+        capacity_retry_seconds: float = 30.0,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self.assistant = assistant
         self.path = path
         self.retry_seconds = max(5.0, retry_seconds)
         self.session_retry_seconds = max(15.0, session_retry_seconds)
+        self.capacity_retry_seconds = max(15.0, capacity_retry_seconds)
         self._now_provider = now_provider or (lambda: datetime.now().astimezone())
         self._lock = threading.RLock()
         self._wake = threading.Event()
@@ -134,6 +149,12 @@ class AutoSelectionService:
                 return duplicate, False
 
             now_text = now.isoformat(timespec="seconds")
+            selected_count = _optional_int(course.get("selected_count"))
+            max_count = _optional_int(course.get("max_count"))
+            monitor_capacity = bool(
+                max_count and selected_count is not None and selected_count >= max_count
+            )
+            waiting_to_start = start > now
             job = AutoSelectionJob(
                 id=uuid4().hex,
                 lesson_id=lesson_id,
@@ -144,7 +165,23 @@ class AutoSelectionService:
                 start_at=start_at,
                 end_at=end_at,
                 course=dict(course),
-                message="等待选课开始" if start > now else "已进入选课时间，等待提交",
+                status=(
+                    "scheduled"
+                    if waiting_to_start or not monitor_capacity
+                    else "waiting_capacity"
+                ),
+                message=(
+                    "等待选课开始"
+                    if waiting_to_start
+                    else (
+                        f"课程已满（{selected_count}/{max_count}），等待空位"
+                        if monitor_capacity
+                        else "已进入选课时间，等待提交"
+                    )
+                ),
+                last_selected_count=selected_count,
+                max_count=max_count,
+                monitor_capacity=monitor_capacity,
                 next_attempt_at=(start if start > now else now).isoformat(timespec="seconds"),
                 created_at=now_text,
                 updated_at=now_text,
@@ -184,10 +221,19 @@ class AutoSelectionService:
             else:
                 start = _parse_time(job.start_at) or now
                 next_attempt = start if start > now else now
+                monitor_now = job.monitor_capacity and start <= now
                 self._set_state(
                     job,
-                    "scheduled",
-                    "等待选课开始" if start > now else "等待重新提交",
+                    "waiting_capacity" if monitor_now else "scheduled",
+                    (
+                        "等待选课开始"
+                        if start > now
+                        else (
+                            "继续等待课程空位"
+                            if monitor_now
+                            else "等待重新提交"
+                        )
+                    ),
                     next_attempt_at=next_attempt,
                 )
             self._save_jobs()
@@ -210,7 +256,7 @@ class AutoSelectionService:
                 (
                     job
                     for job in sorted(self._jobs.values(), key=lambda item: item.created_at)
-                    if job.status in {"scheduled", "retrying", "waiting_session"}
+                    if job.status in {"scheduled", "retrying", "waiting_session", "waiting_capacity"}
                     and (_parse_time(job.next_attempt_at) or now) <= now
                 ),
                 None,
@@ -219,15 +265,22 @@ class AutoSelectionService:
                 if changed:
                     self._save_jobs()
                 return False
-            due.status = "attempting"
-            due.attempts += 1
-            due.last_attempt_at = now.isoformat(timespec="seconds")
-            due.updated_at = due.last_attempt_at
-            due.message = f"正在发起第 {due.attempts} 次选课请求"
+            monitor_capacity = due.monitor_capacity
+            due.status = "checking_capacity" if monitor_capacity else "attempting"
+            if monitor_capacity:
+                due.capacity_checks += 1
+                due.message = f"正在进行第 {due.capacity_checks} 次空位监测"
+                due.updated_at = now.isoformat(timespec="seconds")
+            else:
+                due.attempts += 1
+                due.last_attempt_at = now.isoformat(timespec="seconds")
+                due.updated_at = due.last_attempt_at
+                due.message = f"正在发起第 {due.attempts} 次选课请求"
             due.next_attempt_at = None
             self._save_jobs()
             job_id = due.id
             course = dict(due.course)
+            lesson_id = due.lesson_id
             batch = SelectionBatch(
                 student_id=due.student_id,
                 turn_id=due.turn_id,
@@ -238,15 +291,77 @@ class AutoSelectionService:
                 end_at=due.end_at,
             )
 
+        if monitor_capacity:
+            try:
+                capacity = self.assistant.get_lesson_capacity_for_batch(
+                    lesson_id,
+                    batch,
+                    course,
+                    timeout_ms=60_000,
+                )
+            except Exception as exc:
+                outcome, message, delay = _classify_error(
+                    str(exc),
+                    self.retry_seconds,
+                    self.session_retry_seconds,
+                    self.capacity_retry_seconds,
+                )
+                with self._lock:
+                    job = self._jobs.get(job_id)
+                    if job is None or job.status != "checking_capacity":
+                        return True
+                    next_attempt = (
+                        self._now() + timedelta(seconds=delay) if delay is not None else None
+                    )
+                    self._set_state(job, outcome, message, next_attempt_at=next_attempt)
+                    self._save_jobs()
+                return True
+
+            selected_count = _optional_int(capacity.get("selected_count"))
+            max_count = (
+                _optional_int(capacity.get("max_count"))
+                or _optional_int(course.get("max_count"))
+            )
+            with self._lock:
+                job = self._jobs.get(job_id)
+                if job is None or job.status != "checking_capacity":
+                    return True
+                job.last_selected_count = selected_count
+                job.max_count = max_count
+                if (
+                    max_count and selected_count is not None and selected_count >= max_count
+                ):
+                    next_attempt = self._now() + timedelta(seconds=self.capacity_retry_seconds)
+                    self._set_state(
+                        job,
+                        "waiting_capacity",
+                        f"课程仍满（{selected_count}/{max_count}），继续等待空位",
+                        next_attempt_at=next_attempt,
+                    )
+                    self._save_jobs()
+                    return True
+                job.monitor_capacity = False
+                job.status = "attempting"
+                job.attempts += 1
+                job.last_attempt_at = self._now().isoformat(timespec="seconds")
+                job.updated_at = job.last_attempt_at
+                job.message = f"检测到空位，正在发起第 {job.attempts} 次选课请求"
+                self._save_jobs()
+
         try:
             self.assistant.select_lesson_for_batch_once(
-                due.lesson_id,
+                lesson_id,
                 batch,
                 course,
                 timeout_ms=60_000,
             )
         except Exception as exc:
-            outcome, message, delay = _classify_error(str(exc), self.retry_seconds, self.session_retry_seconds)
+            outcome, message, delay = _classify_error(
+                str(exc),
+                self.retry_seconds,
+                self.session_retry_seconds,
+                self.capacity_retry_seconds,
+            )
         else:
             outcome, message, delay = "selected", "选课成功，任务已停止", None
 
@@ -255,6 +370,8 @@ class AutoSelectionService:
             if job is None or job.status != "attempting":
                 return True
             next_attempt = self._now() + timedelta(seconds=delay) if delay is not None else None
+            if outcome == "waiting_capacity":
+                job.monitor_capacity = True
             self._set_state(job, outcome, message, next_attempt_at=next_attempt)
             self._save_jobs()
         return True
@@ -271,7 +388,7 @@ class AutoSelectionService:
             next_times = [
                 parsed
                 for job in self._jobs.values()
-                if job.status in {"scheduled", "retrying", "waiting_session"}
+                if job.status in {"scheduled", "retrying", "waiting_session", "waiting_capacity"}
                 if (parsed := _parse_time(job.next_attempt_at)) is not None
             ]
         if not next_times:
@@ -320,9 +437,21 @@ class AutoSelectionService:
                 job = AutoSelectionJob(**{key: row[key] for key in AutoSelectionJob.__dataclass_fields__ if key in row})
             except (KeyError, TypeError, ValueError):
                 continue
-            if job.status == "attempting":
-                job.status = "retrying"
-                job.message = "程序重新启动，等待继续选课"
+            job.max_count = job.max_count or _optional_int(job.course.get("max_count"))
+            if job.last_selected_count is None:
+                job.last_selected_count = _optional_int(job.course.get("selected_count"))
+            if job.status in {"full", "checking_capacity"}:
+                job.monitor_capacity = True
+                job.status = "waiting_capacity"
+                job.message = "程序重新启动，继续等待课程空位"
+                job.next_attempt_at = self._now().isoformat(timespec="seconds")
+            elif job.status == "attempting":
+                job.status = (
+                    "waiting_capacity"
+                    if job.monitor_capacity
+                    else "retrying"
+                )
+                job.message = "程序重新启动，等待继续处理选课任务"
                 job.next_attempt_at = self._now().isoformat(timespec="seconds")
             result[job.id] = job
         return result
@@ -348,6 +477,13 @@ def _required_int(value: Any, message: str) -> int:
         raise ValueError(message) from exc
 
 
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_time(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -366,12 +502,17 @@ def _parse_time(value: str | None) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.astimezone()
 
 
-def _classify_error(message: str, retry_seconds: float, session_retry_seconds: float) -> tuple[str, str, float | None]:
+def _classify_error(
+    message: str,
+    retry_seconds: float,
+    session_retry_seconds: float,
+    capacity_retry_seconds: float,
+) -> tuple[str, str, float | None]:
     normalized = message.strip() or "选课请求失败"
     if any(marker in normalized for marker in ("已经选中", "已经在已选", "已选课程")):
         return "selected", "课程已在已选列表中，任务已停止", None
     if any(marker in normalized for marker in ("已满", "满额", "容量不足", "无课余量", "人数已达上限")):
-        return "full", normalized, None
+        return "waiting_capacity", f"{normalized}；将持续监测空位", capacity_retry_seconds
     if any(marker in normalized for marker in ("重新登录", "会话", "token", "授权", "Cookie", "cookie")):
         return "waiting_session", f"{normalized}；登录恢复后将自动重试", session_retry_seconds
     if any(marker in normalized for marker in ("冲突", "不满足", "不允许", "额外确认", "先修", "不在选课范围")):

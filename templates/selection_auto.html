@@ -18,14 +18,14 @@
   {% set active_jobs = jobs|selectattr("is_active")|list %}
   {% set selected_jobs = jobs|selectattr("status", "equalto", "selected")|list %}
   <div class="stat-band auto-selection-stats">
-    <div class="stat"><div class="stat-label">等待执行</div><div class="stat-value">{{ active_jobs|length }}</div><div class="stat-foot">含等待登录与重试</div></div>
+    <div class="stat"><div class="stat-label">等待执行</div><div class="stat-value">{{ active_jobs|length }}</div><div class="stat-foot">含等待空位、登录与重试</div></div>
     <div class="stat"><div class="stat-label">已经选上</div><div class="stat-value">{{ selected_jobs|length }}</div><div class="stat-foot">自动停止的成功任务</div></div>
     <div class="stat"><div class="stat-label">任务总数</div><div class="stat-value">{{ jobs|length }}</div><div class="stat-foot">记录保存在本机</div></div>
   </div>
 
   <div class="table-wrap" data-auto-job-list>
     <table class="auto-selection-table">
-      <thead><tr><th>课程 / 教学班</th><th>选课批次</th><th>执行状态</th><th>尝试</th><th></th></tr></thead>
+      <thead><tr><th>课程 / 教学班</th><th>选课批次</th><th>执行状态</th><th>提交 / 监测</th><th></th></tr></thead>
       <tbody>
         {% for job in jobs %}
           {% set status_color = "green" if job.status == "selected" else ("red" if job.status in ["full", "failed", "expired"] else ("gray" if job.status == "cancelled" else "blue")) %}
@@ -43,7 +43,11 @@
               <div class="table-subtitle auto-job-message" data-auto-job-message>{{ job.message }}</div>
               <div class="table-subtitle" data-auto-job-next>{% if job.next_attempt_at %}下次 {{ job.next_attempt_at }}{% endif %}</div>
             </td>
-            <td><strong data-auto-job-attempts>{{ job.attempts }}</strong><div class="table-subtitle" data-auto-job-last>{{ job.last_attempt_at or "尚未提交" }}</div></td>
+            <td>
+              <strong data-auto-job-attempts>{{ job.attempts }}</strong>
+              <div class="table-subtitle" data-auto-job-checks>监测 {{ job.capacity_checks }} 次</div>
+              <div class="table-subtitle" data-auto-job-capacity>{% if job.max_count %}人数 {{ job.last_selected_count if job.last_selected_count is not none else "未知" }}/{{ job.max_count }}{% endif %}</div>
+              <div class="table-subtitle" data-auto-job-last>{{ job.last_attempt_at or "尚未提交" }}</div>
             <td class="actions-cell">
               <div class="selection-row-actions">
                 {% if job.is_active %}
