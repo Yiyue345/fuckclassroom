@@ -1,0 +1,379 @@
+from __future__ import annotations
+
+import json
+import threading
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Callable
+from uuid import uuid4
+
+from .assistant import CourseSelectionAssistant
+from .models import SelectionBatch
+
+
+ACTIVE_STATUSES = {"scheduled", "retrying", "waiting_session", "attempting"}
+TERMINAL_STATUSES = {"selected", "full", "failed", "expired", "cancelled"}
+STATUS_LABELS = {
+    "scheduled": "等待开始",
+    "attempting": "正在选课",
+    "retrying": "等待重试",
+    "waiting_session": "等待登录",
+    "selected": "已选上",
+    "full": "课程已满",
+    "failed": "已停止",
+    "expired": "批次已结束",
+    "cancelled": "已取消",
+}
+
+
+@dataclass
+class AutoSelectionJob:
+    id: str
+    lesson_id: int
+    student_id: int
+    turn_id: int
+    batch_label: str
+    batch_url: str
+    start_at: str
+    end_at: str
+    course: dict[str, Any]
+    status: str = "scheduled"
+    attempts: int = 0
+    message: str = "等待选课开始"
+    next_attempt_at: str | None = None
+    last_attempt_at: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+    @property
+    def is_active(self) -> bool:
+        return self.status in ACTIVE_STATUSES
+
+    def to_dict(self, *, display: bool = False) -> dict[str, Any]:
+        payload = asdict(self)
+        if display:
+            payload["status_label"] = STATUS_LABELS.get(self.status, self.status)
+            payload["is_active"] = self.is_active
+        return payload
+
+
+class AutoSelectionService:
+    def __init__(
+        self,
+        assistant: CourseSelectionAssistant,
+        path: Path,
+        *,
+        retry_seconds: float = 5.0,
+        session_retry_seconds: float = 30.0,
+        now_provider: Callable[[], datetime] | None = None,
+    ) -> None:
+        self.assistant = assistant
+        self.path = path
+        self.retry_seconds = max(5.0, retry_seconds)
+        self.session_retry_seconds = max(15.0, session_retry_seconds)
+        self._now_provider = now_provider or (lambda: datetime.now().astimezone())
+        self._lock = threading.RLock()
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._jobs = self._load_jobs()
+
+    def start(self) -> None:
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                return
+            self._stop.clear()
+            self._thread = threading.Thread(
+                target=self._worker,
+                name="auto-course-selection",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._wake.set()
+        thread = self._thread
+        if thread and thread.is_alive():
+            thread.join(timeout=5)
+
+    def add_job(
+        self,
+        lesson_id: int,
+        course: dict[str, Any],
+        batch: dict[str, Any],
+    ) -> tuple[AutoSelectionJob, bool]:
+        student_id = _required_int(batch.get("student_id"), "选课批次缺少学生编号")
+        turn_id = _required_int(batch.get("turn_id"), "选课批次缺少批次编号")
+        start_at = str(batch.get("start_at") or "").strip()
+        end_at = str(batch.get("end_at") or "").strip()
+        start = _parse_time(start_at)
+        end = _parse_time(end_at)
+        if start is None or end is None:
+            raise ValueError("批次开始或结束时间未公布，无法创建定时选课")
+        now = self._now()
+        if end <= now:
+            raise ValueError("当前选课批次已经结束")
+        if course.get("is_selected"):
+            raise ValueError("这门课已经在已选课程中")
+
+        with self._lock:
+            duplicate = next(
+                (
+                    job
+                    for job in self._jobs.values()
+                    if job.lesson_id == lesson_id
+                    and job.student_id == student_id
+                    and job.turn_id == turn_id
+                    and job.is_active
+                ),
+                None,
+            )
+            if duplicate:
+                return duplicate, False
+
+            now_text = now.isoformat(timespec="seconds")
+            job = AutoSelectionJob(
+                id=uuid4().hex,
+                lesson_id=lesson_id,
+                student_id=student_id,
+                turn_id=turn_id,
+                batch_label=str(batch.get("label") or "当前选课批次"),
+                batch_url=str(batch.get("url") or ""),
+                start_at=start_at,
+                end_at=end_at,
+                course=dict(course),
+                message="等待选课开始" if start > now else "已进入选课时间，等待提交",
+                next_attempt_at=(start if start > now else now).isoformat(timespec="seconds"),
+                created_at=now_text,
+                updated_at=now_text,
+            )
+            self._jobs[job.id] = job
+            self._save_jobs()
+        self._wake.set()
+        return job, True
+
+    def list_jobs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            jobs = sorted(self._jobs.values(), key=lambda item: item.created_at, reverse=True)
+            return [job.to_dict(display=True) for job in jobs]
+
+    def active_lesson_ids(self) -> set[int]:
+        with self._lock:
+            return {job.lesson_id for job in self._jobs.values() if job.is_active}
+
+    def cancel(self, job_id: str) -> AutoSelectionJob:
+        with self._lock:
+            job = self._get_job(job_id)
+            if job.status in TERMINAL_STATUSES and job.status != "failed":
+                return job
+            self._set_state(job, "cancelled", "用户已取消定时选课", next_attempt_at=None)
+            self._save_jobs()
+            return job
+
+    def resume(self, job_id: str) -> AutoSelectionJob:
+        with self._lock:
+            job = self._get_job(job_id)
+            if job.status not in {"cancelled", "failed"}:
+                return job
+            now = self._now()
+            end = _parse_time(job.end_at)
+            if end is None or end <= now:
+                self._set_state(job, "expired", "选课批次已经结束", next_attempt_at=None)
+            else:
+                start = _parse_time(job.start_at) or now
+                next_attempt = start if start > now else now
+                self._set_state(
+                    job,
+                    "scheduled",
+                    "等待选课开始" if start > now else "等待重新提交",
+                    next_attempt_at=next_attempt,
+                )
+            self._save_jobs()
+        self._wake.set()
+        return job
+
+    def delete(self, job_id: str) -> None:
+        with self._lock:
+            job = self._get_job(job_id)
+            if job.is_active:
+                raise ValueError("请先取消正在等待的定时选课")
+            del self._jobs[job_id]
+            self._save_jobs()
+
+    def run_due_once(self) -> bool:
+        now = self._now()
+        with self._lock:
+            changed = self._expire_jobs(now)
+            due = next(
+                (
+                    job
+                    for job in sorted(self._jobs.values(), key=lambda item: item.created_at)
+                    if job.status in {"scheduled", "retrying", "waiting_session"}
+                    and (_parse_time(job.next_attempt_at) or now) <= now
+                ),
+                None,
+            )
+            if due is None:
+                if changed:
+                    self._save_jobs()
+                return False
+            due.status = "attempting"
+            due.attempts += 1
+            due.last_attempt_at = now.isoformat(timespec="seconds")
+            due.updated_at = due.last_attempt_at
+            due.message = f"正在发起第 {due.attempts} 次选课请求"
+            due.next_attempt_at = None
+            self._save_jobs()
+            job_id = due.id
+            course = dict(due.course)
+            batch = SelectionBatch(
+                student_id=due.student_id,
+                turn_id=due.turn_id,
+                label=due.batch_label,
+                url=due.batch_url,
+                is_open=True,
+                start_at=due.start_at,
+                end_at=due.end_at,
+            )
+
+        try:
+            self.assistant.select_lesson_for_batch_once(
+                due.lesson_id,
+                batch,
+                course,
+                timeout_ms=60_000,
+            )
+        except Exception as exc:
+            outcome, message, delay = _classify_error(str(exc), self.retry_seconds, self.session_retry_seconds)
+        else:
+            outcome, message, delay = "selected", "选课成功，任务已停止", None
+
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status != "attempting":
+                return True
+            next_attempt = self._now() + timedelta(seconds=delay) if delay is not None else None
+            self._set_state(job, outcome, message, next_attempt_at=next_attempt)
+            self._save_jobs()
+        return True
+
+    def _worker(self) -> None:
+        while not self._stop.is_set():
+            processed = self.run_due_once()
+            self._wake.wait(1.0 if processed else self._next_wait_seconds())
+            self._wake.clear()
+
+    def _next_wait_seconds(self) -> float:
+        now = self._now()
+        with self._lock:
+            next_times = [
+                parsed
+                for job in self._jobs.values()
+                if job.status in {"scheduled", "retrying", "waiting_session"}
+                if (parsed := _parse_time(job.next_attempt_at)) is not None
+            ]
+        if not next_times:
+            return 3.0
+        return max(0.05, min(3.0, (min(next_times) - now).total_seconds()))
+
+    def _expire_jobs(self, now: datetime) -> bool:
+        changed = False
+        for job in self._jobs.values():
+            end = _parse_time(job.end_at)
+            if job.is_active and end is not None and end <= now:
+                self._set_state(job, "expired", "选课批次已经结束，任务已停止", next_attempt_at=None)
+                changed = True
+        return changed
+
+    def _set_state(
+        self,
+        job: AutoSelectionJob,
+        status: str,
+        message: str,
+        *,
+        next_attempt_at: datetime | None,
+    ) -> None:
+        job.status = status
+        job.message = message
+        job.next_attempt_at = next_attempt_at.isoformat(timespec="seconds") if next_attempt_at else None
+        job.updated_at = self._now().isoformat(timespec="seconds")
+
+    def _get_job(self, job_id: str) -> AutoSelectionJob:
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        return job
+
+    def _load_jobs(self) -> dict[str, AutoSelectionJob]:
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return {}
+        rows = payload.get("jobs", []) if isinstance(payload, dict) else []
+        result: dict[str, AutoSelectionJob] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                job = AutoSelectionJob(**{key: row[key] for key in AutoSelectionJob.__dataclass_fields__ if key in row})
+            except (KeyError, TypeError, ValueError):
+                continue
+            if job.status == "attempting":
+                job.status = "retrying"
+                job.message = "程序重新启动，等待继续选课"
+                job.next_attempt_at = self._now().isoformat(timespec="seconds")
+            result[job.id] = job
+        return result
+
+    def _save_jobs(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps({"jobs": [job.to_dict() for job in self._jobs.values()]}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(self.path)
+
+    def _now(self) -> datetime:
+        value = self._now_provider()
+        return value if value.tzinfo is not None else value.astimezone()
+
+
+def _required_int(value: Any, message: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+
+def _parse_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        for pattern in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+            try:
+                parsed = datetime.strptime(text, pattern)
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+    return parsed if parsed.tzinfo is not None else parsed.astimezone()
+
+
+def _classify_error(message: str, retry_seconds: float, session_retry_seconds: float) -> tuple[str, str, float | None]:
+    normalized = message.strip() or "选课请求失败"
+    if any(marker in normalized for marker in ("已经选中", "已经在已选", "已选课程")):
+        return "selected", "课程已在已选列表中，任务已停止", None
+    if any(marker in normalized for marker in ("已满", "满额", "容量不足", "无课余量", "人数已达上限")):
+        return "full", normalized, None
+    if any(marker in normalized for marker in ("重新登录", "会话", "token", "授权", "Cookie", "cookie")):
+        return "waiting_session", f"{normalized}；登录恢复后将自动重试", session_retry_seconds
+    if any(marker in normalized for marker in ("冲突", "不满足", "不允许", "额外确认", "先修", "不在选课范围")):
+        return "failed", normalized, None
+    return "retrying", f"{normalized}；稍后自动重试", retry_seconds
