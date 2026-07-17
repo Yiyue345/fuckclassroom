@@ -12,14 +12,34 @@
       <p class="page-description">查看课程、教学班容量和上课时间，操作结果会在当前页面返回。</p>
     </div>
     <div class="head-actions">
-      <form method="post" action="/selection/info/refresh" data-inline-task data-task-status="#selection-refresh-status">
+      <form class="selection-batch-switcher" method="post" action="/selection/info/refresh" data-inline-task data-task-status="#selection-refresh-status" data-task-starting="正在切换并刷新选课批次" data-task-fallback="选课批次刷新失败" data-task-success="选课批次已更新">
         <input type="hidden" name="view" value="{{ info.active_view }}">
-        <button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>刷新课程</button>
+        <select class="select" name="batch_key" title="选课批次" {% if not info.batches %}disabled{% endif %}>
+          {% for batch in info.batches %}
+            <option value="{{ batch.student_id }}:{{ batch.turn_id }}" {% if info.current_batch and batch.student_id == info.current_batch.student_id and batch.turn_id == info.current_batch.turn_id %}selected{% endif %}>{{ batch.label }}</option>
+          {% else %}
+            <option value="">暂无已缓存批次</option>
+          {% endfor %}
+        </select>
+        <button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>切换/刷新</button>
       </form>
     </div>
   </div>
 
   {% if select_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ select_error }}</span></div>{% endif %}
+
+  {% set current_batch = info.current_batch %}
+  <div class="selection-batch-summary">
+    <div class="selection-batch-name">
+      <span>当前批次</span>
+      <strong>{{ current_batch.label if current_batch else (info.title or "尚未缓存选课批次") }}</strong>
+    </div>
+    <div class="selection-batch-times">
+      <span class="selection-batch-time"><small>开始</small><strong>{{ current_batch.start_at if current_batch and current_batch.start_at else "未公布" }}</strong></span>
+      <span class="selection-batch-time"><small>结束</small><strong>{{ current_batch.end_at if current_batch and current_batch.end_at else "未公布" }}</strong></span>
+      <span class="status {% if current_batch and current_batch.is_open %}green{% else %}gray{% endif %}"><span class="tiny-dot"></span>{% if current_batch and current_batch.is_open %}开放中{% else %}未开放{% endif %}</span>
+    </div>
+  </div>
 
   <div class="notice inline-task-status hidden" id="selection-refresh-status" role="status" aria-live="polite">
     <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
@@ -89,11 +109,19 @@
                   </td>
                   <td data-status-cell>{% if course.is_selected %}<span class="status green">已选</span>{% elif is_full %}<span class="status red">已满</span>{% else %}<span class="status blue">可选</span>{% endif %}</td>
                   <td class="actions-cell">
-                    {% if course.is_selected or info.active_view == "selected" %}
-                      <form method="post" action="/selection/info/drop" data-selection-action="drop" data-task-status="#selection-action-status" data-course-name="{{ course.course_name or '这门课程' }}" data-confirm="确认退选 {{ course.course_name or '这门课程' }}？"><input type="hidden" name="view" value="{{ info.active_view }}"><input type="hidden" name="lesson_id" value="{{ course.lesson_id }}"><button class="btn small danger" type="submit" data-selection-submit>退课</button></form>
-                    {% else %}
-                      <form method="post" action="/selection/info/select" data-selection-action="select" data-task-status="#selection-action-status" data-course-name="{{ course.course_name or '这门课程' }}"><input type="hidden" name="view" value="{{ info.active_view }}"><input type="hidden" name="lesson_id" value="{{ course.lesson_id }}"><button class="btn small primary" type="submit" data-selection-submit {% if is_full %}disabled{% endif %}>选课</button></form>
-                    {% endif %}
+                    <div class="selection-row-actions">
+                      {% if course.is_selected or info.active_view == "selected" %}
+                        <form method="post" action="/selection/info/drop" data-selection-action="drop" data-task-status="#selection-action-status" data-course-name="{{ course.course_name or '这门课程' }}" data-confirm="确认退选 {{ course.course_name or '这门课程' }}？"><input type="hidden" name="view" value="{{ info.active_view }}"><input type="hidden" name="lesson_id" value="{{ course.lesson_id }}"><button class="btn small danger" type="submit" data-selection-submit>退课</button></form>
+                      {% else %}
+                        <form method="post" action="/selection/info/select" data-selection-action="select" data-task-status="#selection-action-status" data-course-name="{{ course.course_name or '这门课程' }}"><input type="hidden" name="view" value="{{ info.active_view }}"><input type="hidden" name="lesson_id" value="{{ course.lesson_id }}"><button class="btn small primary" type="submit" data-selection-submit {% if is_full %}disabled{% endif %}>选课</button></form>
+                        {% if current_batch and current_batch.start_at and current_batch.end_at and not is_full %}
+                          <form method="post" action="/selection/auto/add" data-auto-selection data-course-name="{{ course.course_name or '这门课程' }}">
+                            <input type="hidden" name="lesson_id" value="{{ course.lesson_id }}">
+                            <button class="btn small" type="submit" data-auto-selection-submit {% if course.lesson_id in auto_lesson_ids %}disabled{% endif %}><svg class="icon small"><use href="/static/icons.svg#clock-3"></use></svg><span>{% if course.lesson_id in auto_lesson_ids %}已定时{% else %}定时{% endif %}</span></button>
+                          </form>
+                        {% endif %}
+                      {% endif %}
+                    </div>
                   </td>
                 </tr>
               {% endfor %}

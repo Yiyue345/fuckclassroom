@@ -22,6 +22,14 @@
   {% if refresh_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>刷新失败：{{ refresh_error }}</span></div>{% endif %}
   {% if error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>{% endif %}
 
+  <div class="notice inline-task-status hidden" id="course-task-status" role="status" aria-live="polite">
+    <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
+    <div class="inline-task-body">
+      <div class="inline-task-message" data-task-message>正在准备文字提取</div>
+      <div class="progress" aria-hidden="true"><span data-task-progress></span></div>
+    </div>
+  </div>
+
   {% if detail %}
     {% set counts = namespace(replay=0, ppt=0, transcript=0) %}
     {% for lesson in detail.lessons %}{% for resource in lesson.resources %}{% if resource.kind == "ppt" %}{% set counts.ppt = counts.ppt + 1 %}{% elif resource.kind == "transcript" %}{% set counts.transcript = counts.transcript + 1 %}{% else %}{% set counts.replay = counts.replay + 1 %}{% endif %}{% endfor %}{% endfor %}
@@ -54,7 +62,7 @@
               {% if lesson.status_label %}<span class="status {% if '完成' in lesson.status_label or '结束' in lesson.status_label %}green{% else %}gray{% endif %}">{{ lesson.status_label }}</span>{% else %}<span class="status gray">状态未知</span>{% endif %}
             </div>
             <div class="lesson-actions">
-              <form method="post" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/extract"><button class="btn small" type="submit"><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg>提取文字</button></form>
+              <form method="post" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/extract" data-inline-task data-task-status="#course-task-status" data-task-group="course-extraction" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成"><button class="btn small" type="submit" data-task-submit><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg>提取文字</button></form>
               <a class="btn small icon-only" href="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/outputs" title="查看提取结果"><svg class="icon small"><use href="/static/icons.svg#file-text"></use></svg></a>
             </div>
           </article>

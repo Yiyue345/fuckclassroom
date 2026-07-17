@@ -12,12 +12,19 @@
       <p class="page-description">最近课程、下载文件和文字提取任务集中在这里。</p>
     </div>
     <div class="head-actions">
-      <form method="post" action="/auth/verify"><button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>验证会话</button></form>
+      <form method="post" action="/auth/verify" data-inline-task data-task-status="#auth-task-status" data-task-group="auth" data-task-starting="正在启动会话验证" data-task-fallback="会话验证失败" data-task-success="会话状态已更新"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>验证会话</button></form>
       <a class="btn primary" href="/courses">浏览全部课程</a>
     </div>
   </div>
 
   {% if course_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ course_error }}</span></div>{% endif %}
+  <div class="notice inline-task-status hidden" id="auth-task-status" role="status" aria-live="polite">
+    <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
+    <div class="inline-task-body">
+      <div class="inline-task-message" data-task-message>正在准备登录</div>
+      <div class="progress" aria-hidden="true"><span data-task-progress></span></div>
+    </div>
+  </div>
 
   <section class="stat-band">
     <div class="stat"><div class="stat-label">当前课程</div><div class="stat-value">{{ courses|length }}</div><div class="stat-foot">按默认学期加载</div></div>
@@ -75,8 +82,8 @@
         </div>
       </div>
       <div class="surface session-actions">
-        <form method="post" action="/auth/start"><button class="btn primary" type="submit"><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>打开网页登录</button></form>
-        <form method="post" action="/auth/verify"><button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>验证保存会话</button></form>
+        <form method="post" action="/auth/start" data-inline-task data-task-status="#auth-task-status" data-task-group="auth" data-task-starting="正在启动统一账号登录" data-task-fallback="登录失败" data-task-success="课程录播登录成功"><button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>使用统一账号登录</button></form>
+        <form method="post" action="/auth/verify" data-inline-task data-task-status="#auth-task-status" data-task-group="auth" data-task-starting="正在启动会话验证" data-task-fallback="会话验证失败" data-task-success="会话状态已更新"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>验证保存会话</button></form>
         <form method="post" action="/auth/logout" data-confirm="确认清除课程录播登录会话？"><button class="btn danger" type="submit"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除登录会话</button></form>
       </div>
     </div>

@@ -10,12 +10,23 @@
   <div class="page-head"><div><h1>设置</h1><p class="page-description">管理外观、课程偏好、文字提取和 AI 服务配置。</p></div><div class="head-actions"><button class="btn primary" type="submit" form="settings-form">保存更改</button></div></div>
 
   {% if saved %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>设置已保存。</span></div>{% endif %}
+  {% if hy2_built %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>Hy2 代理组件已构建。</span></div>{% endif %}
   {% if cache_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>缓存已清除。</span></div>{% endif %}
+  {% if credentials_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>统一桂电自动登录凭据已清除。</span></div>{% endif %}
   {% if cache_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>缓存清除失败：{{ cache_error }}</span></div>{% endif %}
+  {% if credential_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ credential_error }}</span></div>{% endif %}
   {% if error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>{% endif %}
 
+  <div class="notice inline-task-status hidden" id="settings-task-status" role="status" aria-live="polite">
+    <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
+    <div class="inline-task-body">
+      <div class="inline-task-message" data-task-message>正在准备构建</div>
+      <div class="progress" aria-hidden="true"><span data-task-progress></span></div>
+    </div>
+  </div>
+
   <div class="settings-layout">
-    <nav class="settings-nav"><a class="active" href="#appearance">外观</a><a href="#courses">课程与资源</a><a href="#extraction">文字提取</a><a href="#ai">AI 服务</a><a href="#storage">缓存与存储</a></nav>
+    <nav class="settings-nav"><a class="active" href="#appearance">外观</a><a href="#courses">课程与资源</a><a href="#network">账号与网络</a><a href="#extraction">文字提取</a><a href="#ai">AI 服务</a><a href="#storage">缓存与存储</a></nav>
     <div>
       <form class="settings-main" id="settings-form" method="post" action="/settings">
         <section class="settings-section" id="appearance">
@@ -32,6 +43,21 @@
           <div class="fields">
             <div class="field"><label for="default_term_id">默认学期</label><select class="select" id="default_term_id" name="default_term_id"><option value="" {% if not settings.default_term_id %}selected{% endif %}>全部课程</option>{% for term in terms %}<option value="{{ term.id }}" {% if settings.default_term_id == term.id %}selected{% endif %}>{{ term.year }} 第 {{ term.season }} 学期{% if term.current %}（当前）{% endif %}</option>{% endfor %}</select></div>
             <label class="check-row"><input type="checkbox" name="auto_open_outputs_after_extract" {% if settings.auto_open_outputs_after_extract %}checked{% endif %}><span>提取完成后自动打开结果页</span></label>
+          </div>
+        </section>
+
+        <section class="settings-section" id="network">
+          <div><h2>账号与网络</h2><p>统一账号同时用于课程录播与本科教务，校外教务访问可使用 Hy2 通道。</p></div>
+          <div class="fields">
+            <label class="check-row"><input type="checkbox" name="hy2_enabled" {% if settings.hy2_enabled %}checked{% endif %}><span>启用 Hy2 教务代理</span></label>
+            <div class="field"><label for="hy2_source_dir">GUET Hub Rust 工程</label><input class="input mono" id="hy2_source_dir" name="hy2_source_dir" value="{{ settings.hy2_source_dir or hy2_status.source_dir }}"></div>
+            <div class="detail-grid"><div class="detail-item"><label>运行状态</label><strong>{{ hy2_status.message }}</strong></div><div class="detail-item"><label>代理组件</label><strong title="{{ hy2_status.runner_path }}">{% if hy2_status.running %}运行中{% elif hy2_status.runner_path %}{{ hy2_status.runner_path }}{% else %}未配置{% endif %}</strong></div></div>
+            <button class="btn" type="submit" form="hy2-build-form" data-task-submit><svg class="icon"><use href="/static/icons.svg#play"></use></svg>构建代理组件</button>
+            <div class="field-row"><div class="field"><label for="selection_username">统一桂电账号</label><input class="input mono" id="selection_username" name="selection_username" autocomplete="username" value="{{ selection_credentials.username }}"></div><div class="field"><label for="selection_password">统一桂电密码</label><input class="input mono" id="selection_password" name="selection_password" type="password" autocomplete="new-password" placeholder="{% if selection_credentials.is_saved %}已加密保存，留空保持不变{% else %}未保存{% endif %}"></div></div>
+            <div class="detail-grid"><div class="detail-item"><label>自动登录</label><strong>{{ selection_credentials.message }}</strong></div><div class="detail-item"><label>保护方式</label><strong>Windows DPAPI</strong></div></div>
+            {% if selection_credentials.is_saved %}
+              <button class="btn danger" type="submit" form="credential-clear-form"><svg class="icon"><use href="/static/icons.svg#trash-2"></use></svg>清除自动登录凭据</button>
+            {% endif %}
           </div>
         </section>
 
@@ -52,6 +78,8 @@
           </div>
         </section>
       </form>
+      <form id="hy2-build-form" method="post" action="/settings/hy2/build" data-inline-task data-task-status="#settings-task-status" data-task-source-form="#settings-form" data-task-starting="正在启动 Hy2 代理构建" data-task-fallback="Hy2 代理构建失败" data-task-success="Hy2 代理组件已构建"></form>
+      <form id="credential-clear-form" method="post" action="/settings/selection-credentials/clear" data-confirm="确认清除录播与教务共用的自动登录凭据？"></form>
 
       <section class="settings-section" id="storage">
         <div><h2>缓存与存储</h2><p>课程名、资源链接和选课数据会在本机缓存。</p></div>

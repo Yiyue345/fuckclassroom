@@ -14,9 +14,17 @@
 
   {% if error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>{% endif %}
 
+  <div class="notice inline-task-status hidden" id="lesson-task-status" role="status" aria-live="polite">
+    <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
+    <div class="inline-task-body">
+      <div class="inline-task-message" data-task-message>正在准备处理</div>
+      <div class="progress" aria-hidden="true"><span data-task-progress></span></div>
+    </div>
+  </div>
+
   <div class="output-actions">
-    <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/extract"><button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#scan-text"></use></svg>重新提取</button></form>
-    <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/summarize"><button class="btn primary" type="submit"><svg class="icon"><use href="/static/icons.svg#sparkles"></use></svg>生成 AI 总结</button></form>
+    <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/extract" data-inline-task data-task-status="#lesson-task-status" data-task-group="lesson-processing" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#scan-text"></use></svg>重新提取</button></form>
+    <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/summarize" data-inline-task data-task-status="#lesson-task-status" data-task-group="lesson-processing" data-task-starting="正在启动 AI 总结" data-task-fallback="AI 总结失败" data-task-success="AI 总结已完成"><button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#sparkles"></use></svg>生成 AI 总结</button></form>
   </div>
 
   {% if not outputs %}

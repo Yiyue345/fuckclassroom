@@ -58,6 +58,9 @@
               <svg class="icon"><use href="/static/icons.svg#list-checks"></use></svg><span>已选课程</span>
               {% if info is defined %}<span class="nav-badge">{{ info.sections.get('selected', [])|length }}</span>{% endif %}
             </a>
+            <a class="nav-item{% if active_nav == 'selection_auto' %} active{% endif %}" href="/selection/auto">
+              <svg class="icon"><use href="/static/icons.svg#clock-3"></use></svg><span>定时选课</span>
+            </a>
             <a class="nav-item{% if active_nav == 'selection_captures' %} active{% endif %}" href="/selection/captures">
               <svg class="icon"><use href="/static/icons.svg#activity"></use></svg><span>接口记录</span>
             </a>
@@ -87,9 +90,9 @@
             <a class="session-card" href="/selection">
               {% if session is defined and session.is_saved %}
                 <span class="session-dot{% if session.is_valid is sameas false %} invalid{% else %} valid{% endif %}"></span>
-                <span><span class="session-title">{% if session.is_valid is sameas false %}WebVPN 会话无效{% elif session.is_valid is sameas true %}WebVPN 会话有效{% else %}WebVPN 会话已保存{% endif %}</span><span class="session-meta">{{ session.checked_at or session.saved_at or "尚未验证" }}</span></span>
+                <span><span class="session-title">{% if session.is_valid is sameas false %}教务会话无效{% elif session.is_valid is sameas true %}教务会话有效{% else %}教务会话已保存{% endif %}</span><span class="session-meta">{{ session.checked_at or session.saved_at or "尚未验证" }}</span></span>
               {% else %}
-                <span class="session-dot invalid"></span><span><span class="session-title">尚未登录 WebVPN</span><span class="session-meta">点击打开会话管理</span></span>
+                <span class="session-dot invalid"></span><span><span class="session-title">尚未登录本科教务</span><span class="session-meta">点击打开会话管理</span></span>
               {% endif %}
             </a>
           {% else %}
@@ -135,6 +138,28 @@
           {% block content %}{% endblock %}
         </div>
       </main>
+    </div>
+    <div class="auth-modal hidden" role="dialog" aria-modal="true" aria-labelledby="auth-challenge-title" data-auth-challenge>
+      <div class="auth-modal-panel">
+        <header class="auth-modal-header">
+          <span class="auth-modal-icon"><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg></span>
+          <div><h2 id="auth-challenge-title">短信动态码验证</h2><p data-auth-system>学校统一身份认证</p></div>
+        </header>
+        <div class="auth-modal-body">
+          <p class="auth-modal-message" data-auth-message>需要短信动态码才能继续登录</p>
+          <div class="auth-mobile hidden" data-auth-mobile></div>
+          <div class="field">
+            <label for="auth-verification-code">短信动态码</label>
+            <input class="input mono auth-code-input" id="auth-verification-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="请输入 6 位数字" data-auth-code>
+          </div>
+          <p class="auth-modal-error hidden" role="alert" data-auth-error></p>
+        </div>
+        <footer class="auth-modal-actions">
+          <button class="btn" type="button" data-auth-cancel>取消</button>
+          <button class="btn" type="button" data-auth-send><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg><span>发送动态码</span></button>
+          <button class="btn primary" type="button" data-auth-verify><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>确认验证</button>
+        </footer>
+      </div>
     </div>
     <script src="/static/app.js"></script>
     {% block scripts %}{% endblock %}
