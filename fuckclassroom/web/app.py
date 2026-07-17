@@ -2,73 +2,127 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qs
 from urllib.parse import quote
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .auth import LoginSessionService
-from .cache import JsonCache
-from .classroom import ClassroomClient, ClassroomClientError
-from .config import PROJECT_ROOT, AppConfig
-from .course_selection import (
+from ..auth import LoginSessionService
+from ..auth.cas import LoginVerificationBroker, LoginVerificationError
+from ..auth.credentials import CredentialStoreError, SelectionCredentialStore
+from ..classroom import ClassroomClient, ClassroomClientError
+from ..classroom.downloads import DownloadLibrary
+from ..classroom.extraction import ExtractionError, LessonExtractionService
+from ..core.cache import JsonCache
+from ..core.config import PROJECT_ROOT, AppConfig
+from ..core.settings import SettingsStore
+from ..core.tasks import TaskManager
+from ..course_selection import (
     CourseSelectionApiError,
     CourseSelectionAssistant,
     SELECTION_INFO_VIEWS,
     SelectionTarget,
 )
-from .downloads import DownloadLibrary
-from .extractor import ExtractionError, LessonExtractionService
-from .settings import SettingsStore
-from .tasks import TaskManager
+from ..course_selection.automation import AutoSelectionService
+from ..course_selection.proxy import Hy2ProxyManager
 
 
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "templates"))
 logger = logging.getLogger(__name__)
 
 
+def _unified_credential_path(config: AppConfig):
+    target = config.data_dir / "account" / "credentials.json"
+    legacy = config.data_dir / "webvpn" / "credentials.json"
+    if target.exists() or not legacy.exists():
+        return target
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        legacy.replace(target)
+        return target
+    except OSError as exc:
+        logger.warning("统一登录凭据迁移失败，暂时沿用旧文件：%s", exc)
+        return legacy
+
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
     app_config = config or AppConfig()
-    auth_service = LoginSessionService(app_config)
     classroom_client = ClassroomClient(app_config)
-    course_selection = CourseSelectionAssistant(app_config)
+    hy2_proxy = Hy2ProxyManager(app_config)
+    credential_store = SelectionCredentialStore(_unified_credential_path(app_config))
+    verification_broker = LoginVerificationBroker()
+    login_lock = threading.Lock()
+    auth_service = LoginSessionService(
+        app_config,
+        credential_store=credential_store,
+        verification_broker=verification_broker,
+        login_lock=login_lock,
+    )
+    course_selection = CourseSelectionAssistant(
+        app_config,
+        hy2_proxy=hy2_proxy,
+        credential_store=credential_store,
+        verification_broker=verification_broker,
+        login_lock=login_lock,
+    )
     extraction_service = LessonExtractionService(app_config)
     settings_store = SettingsStore(app_config.data_dir / "settings.json")
     cache_store = JsonCache(app_config.cache_dir)
     download_library = DownloadLibrary(app_config.downloads_dir)
     task_manager = TaskManager()
+    auto_selection = AutoSelectionService(
+        course_selection, app_config.data_dir / "webvpn" / "auto_selection_jobs.json"
+    )
 
     def verify_classroom_session():
-        saved_status = auth_service.get_session_status()
-        if saved_status.cookie_count == 0:
-            return saved_status
-        try:
-            classroom_client.verify_session()
-        except ClassroomClientError as exc:
-            return auth_service.record_session_verification(False, str(exc))
-        return auth_service.record_session_verification(True, "登录会话有效", app_config.site_url)
+        return auth_service.verify_saved_session()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        results = await asyncio.gather(
-            asyncio.to_thread(verify_classroom_session),
-            asyncio.to_thread(course_selection.verify_saved_session),
-            return_exceptions=True,
-        )
-        labels = ("课程录播", "WebVPN/教务")
-        for label, result in zip(labels, results):
-            if isinstance(result, Exception):
-                logger.warning("启动时%s会话检测失败：%s", label, result)
-            else:
-                logger.info("启动时%s会话状态：%s", label, result.message)
-        yield
+        async def verify_saved_sessions() -> None:
+            results = await asyncio.gather(
+                asyncio.to_thread(verify_classroom_session),
+                asyncio.to_thread(course_selection.verify_saved_session),
+                return_exceptions=True,
+            )
+            labels = ("课程录播", "WebVPN/教务")
+            for label, result in zip(labels, results):
+                if isinstance(result, Exception):
+                    logger.warning("启动时%s会话检测失败：%s", label, result)
+                else:
+                    logger.info("启动时%s会话状态：%s", label, result.message)
+
+        startup_check = asyncio.create_task(verify_saved_sessions())
+        auto_selection.start()
+        try:
+            yield
+        finally:
+            if not startup_check.done():
+                startup_check.cancel()
+            try:
+                await startup_check
+            except asyncio.CancelledError:
+                pass
+            auto_selection.stop()
+            hy2_proxy.stop()
 
     app = FastAPI(title="Fuck Classroom", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(PROJECT_ROOT / "static")), name="static")
+    def task_started_response(request: Request, task, result_url: str | None = None) -> Response:
+        if "application/json" in request.headers.get("accept", ""):
+            payload = {
+                "task_id": task.id,
+                "status_url": f"/api/tasks/{task.id}",
+            }
+            if result_url:
+                payload["result_url"] = result_url
+            return JSONResponse(payload)
+        return RedirectResponse(f"/tasks/{task.id}", status_code=303)
 
     @app.get("/")
     def index() -> RedirectResponse:
@@ -102,21 +156,52 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
 
     @app.post("/auth/start")
-    def start_login(background_tasks: BackgroundTasks) -> RedirectResponse:
-        auth_service.mark_login_started()
-        background_tasks.add_task(auth_service.start_browser_login)
-        return RedirectResponse("/classroom", status_code=303)
+    def start_login(request: Request) -> Response:
+        task = task_manager.start(
+            "课程录播登录", lambda progress: auth_service.login_for_web(progress)
+        )
+        return task_started_response(request, task, "/classroom#session")
 
     @app.post("/auth/verify")
-    def verify_login() -> RedirectResponse:
-        auth_service.verify_saved_session()
-        return RedirectResponse("/classroom", status_code=303)
+    def verify_login(request: Request) -> Response:
+        task = task_manager.start(
+            "验证课程录播会话", lambda progress: auth_service.verify_for_web(progress)
+        )
+        return task_started_response(request, task, "/classroom#session")
 
     @app.post("/auth/logout")
     def logout() -> RedirectResponse:
         auth_service.clear_session()
         return RedirectResponse("/classroom", status_code=303)
 
+    @app.get("/api/auth/challenge")
+    def current_auth_challenge() -> JSONResponse:
+        return JSONResponse({"challenge": verification_broker.current()})
+
+    @app.post("/api/auth/challenge/{challenge_id}/send")
+    def send_auth_code(challenge_id: str) -> JSONResponse:
+        try:
+            verification_broker.request_send(challenge_id)
+        except LoginVerificationError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/auth/challenge/{challenge_id}/verify")
+    async def verify_auth_code(challenge_id: str, request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+            verification_broker.request_verify(challenge_id, str(payload.get("code") or ""))
+        except (ValueError, AttributeError, LoginVerificationError) as exc:
+            return JSONResponse({"detail": str(exc) or "验证码请求无效"}, status_code=409)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/auth/challenge/{challenge_id}/cancel")
+    def cancel_auth_code(challenge_id: str) -> JSONResponse:
+        try:
+            verification_broker.request_cancel(challenge_id)
+        except LoginVerificationError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+        return JSONResponse({"ok": True})
     @app.get("/courses", response_class=HTMLResponse)
     def courses(request: Request, term_id: str | None = None) -> HTMLResponse:
         error = None
@@ -165,9 +250,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 "settings": settings_store.load().to_public_dict(),
                 "terms": terms,
                 "saved": request.query_params.get("saved") == "1",
+                "hy2_built": request.query_params.get("hy2_built") == "1",
                 "cache_cleared": request.query_params.get("cache_cleared") == "1",
                 "cache_error": request.query_params.get("cache_error"),
+                "credential_error": request.query_params.get("credential_error"),
+                "credentials_cleared": request.query_params.get("credentials_cleared") == "1",
+                "selection_credentials": credential_store.public_status(),
                 "cache_info": cache_store.info(),
+                "hy2_status": hy2_proxy.get_status().to_dict(),
                 "error": error,
             },
         )
@@ -177,9 +267,36 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         body = (await request.body()).decode("utf-8", errors="replace")
         parsed = parse_qs(body, keep_blank_values=True)
         form = {key: values[-1] if values else "" for key, values in parsed.items()}
-        settings_store.update_from_form(form)
+        updated = settings_store.update_from_form(form)
+        try:
+            credential_store.update_from_form(
+                form.get("selection_username", ""), form.get("selection_password", "")
+            )
+        except CredentialStoreError as exc:
+            return RedirectResponse(f"/settings?credential_error={quote(str(exc))}", status_code=303)
+        course_selection.invalidate_access_mode()
+        if not updated.hy2_enabled:
+            hy2_proxy.stop()
         return RedirectResponse("/settings?saved=1", status_code=303)
 
+    @app.post("/settings/hy2/build")
+    async def build_hy2_proxy(request: Request) -> Response:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        form = {key: values[-1] if values else "" for key, values in parsed.items()}
+        settings_store.update_from_form(form)
+        course_selection.invalidate_access_mode()
+        hy2_proxy.stop()
+        task = task_manager.start("构建 Hy2 代理", hy2_proxy.build_runner)
+        return task_started_response(request, task, "/settings?hy2_built=1")
+
+    @app.post("/settings/selection-credentials/clear")
+    def clear_selection_credentials() -> RedirectResponse:
+        try:
+            credential_store.clear()
+        except CredentialStoreError as exc:
+            return RedirectResponse(f"/settings?credential_error={quote(str(exc))}", status_code=303)
+        return RedirectResponse("/settings?credentials_cleared=1", status_code=303)
     @app.post("/settings/cache/clear")
     def clear_cache() -> RedirectResponse:
         try:
@@ -276,6 +393,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "selection.html",
             {
                 "session": course_selection.get_session_status(),
+                "access": course_selection.get_access_info(),
+                "credentials": course_selection.get_credential_status(),
                 "select_error": request.query_params.get("select_error"),
             },
         )
@@ -300,8 +419,85 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 "views": SELECTION_INFO_VIEWS,
                 "last_action": course_selection.get_selection_action_result(),
                 "select_error": request.query_params.get("select_error"),
+                "auto_lesson_ids": auto_selection.active_lesson_ids(),
             },
         )
+
+    @app.get("/selection/auto", response_class=HTMLResponse)
+    def selection_auto_jobs(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "selection_auto.html",
+            {
+                "session": course_selection.get_session_status(),
+                "jobs": auto_selection.list_jobs(),
+                "select_error": request.query_params.get("select_error"),
+            },
+        )
+
+    @app.get("/api/selection/auto/jobs")
+    def selection_auto_jobs_api() -> JSONResponse:
+        return JSONResponse({"jobs": auto_selection.list_jobs()})
+
+    @app.post("/selection/auto/add")
+    async def add_selection_auto_job(request: Request) -> Response:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        raw_lesson_id = (parsed.get("lesson_id") or [""])[-1]
+        try:
+            lesson_id = int(raw_lesson_id)
+            info = course_selection.get_selection_info("all")
+            batch = info.current_batch
+            course = next(
+                (
+                    item
+                    for courses in info.sections.values()
+                    for item in courses
+                    if isinstance(item, dict) and item.get("lesson_id") == lesson_id
+                ),
+                None,
+            )
+            if batch is None:
+                raise ValueError("尚未缓存选课批次，请先刷新课程")
+            if course is None:
+                raise ValueError("缓存中找不到这门课，请先刷新课程")
+            job, created = auto_selection.add_job(lesson_id, course, batch)
+        except (TypeError, ValueError) as exc:
+            if "application/json" in request.headers.get("accept", ""):
+                return JSONResponse({"detail": str(exc)}, status_code=400)
+            return RedirectResponse(f"/selection/info?select_error={quote(str(exc))}", status_code=303)
+
+        message = "已加入定时选课" if created else "这门课已经在定时队列中"
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"job": job.to_dict(display=True), "message": message})
+        return RedirectResponse("/selection/auto", status_code=303)
+
+    @app.post("/selection/auto/{job_id}/cancel")
+    def cancel_selection_auto_job(job_id: str) -> Response:
+        try:
+            auto_selection.cancel(job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="定时选课任务不存在")
+        return RedirectResponse("/selection/auto", status_code=303)
+
+    @app.post("/selection/auto/{job_id}/resume")
+    def resume_selection_auto_job(job_id: str) -> Response:
+        try:
+            auto_selection.resume(job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="定时选课任务不存在")
+        return RedirectResponse("/selection/auto", status_code=303)
+
+    @app.post("/selection/auto/{job_id}/delete")
+    def delete_selection_auto_job(job_id: str) -> Response:
+        try:
+            auto_selection.delete(job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="定时选课任务不存在")
+        except ValueError as exc:
+            return RedirectResponse(f"/selection/auto?select_error={quote(str(exc))}", status_code=303)
+        return RedirectResponse("/selection/auto", status_code=303)
+
 
     @app.post("/selection/info/refresh")
     async def refresh_selection_info(request: Request) -> Response:
@@ -309,9 +505,27 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         parsed = parse_qs(body, keep_blank_values=True)
         view = (parsed.get("view") or ["major-plan"])[-1]
         result_url = f"/selection/info/{view}" if view in SELECTION_INFO_VIEWS and view != "major-plan" else "/selection/info"
+        batch_key = (parsed.get("batch_key") or [""])[-1].strip()
+        student_id = None
+        turn_id = None
+        if batch_key:
+            try:
+                raw_student_id, raw_turn_id = batch_key.split(":", 1)
+                student_id = int(raw_student_id)
+                turn_id = int(raw_turn_id)
+            except (TypeError, ValueError):
+                detail = "选课批次无效，请重新选择"
+                if "application/json" in request.headers.get("accept", ""):
+                    return JSONResponse({"detail": detail}, status_code=400)
+                return RedirectResponse(f"{result_url}?select_error={quote(detail)}", status_code=303)
         task = task_manager.start(
-            "刷新选课信息",
-            lambda progress: course_selection.refresh_selection_info_for_web(progress=progress, result_url=result_url),
+            "切换选课批次" if batch_key else "刷新选课信息",
+            lambda progress: course_selection.refresh_selection_info_for_web(
+                progress=progress,
+                result_url=result_url,
+                student_id=student_id,
+                turn_id=turn_id,
+            ),
         )
         if "application/json" in request.headers.get("accept", ""):
             return JSONResponse(
@@ -385,31 +599,31 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return RedirectResponse(f"/tasks/{task.id}", status_code=303)
 
     @app.post("/selection/login")
-    def start_webvpn_login() -> RedirectResponse:
+    def start_webvpn_login(request: Request) -> Response:
         task = task_manager.start(
-            "WebVPN 登录",
+            "本科教务登录",
             lambda progress: course_selection.login_for_web(progress=progress),
         )
-        return RedirectResponse(f"/tasks/{task.id}", status_code=303)
+        return task_started_response(request, task, "/selection")
 
     @app.post("/selection/open")
-    def open_selection_home() -> RedirectResponse:
+    def open_selection_home(request: Request) -> Response:
         task = task_manager.start(
             "打开本科教务",
             lambda progress: course_selection.open_home_for_web(progress=progress),
         )
-        return RedirectResponse(f"/tasks/{task.id}", status_code=303)
+        return task_started_response(request, task, "/selection")
 
     @app.post("/selection/open-course-select")
-    def open_course_select() -> RedirectResponse:
+    def open_course_select(request: Request) -> Response:
         task = task_manager.start(
             "打开选课入口",
             lambda progress: course_selection.open_course_select_for_web(progress=progress),
         )
-        return RedirectResponse(f"/tasks/{task.id}", status_code=303)
+        return task_started_response(request, task, "/selection")
 
     @app.post("/selection/capture")
-    async def capture_selection_interfaces(request: Request) -> RedirectResponse:
+    async def capture_selection_interfaces(request: Request) -> Response:
         body = (await request.body()).decode("utf-8", errors="replace")
         parsed = parse_qs(body, keep_blank_values=True)
         raw_duration = (parsed.get("duration_seconds") or ["180"])[-1]
@@ -424,7 +638,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 duration_seconds=duration_seconds,
             ),
         )
-        return RedirectResponse(f"/tasks/{task.id}", status_code=303)
+        return task_started_response(request, task, "/selection/captures")
 
     @app.get("/selection/captures", response_class=HTMLResponse)
     def selection_captures(request: Request) -> HTMLResponse:
@@ -454,7 +668,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
 
     @app.post("/selection/highlight")
-    async def highlight_selection_course(request: Request) -> RedirectResponse:
+    async def highlight_selection_course(request: Request) -> Response:
         body = (await request.body()).decode("utf-8", errors="replace")
         parsed = parse_qs(body, keep_blank_values=True)
         target = SelectionTarget(
@@ -466,13 +680,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "定位选课课程",
             lambda progress: course_selection.highlight_for_web(target, progress=progress),
         )
-        return RedirectResponse(f"/tasks/{task.id}", status_code=303)
+        return task_started_response(request, task, "/selection")
 
     @app.post("/selection/select-once")
-    async def select_course_once(request: Request) -> RedirectResponse:
+    async def select_course_once(request: Request) -> Response:
         body = (await request.body()).decode("utf-8", errors="replace")
         parsed = parse_qs(body, keep_blank_values=True)
         if (parsed.get("confirm_select") or [""])[-1] != "YES":
+            if "application/json" in request.headers.get("accept", ""):
+                return JSONResponse({"detail": "需要先确认只点击一次唯一匹配课程"}, status_code=400)
             return RedirectResponse(f"/selection?select_error={quote('需要先确认只点击一次唯一匹配课程')}", status_code=303)
         target = SelectionTarget(
             course_name=(parsed.get("name") or [""])[-1].strip(),
@@ -483,10 +699,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "执行一次选课",
             lambda progress: course_selection.select_once_for_web(target, progress=progress),
         )
-        return RedirectResponse(f"/tasks/{task.id}", status_code=303)
+        return task_started_response(request, task, "/selection")
 
     @app.post("/courses/{course_id}/lessons/{lesson_id}/extract")
-    def extract_lesson(course_id: str, lesson_id: str) -> RedirectResponse:
+    def extract_lesson(request: Request, course_id: str, lesson_id: str) -> Response:
         result_url = f"/courses/{course_id}/lessons/{lesson_id}/outputs"
 
         def worker(progress):
@@ -494,10 +710,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             return result_url
 
         task = task_manager.start("提取文字", worker)
-        return RedirectResponse(f"/tasks/{task.id}", status_code=303)
+        return task_started_response(request, task, result_url)
 
     @app.post("/courses/{course_id}/lessons/{lesson_id}/summarize")
-    def summarize_lesson(course_id: str, lesson_id: str) -> RedirectResponse:
+    def summarize_lesson(request: Request, course_id: str, lesson_id: str) -> Response:
         result_url = f"/courses/{course_id}/lessons/{lesson_id}/outputs"
 
         def worker(progress):
@@ -505,7 +721,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             return result_url
 
         task = task_manager.start("生成 AI 总结", worker)
-        return RedirectResponse(f"/tasks/{task.id}", status_code=303)
+        return task_started_response(request, task, result_url)
 
     @app.get("/tasks/{task_id}", response_class=HTMLResponse)
     def task_status(request: Request, task_id: str) -> HTMLResponse:
@@ -514,7 +730,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="任务不存在")
         selection_task = any(
             marker in task.title
-            for marker in ("选课", "WebVPN", "本科教务", "缓存课程", "退选", "课程信息")
+            for marker in ("选课", "WebVPN", "本科教务", "Hy2", "缓存课程", "退选", "课程信息")
         )
         return templates.TemplateResponse(
             request,
