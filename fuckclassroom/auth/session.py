@@ -1,19 +1,30 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
-from .config import AppConfig
+from .cas import (
+    LoginVerificationBroker,
+    is_sms_verification_page,
+    login_interaction_reason,
+    run_sms_verification,
+    submit_saved_credentials,
+)
+from .credentials import CredentialStoreError, SelectionCredentialStore, SelectionCredentials
+from ..core.config import AppConfig
 
 
 CLASSROOM_HOST = "classroom.guet.edu.cn"
 CAS_HOST = "cas.guet.edu.cn"
 COURSE_PROBE_PATH = "/personal/courseapi/vlabpassportapi/v1/account-profile/course?nowpage=1&per-page=1"
-LOGIN_PROBE_INTERVAL_MS = 5_000
+LOGIN_PROBE_INTERVAL_MS = 1_000
+ProgressCallback = Callable[[int, str], None]
 
 
 @dataclass(frozen=True)
@@ -34,8 +45,18 @@ class LoginRunStatus:
 
 
 class LoginSessionService:
-    def __init__(self, config: AppConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig | None = None,
+        *,
+        credential_store: SelectionCredentialStore | None = None,
+        verification_broker: LoginVerificationBroker | None = None,
+        login_lock: threading.Lock | None = None,
+    ) -> None:
         self.config = config or AppConfig()
+        self.credential_store = credential_store
+        self.verification_broker = verification_broker or LoginVerificationBroker()
+        self._login_lock = login_lock or threading.Lock()
 
     def get_session_status(self) -> SessionStatus:
         if not self.config.storage_state_path.exists():
@@ -89,11 +110,35 @@ class LoginSessionService:
         )
 
     def mark_login_started(self) -> None:
-        self._write_login_status("running", "浏览器登录窗口已启动，请在窗口中完成学校统一身份认证")
+        self._write_login_status("running", "正在通过学校统一身份认证登录课程录播")
 
-    def start_browser_login(self) -> SessionStatus:
+    def start_browser_login(self, progress: ProgressCallback | None = None) -> SessionStatus:
         self._ensure_auth_dir()
         self.mark_login_started()
+        with self._login_lock:
+            try:
+                credentials = self._load_credentials()
+            except CredentialStoreError as exc:
+                message = str(exc)
+                self._write_login_status("failed", message)
+                return SessionStatus(False, message)
+            if credentials is not None:
+                _report(progress, 5, "正在使用统一桂电账号自动登录课程录播")
+                status = self._start_browser_login(credentials, progress, headless=True)
+                if status.is_logged_in:
+                    return status
+                _report(progress, 16, f"自动登录需要人工确认：{status.message}")
+            _report(progress, 20, "正在打开统一身份认证窗口")
+            return self._start_browser_login(credentials, progress, headless=False)
+
+    def login_for_web(self, progress: ProgressCallback | None = None) -> str:
+        status = self.start_browser_login(progress)
+        if not status.is_logged_in:
+            raise RuntimeError(status.message)
+        return "/classroom#session"
+
+    def _start_browser_login(self, credentials: SelectionCredentials | None, progress: ProgressCallback | None, *, headless: bool) -> SessionStatus:
+        self._ensure_auth_dir()
 
         try:
             from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -105,12 +150,13 @@ class LoginSessionService:
 
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=self.config.browser_headless)
-                context = browser.new_context()
+                browser = playwright.chromium.launch(headless=headless)
+                context = self._new_login_context(browser)
                 page = context.new_page()
                 page.goto(self.config.site_url, wait_until="domcontentloaded")
+                submitted = bool(credentials and submit_saved_credentials(page, credentials))
 
-                final_url = self._wait_for_authenticated_classroom(page, PlaywrightTimeoutError)
+                final_url = self._wait_for_authenticated_classroom(page, PlaywrightTimeoutError, credentials, progress, headless, submitted)
                 context.storage_state(path=str(self.config.storage_state_path))
                 browser.close()
         except PlaywrightTimeoutError:
@@ -122,20 +168,54 @@ class LoginSessionService:
             self._write_login_status("failed", message)
             return SessionStatus(False, message)
 
-        status = self.get_session_status()
+        storage_state = self._read_json(self.config.storage_state_path, default={})
+        cookie_count = len(storage_state.get("cookies", []))
         self._write_session_meta(final_url)
-        message = "登录会话已保存，可以关闭浏览器窗口" if status.cookie_count else "未获取到 cookie，请重新登录"
-        state = "succeeded" if status.cookie_count else "failed"
+        message = "课程录播登录成功，会话已保存" if cookie_count else "未获取到 cookie，请重新登录"
+        state = "succeeded" if cookie_count else "failed"
         self._write_login_status(state, message, final_url)
         return SessionStatus(
-            is_logged_in=status.cookie_count > 0,
+            is_logged_in=cookie_count > 0,
             message=message,
             final_url=final_url,
             saved_at=self._now(),
-            cookie_count=status.cookie_count,
+            cookie_count=cookie_count,
         )
 
-    def verify_saved_session(self) -> SessionStatus:
+    def verify_for_web(self, progress: ProgressCallback | None = None) -> str:
+        _report(progress, 5, "正在验证课程录播会话")
+        status = self.verify_saved_session(progress=progress)
+        if not status.is_logged_in:
+            raise RuntimeError(status.message)
+        _report(progress, 100, status.message)
+        return "/classroom#session"
+
+    def verify_saved_session(
+        self,
+        *,
+        auto_relogin: bool = True,
+        progress: ProgressCallback | None = None,
+    ) -> SessionStatus:
+        with self._login_lock:
+            status = self._verify_saved_session_once()
+            if status.is_logged_in or not auto_relogin:
+                return status
+            try:
+                credentials = self._load_credentials()
+            except CredentialStoreError as exc:
+                self._write_login_status("failed", str(exc))
+                return SessionStatus(False, str(exc), final_url=status.final_url)
+            if credentials is None:
+                return status
+            _report(progress, 20, "课程录播会话已失效，正在使用统一桂电账号恢复")
+            relogin = self._start_browser_login(credentials, progress, headless=True)
+            if relogin.is_logged_in:
+                return relogin
+            message = f"课程录播自动登录失败：{relogin.message}"
+            self._write_login_status("failed", message, status.final_url)
+            return SessionStatus(False, message, final_url=status.final_url)
+
+    def _verify_saved_session_once(self) -> SessionStatus:
         if not self.config.storage_state_path.exists():
             status = SessionStatus(False, "尚未保存登录会话")
             self._write_login_status("failed", status.message)
@@ -194,6 +274,19 @@ class LoginSessionService:
         self._write_login_status("failed", status.message, final_url)
         return status
 
+    def _load_credentials(self) -> SelectionCredentials | None:
+        if self.credential_store is None:
+            return None
+        return self.credential_store.load()
+
+    def _new_login_context(self, browser: Any) -> Any:
+        if self.config.storage_state_path.exists():
+            try:
+                return browser.new_context(storage_state=str(self.config.storage_state_path))
+            except Exception:
+                pass
+        return browser.new_context()
+
     def clear_session(self) -> None:
         for path in (
             self.config.storage_state_path,
@@ -203,7 +296,15 @@ class LoginSessionService:
             if path.exists():
                 path.unlink()
 
-    def _wait_for_authenticated_classroom(self, page: Any, timeout_error: type[Exception]) -> str:
+    def _wait_for_authenticated_classroom(
+        self,
+        page: Any,
+        timeout_error: type[Exception],
+        credentials: SelectionCredentials | None,
+        progress: ProgressCallback | None,
+        headless: bool,
+        submitted: bool,
+    ) -> str:
         deadline = datetime.now(timezone.utc).timestamp() + self.config.login_timeout_seconds
         last_url = page.url
         while datetime.now(timezone.utc).timestamp() < deadline:
@@ -213,7 +314,23 @@ class LoginSessionService:
             host = urlparse(last_url).hostname or ""
             if host == CLASSROOM_HOST and self._is_authenticated_classroom(page):
                 return last_url
-            self._write_login_status("running", "等待学校认证完成，检测到课程接口可访问后会自动保存会话", last_url)
+            if credentials and is_sms_verification_page(page):
+                run_sms_verification(
+                    page,
+                    credentials.username,
+                    self.verification_broker,
+                    "课程录播",
+                    progress,
+                )
+                page.goto(self.config.site_url, wait_until="domcontentloaded", timeout=30_000)
+                submitted = submit_saved_credentials(page, credentials) or submitted
+                continue
+            reason = login_interaction_reason(page) if submitted else ""
+            if reason and headless:
+                raise RuntimeError(reason)
+            message = f"{reason}，请在浏览器中完成后继续" if reason else "等待学校统一身份认证完成"
+            self._write_login_status("running", message, last_url)
+            _report(progress, 30 if headless else 25, message)
             page.wait_for_timeout(LOGIN_PROBE_INTERVAL_MS)
         raise timeout_error(f"CAS login did not finish before timeout, last url: {last_url}")
 
@@ -279,3 +396,8 @@ class LoginSessionService:
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def _report(progress: ProgressCallback | None, value: int, message: str) -> None:
+    if progress:
+        progress(value, message)
