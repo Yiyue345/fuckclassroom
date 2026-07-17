@@ -547,10 +547,10 @@ class SelectionBrowserMixin:
         combined = f"{final_url} {title} {body_preview}".lower()
         if not result.get("request_ok"):
             return _session_check(False, f"会话验证请求失败：{result.get('error') or '未知错误'}", final_url, status)
-        if status is not None and status >= 400:
-            return _session_check(False, f"教务访问返回 {status}，请重新登录或稍后再试", final_url, status)
         if any(marker in combined for marker in ("authserver", "统一身份认证", "/login", "cas/login")):
             return _session_check(False, "会话已跳转到登录页，请重新登录", final_url, status)
+        if status is not None and status >= 400:
+            return _session_check(False, f"教务访问返回 {status}，请重新登录或稍后再试", final_url, status)
         if any(marker in combined for marker in ("wengine-auth-failed", "访问出错 - 403", "access forbidden")):
             return _session_check(False, "WebVPN 网关拒绝访问，请重新登录或稍后再试", final_url, status)
         if self._looks_like_jw_page(context, page, final_url, title):

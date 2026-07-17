@@ -141,14 +141,27 @@ class SelectionSessionMixin:
         self._write_session_meta(page.url)
         context.close()
 
-    def login_for_web(self, progress: ProgressCallback | None = None, timeout_ms: int = 600_000) -> str:
+    def login_for_web(
+        self,
+        progress: ProgressCallback | None = None,
+        timeout_ms: int = 600_000,
+        *,
+        force_interactive: bool = False,
+    ) -> str:
         self._ensure_session_dir()
-        access = self._selection_access(force=True)
         with self._login_lock:
             try:
                 credentials = self.credential_store.load()
             except CredentialStoreError as exc:
                 raise CourseSelectionApiError(str(exc)) from exc
+            if force_interactive:
+                return self._login_interactively(
+                    progress,
+                    timeout_ms,
+                    credentials,
+                    reuse_saved_session=False,
+                )
+            access = self._selection_access(force=True)
             if credentials:
                 _report(progress, 5, "正在使用保存的账号自动登录本科教务")
                 try:
@@ -161,13 +174,20 @@ class SelectionSessionMixin:
                         12,
                         f"自动登录需要人工确认：{exc}，正在打开登录窗口",
                     )
-            return self._login_interactively(progress, timeout_ms, credentials)
+            return self._login_interactively(
+                progress,
+                timeout_ms,
+                credentials,
+                reuse_saved_session=False,
+            )
 
     def _login_interactively(
         self,
         progress: ProgressCallback | None = None,
         timeout_ms: int = 600_000,
         credentials: SelectionCredentials | None = None,
+        *,
+        reuse_saved_session: bool = True,
     ) -> str:
         self._ensure_session_dir()
         access = self._selection_access(force=True)
@@ -179,7 +199,7 @@ class SelectionSessionMixin:
                     headless=False,
                     **self._playwright_proxy_options(access),
                 )
-                context = self._new_login_context(browser)
+                context = self._new_login_context(browser, reuse_saved_session=reuse_saved_session)
                 page = context.new_page()
                 self._goto_login_page(page, access.login_url, timeout_ms)
                 if credentials and self._submit_saved_credentials(page, credentials):
@@ -310,8 +330,8 @@ class SelectionSessionMixin:
             finally:
                 browser.close()
 
-    def _new_login_context(self, browser: Any) -> Any:
-        if self.storage_state_path.exists():
+    def _new_login_context(self, browser: Any, *, reuse_saved_session: bool = True) -> Any:
+        if reuse_saved_session and self.storage_state_path.exists():
             try:
                 return browser.new_context(storage_state=str(self.storage_state_path))
             except Exception:

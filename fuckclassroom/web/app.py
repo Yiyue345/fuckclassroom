@@ -617,7 +617,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def start_webvpn_login(request: Request) -> Response:
         task = task_manager.start(
             "本科教务登录",
-            lambda progress: course_selection.login_for_web(progress=progress),
+            lambda progress: course_selection.login_for_web(progress=progress, force_interactive=True),
         )
         return task_started_response(request, task, "/selection")
 
