@@ -7,6 +7,7 @@
 - 缓存课程名、课次和视频/课件资源链接，减少重复访问平台接口；
 - 在下载中心查看本地已下载文件；
 - 下载课堂录像、课件和平台转写；
+- 在选课批次开始后执行持久化定时选课任务；
 - 从平台转写 `.docx` 提取文本；
 - 对图片型 `.pptx` 使用 OCR 提取课件文字；
 - 将转写和课件 OCR 合并后发送给 AI 生成课程总结；
@@ -27,7 +28,7 @@ http://127.0.0.1:8765
 首页会先显示系统选择：
 
 - 课程录播助手：`/classroom`
-- WebVPN 选课辅助：`/selection`
+- 本科教务选课辅助：`/selection`
 
 可选端口：
 
@@ -35,6 +36,35 @@ http://127.0.0.1:8765
 $env:FUCKCLASSROOM_PORT="8766"
 .\.venv\Scripts\python.exe main.py
 ```
+## 项目结构
+
+Python 代码按职责放在 `fuckclassroom/` 下的子包中：
+
+```text
+fuckclassroom/
+├── auth/               # CAS、登录会话和加密凭据
+├── classroom/          # 录播平台接口、下载、OCR 和 AI 总结
+├── core/               # 配置、缓存、设置和后台任务
+├── course_selection/   # 教务接口、浏览器兼容、定时选课和 Hy2
+└── web/                # FastAPI 应用和页面路由
+```
+
+选课模块进一步按职责拆分：
+
+```text
+course_selection/
+├── assistant.py        # 对外统一入口
+├── session.py          # 登录与会话管理
+├── api.py              # 课程查询、选课和退课接口
+├── browser.py          # 必要的浏览器兼容流程
+├── automation.py       # 定时自动选课
+├── models.py           # 数据模型
+├── helpers.py          # 响应解析与通用辅助函数
+└── proxy.py            # Hy2 本地代理
+```
+
+根目录下的 `config.py`、`settings.py`、`cache.py` 和 `tasks.py` 仅保留兼容导入，已有外部脚本无需立即修改。
+
 
 ## OCR
 
@@ -103,9 +133,20 @@ data/downloads/
 
 下载中心 `/downloads` 可以查看和删除本地已下载文件，并使用 KB/MB/GB 显示文件大小。课件或转写文件已存在时，课程详情页会显示“已下载”，再次点击下载会直接返回本地文件，不会重复请求平台下载。
 
-## WebVPN 选课辅助
+## 本科教务选课辅助
 
-校外访问本科教务系统时，可以使用独立的 WebVPN 会话：
+可视化页面会参考 GUET Hub 的策略探测 `https://iw.guet.edu.cn/`：校园网内直接访问本科教务；校外启用 Hy2 时优先通过本地代理访问教务和 CAS，代理不可用时自动回退 WebVPN。网络入口切换后需要为当前入口重新登录，避免混用 Cookie 和选课 token。
+
+Hy2 配置位于设置页的“网络代理”。默认从相邻的 GUET Hub Rust 工程构建 `hy2_serve`：
+
+```text
+E:/project/guethub/rust_module/rust
+```
+
+构建结果保存到 `data/hy2/hy2_serve.exe`，该目录已被 Git 忽略。GUET Hub 的节点配置仍保留在它自己的 Rust 二进制中，本项目只在内存中读取随机本地 SOCKS5 凭据，再提供仅监听 `127.0.0.1` 的 HTTP CONNECT 桥接。可用环境变量 `FUCKCLASSROOM_HY2_ENABLED`、`FUCKCLASSROOM_HY2_SOURCE_DIR` 和 `FUCKCLASSROOM_HY2_RUNNER_PATH` 覆盖本机设置。
+
+未启用 Hy2 或代理启动失败时，校外访问继续使用独立的 WebVPN 会话：
+
 
 ```powershell
 .\.venv\Scripts\python.exe select_course.py login
@@ -145,7 +186,18 @@ data/webvpn/storage_state.json
 http://127.0.0.1:8765/selection
 ```
 
-页面版支持打开 WebVPN 登录窗口、打开本科教务系统，以及在进入选课页面后高亮匹配课程。页面版不会自动提交选课。
+页面版登录会根据当前网络自动打开校园网直连、Hy2 代理直连或 WebVPN 本科教务入口，后续课程查询、人数刷新、选课和退课接口沿用同一入口。
+
+课程列表可以把指定教学班加入“定时选课”队列：
+
+- 任务保存在 `data/webvpn/auto_selection_jobs.json`，程序重启后会继续等待；
+- 到达当前批次开始时间后才会通过接口提交，选上、课程满额或批次结束后自动停止；
+- 普通失败的重试间隔不低于 5 秒，会话失效时每 30 秒检查一次，避免高频请求学校接口；
+- 可在 `/selection/auto` 查看尝试次数、平台返回信息，并取消、重试或删除任务。
+
+校园网直连和 Hy2 登录从 `https://bkjwtest.guet.edu.cn/student/sso/login` 进入 CAS，`/student/home` 只用于登录后的会话验证。在设置页保存统一桂电账号和密码后，课程录播与本科教务会共用这份凭据，在启动检测或点击登录时优先静默恢复失效会话。短信动态码会在本地页面弹窗中完成；只有图形验证码、密码错误等确实需要操作登录页的情况才打开浏览器窗口。
+
+凭据整体使用当前 Windows 用户的 DPAPI 加密，单独保存到 `data/account/credentials.json`，不会写入 `data/settings.json`，也不能被其他 Windows 用户直接解密。旧的 `data/webvpn/credentials.json` 会在启动时自动迁移，设置页可以随时清除这份共用凭据。
 
 页面版还支持抓取选课相关 XHR/fetch 接口：
 
