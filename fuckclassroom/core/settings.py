@@ -21,6 +21,9 @@ class AppSettings:
     default_term_id: str = ""
     hy2_enabled: bool = False
     hy2_source_dir: str = ""
+    auto_selection_retry_seconds: int = 5
+    auto_selection_session_retry_seconds: int = 30
+    auto_selection_capacity_retry_seconds: int = 30
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
@@ -35,6 +38,24 @@ class AppSettings:
             default_term_id=str(data.get("default_term_id") or ""),
             hy2_enabled=_to_bool(data.get("hy2_enabled")),
             hy2_source_dir=str(data.get("hy2_source_dir") or "").strip(),
+            auto_selection_retry_seconds=_bounded_int(
+                data.get("auto_selection_retry_seconds"),
+                cls.auto_selection_retry_seconds,
+                5,
+                3600,
+            ),
+            auto_selection_session_retry_seconds=_bounded_int(
+                data.get("auto_selection_session_retry_seconds"),
+                cls.auto_selection_session_retry_seconds,
+                15,
+                3600,
+            ),
+            auto_selection_capacity_retry_seconds=_bounded_int(
+                data.get("auto_selection_capacity_retry_seconds"),
+                cls.auto_selection_capacity_retry_seconds,
+                15,
+                3600,
+            ),
         )
 
     def to_public_dict(self) -> dict[str, Any]:
@@ -82,6 +103,17 @@ class SettingsStore:
                 "auto_open_outputs_after_extract": form.get("auto_open_outputs_after_extract"),
                 "default_term_id": form.get("default_term_id", current.default_term_id),
                 "hy2_enabled": form.get("hy2_enabled"),
+                "auto_selection_retry_seconds": form.get(
+                    "auto_selection_retry_seconds", current.auto_selection_retry_seconds
+                ),
+                "auto_selection_session_retry_seconds": form.get(
+                    "auto_selection_session_retry_seconds",
+                    current.auto_selection_session_retry_seconds,
+                ),
+                "auto_selection_capacity_retry_seconds": form.get(
+                    "auto_selection_capacity_retry_seconds",
+                    current.auto_selection_capacity_retry_seconds,
+                ),
                 "hy2_source_dir": form.get("hy2_source_dir", current.hy2_source_dir),
             }
         )
@@ -97,6 +129,13 @@ def _valid_ocr_engine(value: Any) -> str:
 def _positive_int(value: Any, fallback: int) -> int:
     try:
         return max(1, int(value))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _bounded_int(value: Any, fallback: int, minimum: int, maximum: int) -> int:
+    try:
+        return max(minimum, min(maximum, int(value)))
     except (TypeError, ValueError):
         return fallback
 

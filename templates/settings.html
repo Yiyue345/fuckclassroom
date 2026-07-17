@@ -26,7 +26,7 @@
   </div>
 
   <div class="settings-layout">
-    <nav class="settings-nav"><a class="active" href="#appearance">外观</a><a href="#courses">课程与资源</a><a href="#network">账号与网络</a><a href="#extraction">文字提取</a><a href="#ai">AI 服务</a><a href="#storage">缓存与存储</a></nav>
+    <nav class="settings-nav"><a class="active" href="#appearance">外观</a><a href="#courses">课程与资源</a><a href="#auto-selection">定时选课</a><a href="#network">账号与网络</a><a href="#extraction">文字提取</a><a href="#ai">AI 服务</a><a href="#storage">缓存与存储</a></nav>
     <div>
       <form class="settings-main" id="settings-form" method="post" action="/settings">
         <section class="settings-section" id="appearance">
@@ -43,6 +43,17 @@
           <div class="fields">
             <div class="field"><label for="default_term_id">默认学期</label><select class="select" id="default_term_id" name="default_term_id"><option value="" {% if not settings.default_term_id %}selected{% endif %}>全部课程</option>{% for term in terms %}<option value="{{ term.id }}" {% if settings.default_term_id == term.id %}selected{% endif %}>{{ term.year }} 第 {{ term.season }} 学期{% if term.current %}（当前）{% endif %}</option>{% endfor %}</select></div>
             <label class="check-row"><input type="checkbox" name="auto_open_outputs_after_extract" {% if settings.auto_open_outputs_after_extract %}checked{% endif %}><span>提取完成后自动打开结果页</span></label>
+          </div>
+        </section>
+
+        <section class="settings-section" id="auto-selection">
+          <div><h2>定时选课</h2></div>
+          <div class="fields">
+            <div class="field-row">
+              <div class="field"><label for="auto_selection_retry_seconds">普通失败重试（秒）</label><input class="input" id="auto_selection_retry_seconds" name="auto_selection_retry_seconds" type="number" min="5" max="3600" step="1" value="{{ settings.auto_selection_retry_seconds }}"></div>
+              <div class="field"><label for="auto_selection_session_retry_seconds">会话恢复重试（秒）</label><input class="input" id="auto_selection_session_retry_seconds" name="auto_selection_session_retry_seconds" type="number" min="15" max="3600" step="1" value="{{ settings.auto_selection_session_retry_seconds }}"></div>
+            </div>
+            <div class="field"><label for="auto_selection_capacity_retry_seconds">满课人数监测（秒）</label><input class="input" id="auto_selection_capacity_retry_seconds" name="auto_selection_capacity_retry_seconds" type="number" min="15" max="3600" step="1" value="{{ settings.auto_selection_capacity_retry_seconds }}"></div>
           </div>
         </section>
 

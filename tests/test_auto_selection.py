@@ -7,6 +7,7 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fuckclassroom.course_selection.automation import AutoSelectionService
@@ -34,9 +35,12 @@ class FakeAssistant:
         self,
         outcomes: list[Exception | None] | None = None,
         capacity_results: list[dict | Exception] | None = None,
+        session_results: list[SimpleNamespace | Exception] | None = None,
     ) -> None:
         self.outcomes = list(outcomes or [None])
         self.capacity_results = list(capacity_results or [])
+        self.session_results = list(session_results or [])
+        self.verify_calls = 0
         self.calls: list[tuple[int, SelectionBatch, dict]] = []
         self.capacity_calls: list[tuple[int, SelectionBatch, dict]] = []
         self.called = threading.Event()
@@ -74,6 +78,20 @@ class FakeAssistant:
             "selected_count": course.get("selected_count"),
             "max_count": course.get("max_count"),
         }
+
+    def verify_saved_session(
+        self,
+        timeout_ms: int = 15_000,
+        *,
+        auto_relogin: bool = True,
+    ):
+        self.verify_calls += 1
+        if self.session_results:
+            result = self.session_results.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
+        return SimpleNamespace(is_valid=False, message="未保存可用的自动登录会话")
 
 
 class AutoSelectionServiceTests(unittest.TestCase):
@@ -233,6 +251,81 @@ class AutoSelectionServiceTests(unittest.TestCase):
 
         self.assertEqual(job["status"], "selected")
         self.assertEqual(job["attempts"], 2)
+
+    def test_invalid_session_automatically_relogs_in_with_saved_credentials(self) -> None:
+        restored = SimpleNamespace(is_valid=True, message="教务会话有效")
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = FakeAssistant(
+                [RuntimeError("教务会话失效，请重新登录"), None],
+                session_results=[restored],
+            )
+            service = self.service(directory, assistant)
+            service.add_job(
+                88,
+                self.course,
+                self.batch(
+                    self.clock.value - timedelta(minutes=1),
+                    self.clock.value + timedelta(hours=1),
+                ),
+            )
+
+            service.run_due_once()
+            waiting = service.list_jobs()[0]
+            self.assertEqual(waiting["status"], "retrying")
+            self.assertIn("自动恢复", waiting["message"])
+            self.assertEqual(assistant.verify_calls, 1)
+
+            self.clock.advance(5)
+            service.run_due_once()
+            selected = service.list_jobs()[0]
+
+        self.assertEqual(selected["status"], "selected")
+
+    def test_capacity_monitor_keeps_waiting_after_automatic_relogin(self) -> None:
+        full_course = dict(self.course, selected_count=60)
+        restored = SimpleNamespace(is_valid=True, message="教务会话有效")
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = FakeAssistant(
+                capacity_results=[
+                    RuntimeError("教务会话失效，请重新登录"),
+                    {"selected_count": 59, "max_count": 60},
+                ],
+                session_results=[restored],
+            )
+            service = self.service(directory, assistant)
+            service.add_job(
+                88,
+                full_course,
+                self.batch(
+                    self.clock.value - timedelta(minutes=1),
+                    self.clock.value + timedelta(hours=1),
+                ),
+            )
+
+            service.run_due_once()
+            waiting = service.list_jobs()[0]
+            self.assertEqual(waiting["status"], "waiting_capacity")
+            self.assertTrue(waiting["monitor_capacity"])
+
+            self.clock.advance(5)
+            service.run_due_once()
+            selected = service.list_jobs()[0]
+
+        self.assertEqual(selected["status"], "selected")
+        self.assertEqual(assistant.verify_calls, 1)
+
+    def test_retry_intervals_can_be_updated_at_runtime(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            service = self.service(directory, FakeAssistant())
+            service.configure_intervals(
+                retry_seconds=9,
+                session_retry_seconds=45,
+                capacity_retry_seconds=75,
+            )
+
+        self.assertEqual(service.retry_seconds, 9)
+        self.assertEqual(service.session_retry_seconds, 45)
+        self.assertEqual(service.capacity_retry_seconds, 75)
 
     def test_jobs_persist_and_can_be_removed_after_cancel(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:

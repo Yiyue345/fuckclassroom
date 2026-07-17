@@ -75,8 +75,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     cache_store = JsonCache(app_config.cache_dir)
     download_library = DownloadLibrary(app_config.downloads_dir)
     task_manager = TaskManager()
+    runtime_settings = settings_store.load()
     auto_selection = AutoSelectionService(
-        course_selection, app_config.data_dir / "webvpn" / "auto_selection_jobs.json"
+        course_selection,
+        app_config.data_dir / "webvpn" / "auto_selection_jobs.json",
+        retry_seconds=runtime_settings.auto_selection_retry_seconds,
+        session_retry_seconds=runtime_settings.auto_selection_session_retry_seconds,
+        capacity_retry_seconds=runtime_settings.auto_selection_capacity_retry_seconds,
     )
 
     def verify_classroom_session():
@@ -275,6 +280,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         except CredentialStoreError as exc:
             return RedirectResponse(f"/settings?credential_error={quote(str(exc))}", status_code=303)
         course_selection.invalidate_access_mode()
+        auto_selection.configure_intervals(
+            retry_seconds=updated.auto_selection_retry_seconds,
+            session_retry_seconds=updated.auto_selection_session_retry_seconds,
+            capacity_retry_seconds=updated.auto_selection_capacity_retry_seconds,
+        )
         if not updated.hy2_enabled:
             hy2_proxy.stop()
         return RedirectResponse("/settings?saved=1", status_code=303)
@@ -284,7 +294,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         body = (await request.body()).decode("utf-8", errors="replace")
         parsed = parse_qs(body, keep_blank_values=True)
         form = {key: values[-1] if values else "" for key, values in parsed.items()}
-        settings_store.update_from_form(form)
+        updated = settings_store.update_from_form(form)
+        auto_selection.configure_intervals(
+            retry_seconds=updated.auto_selection_retry_seconds,
+            session_retry_seconds=updated.auto_selection_session_retry_seconds,
+            capacity_retry_seconds=updated.auto_selection_capacity_retry_seconds,
+        )
         course_selection.invalidate_access_mode()
         hy2_proxy.stop()
         task = task_manager.start("构建 Hy2 代理", hy2_proxy.build_runner)

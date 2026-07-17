@@ -94,6 +94,19 @@ class AutoSelectionService:
         self._thread: threading.Thread | None = None
         self._jobs = self._load_jobs()
 
+    def configure_intervals(
+        self,
+        *,
+        retry_seconds: float,
+        session_retry_seconds: float,
+        capacity_retry_seconds: float,
+    ) -> None:
+        with self._lock:
+            self.retry_seconds = max(5.0, retry_seconds)
+            self.session_retry_seconds = max(15.0, session_retry_seconds)
+            self.capacity_retry_seconds = max(15.0, capacity_retry_seconds)
+        self._wake.set()
+
     def start(self) -> None:
         with self._lock:
             if self._thread and self._thread.is_alive():
@@ -306,6 +319,12 @@ class AutoSelectionService:
                     self.session_retry_seconds,
                     self.capacity_retry_seconds,
                 )
+                outcome, message, delay = self._recover_session_if_needed(
+                    outcome,
+                    message,
+                    delay,
+                    monitor_capacity=True,
+                )
                 with self._lock:
                     job = self._jobs.get(job_id)
                     if job is None or job.status != "checking_capacity":
@@ -341,6 +360,7 @@ class AutoSelectionService:
                     self._save_jobs()
                     return True
                 job.monitor_capacity = False
+                monitor_capacity = False
                 job.status = "attempting"
                 job.attempts += 1
                 job.last_attempt_at = self._now().isoformat(timespec="seconds")
@@ -362,6 +382,12 @@ class AutoSelectionService:
                 self.session_retry_seconds,
                 self.capacity_retry_seconds,
             )
+            outcome, message, delay = self._recover_session_if_needed(
+                outcome,
+                message,
+                delay,
+                monitor_capacity=monitor_capacity,
+            )
         else:
             outcome, message, delay = "selected", "选课成功，任务已停止", None
 
@@ -375,6 +401,42 @@ class AutoSelectionService:
             self._set_state(job, outcome, message, next_attempt_at=next_attempt)
             self._save_jobs()
         return True
+
+    def _recover_session_if_needed(
+        self,
+        outcome: str,
+        message: str,
+        delay: float | None,
+        *,
+        monitor_capacity: bool,
+    ) -> tuple[str, str, float | None]:
+        if outcome != "waiting_session":
+            return outcome, message, delay
+        try:
+            status = self.assistant.verify_saved_session(
+                timeout_ms=15_000,
+                auto_relogin=True,
+            )
+        except Exception as exc:
+            return (
+                "waiting_session",
+                f"{message}；自动登录失败：{exc}",
+                self.session_retry_seconds,
+            )
+        if status.is_valid is True:
+            next_status = "waiting_capacity" if monitor_capacity else "retrying"
+            next_action = "继续监测课程空位" if monitor_capacity else "继续选课"
+            return (
+                next_status,
+                f"教务会话已自动恢复；{next_action}",
+                self.retry_seconds,
+            )
+        reason = status.message or "自动登录未能恢复教务会话"
+        return (
+            "waiting_session",
+            f"{message}；{reason}",
+            self.session_retry_seconds,
+        )
 
     def _worker(self) -> None:
         while not self._stop.is_set():
