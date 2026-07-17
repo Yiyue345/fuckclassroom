@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Callable
 
 from .ai import AIClient, AIClientError
-from .classroom import ClassroomClient, ClassroomClientError, CourseDetail, ExportedFile, Lesson
-from .config import AppConfig
+from .client import ClassroomClient, ClassroomClientError, CourseDetail, ExportedFile, Lesson
+from ..core.config import AppConfig
 
 
 class ExtractionError(RuntimeError):

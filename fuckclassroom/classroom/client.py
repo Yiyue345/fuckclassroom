@@ -10,8 +10,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
-from .cache import JsonCache
-from .config import AppConfig
+from ..core.cache import JsonCache
+from ..core.config import AppConfig
 
 
 BASE_URL = "https://classroom.guet.edu.cn"

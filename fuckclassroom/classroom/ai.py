@@ -7,7 +7,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from .config import AppConfig
+from ..core.config import AppConfig
 
 
 class AIClientError(RuntimeError):
