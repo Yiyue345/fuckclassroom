@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import patch
@@ -19,6 +20,7 @@ from fuckclassroom.course_selection import (
 
 class SelectionBatchTests(unittest.TestCase):
     def test_batch_parser_keeps_open_time_range(self) -> None:
+        now = datetime(2026, 7, 29, 12, 0, tzinfo=timezone(timedelta(hours=8)))
         batches = _selection_batches_from_api(
             {
                 "result": False,
@@ -35,12 +37,51 @@ class SelectionBatchTests(unittest.TestCase):
                 ],
             },
             student_id=224039,
+            now=now,
         )
 
         self.assertEqual(len(batches), 1)
         self.assertEqual(batches[0].start_at, "2026-05-12 09:50")
         self.assertEqual(batches[0].end_at, "2026-07-19 23:00")
-        self.assertTrue(batches[0].is_open)
+        self.assertFalse(batches[0].is_open)
+
+    def test_batch_is_open_only_inside_time_range(self) -> None:
+        payload = {
+            "result": False,
+            "data": [
+                {
+                    "id": 1822,
+                    "name": "小学期选课",
+                    "allowEnter": True,
+                    "openDateTimeRange": {
+                        "startDateTime": "2026-05-12 09:50:00",
+                        "endDateTime": "2026-07-19 23:00:00",
+                    },
+                }
+            ],
+        }
+        china = timezone(timedelta(hours=8))
+
+        before = _selection_batches_from_api(
+            payload,
+            student_id=224039,
+            now=datetime(2026, 5, 12, 9, 49, tzinfo=china),
+        )
+        during = _selection_batches_from_api(
+            payload,
+            student_id=224039,
+            now=datetime(2026, 5, 12, 9, 50, tzinfo=china),
+        )
+        at_end = _selection_batches_from_api(
+            payload,
+            student_id=224039,
+            now=datetime(2026, 7, 19, 23, 0, tzinfo=china),
+        )
+
+        self.assertFalse(before[0].is_open)
+        self.assertTrue(during[0].is_open)
+        self.assertFalse(at_end[0].is_open)
+
 
     def test_selected_batch_is_fetched_without_falling_back(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
@@ -129,6 +170,7 @@ class SelectionBatchTests(unittest.TestCase):
         self.assertIsNotNone(info.current_batch)
         self.assertEqual(info.current_batch["label"], "第二批次")
         self.assertEqual(info.current_batch["start_at"], "2026-05-12 09:50")
+        self.assertFalse(info.current_batch["is_open"])
 
 
     def test_refresh_forwards_selected_batch(self) -> None:

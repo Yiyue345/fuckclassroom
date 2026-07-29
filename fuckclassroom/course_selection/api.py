@@ -104,11 +104,18 @@ class SelectionApiMixin:
         if "major-plan" not in sections and isinstance(payload.get("courses"), list):
             sections["major-plan"] = payload["courses"]
         raw_batches = payload.get("batches")
-        batches = (
-            [dict(item) for item in raw_batches if isinstance(item, dict)]
-            if isinstance(raw_batches, list)
-            else []
-        )
+        batches: list[dict[str, Any]] = []
+        if isinstance(raw_batches, list):
+            for item in raw_batches:
+                if not isinstance(item, dict):
+                    continue
+                batch = dict(item)
+                batch["is_open"] = _selection_batch_is_open(
+                    batch.get("is_open"),
+                    batch.get("start_at"),
+                    batch.get("end_at"),
+                )
+                batches.append(batch)
         current_turn_id = _safe_int(payload.get("turn_id"))
         current_student_id = _safe_int(payload.get("student_id"))
         current_batch = next(

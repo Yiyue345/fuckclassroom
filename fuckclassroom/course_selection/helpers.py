@@ -104,7 +104,12 @@ def _extract_selection_student_ids(payload: Any) -> list[int]:
     return student_ids
 
 
-def _selection_batches_from_api(payload: Any, student_id: int) -> list[SelectionBatch]:
+def _selection_batches_from_api(
+    payload: Any,
+    student_id: int,
+    *,
+    now: datetime | None = None,
+) -> list[SelectionBatch]:
     batches: list[SelectionBatch] = []
     for item in _selection_api_rows(payload, "选课批次"):
         if not isinstance(item, dict):
@@ -119,7 +124,12 @@ def _selection_batches_from_api(payload: Any, student_id: int) -> list[Selection
                 turn_id=turn_id,
                 label=str(item.get("name") or f"选课批次 {turn_id}"),
                 url=_selection_batch_url(student_id, turn_id),
-                is_open=_selection_api_bool(item.get("allowEnter")),
+                is_open=_selection_batch_is_open(
+                    item.get("allowEnter"),
+                    start_at,
+                    end_at,
+                    now=now,
+                ),
                 start_at=start_at,
                 end_at=end_at,
             )
@@ -155,6 +165,45 @@ def _selection_datetime_text(value: Any) -> str | None:
     except ValueError:
         return text
     return parsed.strftime("%Y-%m-%d %H:%M")
+
+
+def _selection_batch_is_open(
+    allow_enter: Any,
+    start_at: Any,
+    end_at: Any,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if not _selection_api_bool(allow_enter):
+        return False
+
+    current = now or datetime.now().astimezone()
+    start = _selection_datetime_for_compare(start_at, current)
+    end = _selection_datetime_for_compare(end_at, current)
+    if start is not None and current < start:
+        return False
+    if end is not None and current >= end:
+        return False
+    return True
+
+
+def _selection_datetime_for_compare(value: Any, reference: datetime) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None and reference.tzinfo is not None:
+        return parsed.replace(tzinfo=reference.tzinfo)
+    if parsed.tzinfo is not None and reference.tzinfo is None:
+        return parsed.astimezone().replace(tzinfo=None)
+    if parsed.tzinfo is not None and reference.tzinfo is not None:
+        return parsed.astimezone(reference.tzinfo)
+    return parsed
+
 
 def _selection_api_rows(payload: Any, label: str) -> list[Any]:
     if not isinstance(payload, dict):
@@ -775,4 +824,4 @@ class _ManagedContext:
         finally:
             self._playwright_context_manager.__exit__(None, None, None)
 
-__all__ = ['_report', '_session_check', '_extract_selection_bootstrap_token', '_selection_token_expiry', '_selection_access', '_NoRedirectHandler', '_extract_selection_student_ids', '_selection_batches_from_api', '_selection_batch_time_range', '_selection_datetime_text', '_selection_api_rows', '_selection_api_bool', '_sort_selection_batches', '_selection_batch_url', '_extract_semester_id', '_selection_route_ids', '_is_selection_token_error', '_safe_int', '_extract_lessons', '_extract_plan_courses', '_merge_lessons', '_looks_like_lesson', '_extract_selected_lesson_ids', '_extract_count_map', '_local_now', '_selection_query_body', '_selection_request_middle', '_selection_request_id', '_selection_response_data', '_selection_response_message', '_selection_predicate_message', '_normalize_lesson', '_first_text', '_schedule_limit_count', '_first_teacher_name', '_summarize_action_responses', '_extract_action_messages', '_extract_action_success', '_click_text_in_page', '_sanitize_url', '_sanitize_mapping', '_sanitize_body', '_sanitize_form_or_text', '_sanitize_value', '_is_sensitive_key', '_capture_markdown', '_ManagedContext']
+__all__ = ['_report', '_session_check', '_extract_selection_bootstrap_token', '_selection_token_expiry', '_selection_access', '_NoRedirectHandler', '_extract_selection_student_ids', '_selection_batches_from_api', '_selection_batch_time_range', '_selection_datetime_text', '_selection_batch_is_open', '_selection_api_rows', '_selection_api_bool', '_sort_selection_batches', '_selection_batch_url', '_extract_semester_id', '_selection_route_ids', '_is_selection_token_error', '_safe_int', '_extract_lessons', '_extract_plan_courses', '_merge_lessons', '_looks_like_lesson', '_extract_selected_lesson_ids', '_extract_count_map', '_local_now', '_selection_query_body', '_selection_request_middle', '_selection_request_id', '_selection_response_data', '_selection_response_message', '_selection_predicate_message', '_normalize_lesson', '_first_text', '_schedule_limit_count', '_first_teacher_name', '_summarize_action_responses', '_extract_action_messages', '_extract_action_success', '_click_text_in_page', '_sanitize_url', '_sanitize_mapping', '_sanitize_body', '_sanitize_form_or_text', '_sanitize_value', '_is_sensitive_key', '_capture_markdown', '_ManagedContext']
