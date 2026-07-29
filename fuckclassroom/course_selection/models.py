@@ -18,6 +18,7 @@ WEBVPN_HOST = "v.guet.edu.cn"
 CAMPUS_PROBE_URL = "https://iw.guet.edu.cn/"
 JW_DIRECT_BASE_URL = "https://bkjwtest.guet.edu.cn"
 JW_DIRECT_LOGIN_URL = f"{JW_DIRECT_BASE_URL}/student/sso/login"
+JW_PUBLIC_LOGIN_URL = f"{JW_DIRECT_BASE_URL}/student/ldap/login"
 JW_DIRECT_HOME_URL = f"{JW_DIRECT_BASE_URL}/student/home"
 JW_DIRECT_COURSE_SELECT_URL = f"{JW_DIRECT_BASE_URL}/student/for-std/course-select"
 DIRECT_COURSE_SELECTION_API_BASE_URL = (

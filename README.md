@@ -139,6 +139,8 @@ data/downloads/
 
 可视化页面会参考 GUET Hub 的策略探测 `https://iw.guet.edu.cn/`：校园网内直接访问本科教务；校外启用 Hy2 时优先通过本地代理访问教务和 CAS，代理不可用时自动回退 WebVPN。网络入口切换后需要为当前入口重新登录，避免混用 Cookie 和选课 token。
 
+寒暑假开放公网选课入口时，程序会在 Hy2/WebVPN 之前探测 `https://bkjwtest.guet.edu.cn/student/ldap/login`。仅当该入口返回 2xx/3xx 时才切换到“公网直连”；未开放时的错误状态不会改变现有 Hy2/WebVPN 回退逻辑。
+
 Hy2 Rust 源码已经内置在项目中：
 
 ```text

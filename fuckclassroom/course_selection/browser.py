@@ -715,6 +715,23 @@ class SelectionBrowserMixin:
                         mode = "campus"
             except (HTTPError, URLError, TimeoutError, OSError):
                 pass
+            if mode == "webvpn":
+                public_request = Request(
+                    JW_PUBLIC_LOGIN_URL,
+                    headers={"User-Agent": "Mozilla/5.0", "Accept": "text/html,*/*"},
+                )
+                try:
+                    with build_opener(_NoRedirectHandler()).open(
+                        public_request,
+                        timeout=2,
+                    ) as response:
+                        if 200 <= int(response.status) < 400:
+                            mode = "public"
+                except HTTPError as exc:
+                    if 300 <= exc.code < 400:
+                        mode = "public"
+                except (URLError, TimeoutError, OSError):
+                    pass
             if mode == "webvpn" and self.config.hy2_enabled:
                 try:
                     proxy_url = self.hy2_proxy.ensure_started()
@@ -744,7 +761,7 @@ class SelectionBrowserMixin:
         if not isinstance(payload, dict):
             return "webvpn"
         mode = str(payload.get("mode") or "webvpn")
-        return mode if mode in {"campus", "hy2", "webvpn"} else "webvpn"
+        return mode if mode in {"campus", "public", "hy2", "webvpn"} else "webvpn"
 
     def _write_access_mode(self, mode: str) -> None:
         self._ensure_session_dir()

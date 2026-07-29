@@ -57,11 +57,16 @@ def _selection_token_expiry(token: str, now: float) -> float:
 
 
 def _selection_access(mode: str) -> SelectionAccess:
-    if mode in {"campus", "hy2"}:
+    if mode in {"campus", "public", "hy2"}:
+        labels = {
+            "campus": "校园网直连",
+            "public": "公网直连",
+            "hy2": "Hy2 代理",
+        }
         return SelectionAccess(
             mode=mode,
-            label="校园网直连" if mode == "campus" else "Hy2 代理",
-            login_url=JW_DIRECT_LOGIN_URL,
+            label=labels[mode],
+            login_url=JW_PUBLIC_LOGIN_URL if mode == "public" else JW_DIRECT_LOGIN_URL,
             home_url=JW_DIRECT_HOME_URL,
             course_select_url=JW_DIRECT_COURSE_SELECT_URL,
             api_base_url=DIRECT_COURSE_SELECTION_API_BASE_URL,

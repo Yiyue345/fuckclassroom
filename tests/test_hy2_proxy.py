@@ -9,7 +9,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler
 
 from fuckclassroom.config import AppConfig
@@ -66,6 +66,14 @@ class _FailingOpener:
         raise URLError("offline")
 
 
+class _ErrorStatusOpener:
+    def __init__(self, status: int) -> None:
+        self.status = status
+
+    def open(self, request, *_args, **_kwargs):
+        raise HTTPError(request.full_url, self.status, "unavailable", {}, None)
+
+
 class _Response:
     status = 200
 
@@ -84,8 +92,10 @@ class _SuccessfulOpener:
 class _FakeHy2Proxy:
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
+        self.starts = 0
 
     def ensure_started(self) -> str:
+        self.starts += 1
         if self.error:
             raise self.error
         return "http://127.0.0.1:19090"
@@ -159,15 +169,34 @@ class Hy2ProxyTests(unittest.TestCase):
         self.assertIn("bkjwtest.guet.edu.cn", access.home_url)
         self.assertTrue(access.login_url.endswith("/student/sso/login"))
 
+    def test_public_access_uses_ldap_login_without_webvpn(self) -> None:
+        access = _selection_access("public")
+        self.assertEqual(access.mode, "public")
+        self.assertEqual(access.label, "公网直连")
+        self.assertTrue(access.login_url.endswith("/student/ldap/login"))
+        self.assertIn("bkjwtest.guet.edu.cn", access.api_base_url)
+
     def test_detection_uses_hy2_after_direct_probe_fails(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             config = _hy2_config(Path(directory))
             assistant = CourseSelectionAssistant(config, hy2_proxy=_FakeHy2Proxy())
             with patch(
                 "fuckclassroom.course_selection.browser.build_opener",
-                side_effect=[_FailingOpener(), _SuccessfulOpener()],
+                side_effect=[_FailingOpener(), _ErrorStatusOpener(483), _SuccessfulOpener()],
             ):
                 self.assertEqual(assistant._detect_access_mode(force=True), "hy2")
+
+    def test_detection_uses_public_ldap_before_hy2(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            config = _hy2_config(Path(directory))
+            proxy = _FakeHy2Proxy()
+            assistant = CourseSelectionAssistant(config, hy2_proxy=proxy)
+            with patch(
+                "fuckclassroom.course_selection.browser.build_opener",
+                side_effect=[_FailingOpener(), _SuccessfulOpener()],
+            ):
+                self.assertEqual(assistant._detect_access_mode(force=True), "public")
+            self.assertEqual(proxy.starts, 0)
 
     def test_detection_falls_back_when_hy2_cannot_start(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
