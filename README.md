@@ -63,6 +63,8 @@ course_selection/
 └── proxy.py            # Hy2 本地代理
 ```
 
+`rust_module/hy2_proxy/` 是项目内置的独立 Hy2 Rust crate，包含 `hy2_serve` 命令行组件及 MPL-2.0 许可证。
+
 根目录下的 `config.py`、`settings.py`、`cache.py` 和 `tasks.py` 仅保留兼容导入，已有外部脚本无需立即修改。
 
 
@@ -137,13 +139,13 @@ data/downloads/
 
 可视化页面会参考 GUET Hub 的策略探测 `https://iw.guet.edu.cn/`：校园网内直接访问本科教务；校外启用 Hy2 时优先通过本地代理访问教务和 CAS，代理不可用时自动回退 WebVPN。网络入口切换后需要为当前入口重新登录，避免混用 Cookie 和选课 token。
 
-Hy2 配置位于设置页的“网络代理”。默认从相邻的 GUET Hub Rust 工程构建 `hy2_serve`：
+Hy2 Rust 源码已经内置在项目中：
 
 ```text
-E:/project/guethub/rust_module/rust
+rust_module/hy2_proxy
 ```
 
-构建结果保存到 `data/hy2/hy2_serve.exe`，该目录已被 Git 忽略。GUET Hub 的节点配置仍保留在它自己的 Rust 二进制中，本项目只在内存中读取随机本地 SOCKS5 凭据，再提供仅监听 `127.0.0.1` 的 HTTP CONNECT 桥接。可用环境变量 `FUCKCLASSROOM_HY2_ENABLED`、`FUCKCLASSROOM_HY2_SOURCE_DIR` 和 `FUCKCLASSROOM_HY2_RUNNER_PATH` 覆盖本机设置。
+设置页不再要求填写 GUET Hub 或其他本地源码路径。安装 Rust 工具链后点击“构建内置组件”，产物会保存到已忽略的 `data/hy2/hy2_serve.exe`。运行时只在内存中读取随机本地 SOCKS5 凭据，并提供仅监听 `127.0.0.1` 的 HTTP CONNECT 桥接。仍可用环境变量 `FUCKCLASSROOM_HY2_ENABLED` 控制是否启用。
 
 未启用 Hy2 或代理启动失败时，校外访问继续使用独立的 WebVPN 会话：
 

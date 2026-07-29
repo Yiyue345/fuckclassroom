@@ -58,12 +58,11 @@
         </section>
 
         <section class="settings-section" id="network">
-          <div><h2>账号与网络</h2><p>统一账号同时用于课程录播与本科教务，校外教务访问可使用 Hy2 通道。</p></div>
+          <div><h2>账号与网络</h2><p>统一账号同时用于课程录播与本科教务，校外教务访问可使用内置 Hy2 通道。</p></div>
           <div class="fields">
             <label class="check-row"><input type="checkbox" name="hy2_enabled" {% if settings.hy2_enabled %}checked{% endif %}><span>启用 Hy2 教务代理</span></label>
-            <div class="field"><label for="hy2_source_dir">GUET Hub Rust 工程</label><input class="input mono" id="hy2_source_dir" name="hy2_source_dir" value="{{ settings.hy2_source_dir or hy2_status.source_dir }}"></div>
-            <div class="detail-grid"><div class="detail-item"><label>运行状态</label><strong>{{ hy2_status.message }}</strong></div><div class="detail-item"><label>代理组件</label><strong title="{{ hy2_status.runner_path }}">{% if hy2_status.running %}运行中{% elif hy2_status.runner_path %}{{ hy2_status.runner_path }}{% else %}未配置{% endif %}</strong></div></div>
-            <button class="btn" type="submit" form="hy2-build-form" data-task-submit><svg class="icon"><use href="/static/icons.svg#play"></use></svg>构建代理组件</button>
+            <div class="detail-grid"><div class="detail-item"><label>运行状态</label><strong>{{ hy2_status.message }}</strong></div><div class="detail-item"><label>Rust 模块</label><strong>项目内置</strong></div></div>
+            <button class="btn" type="submit" form="hy2-build-form" data-task-submit><svg class="icon"><use href="/static/icons.svg#play"></use></svg>构建内置组件</button>
             <div class="field-row"><div class="field"><label for="selection_username">统一桂电账号</label><input class="input mono" id="selection_username" name="selection_username" autocomplete="username" value="{{ selection_credentials.username }}"></div><div class="field"><label for="selection_password">统一桂电密码</label><input class="input mono" id="selection_password" name="selection_password" type="password" autocomplete="new-password" placeholder="{% if selection_credentials.is_saved %}已加密保存，留空保持不变{% else %}未保存{% endif %}"></div></div>
             <div class="detail-grid"><div class="detail-item"><label>自动登录</label><strong>{{ selection_credentials.message }}</strong></div><div class="detail-item"><label>保护方式</label><strong>Windows DPAPI</strong></div></div>
             {% if selection_credentials.is_saved %}

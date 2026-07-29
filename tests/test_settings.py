@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,6 +38,24 @@ class AutoSelectionSettingsTests(unittest.TestCase):
         self.assertEqual(updated.auto_selection_session_retry_seconds, 48)
         self.assertEqual(updated.auto_selection_capacity_retry_seconds, 75)
         self.assertEqual(restored, updated)
+
+    def test_legacy_hy2_source_path_is_removed_on_save(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "hy2_enabled": True,
+                        "hy2_source_dir": "E:/project/guethub/rust_module/rust",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = SettingsStore(path)
+
+            store.update_from_form({"hy2_enabled": "on"})
+
+            self.assertNotIn("hy2_source_dir", json.loads(path.read_text(encoding="utf-8")))
 
 
 if __name__ == "__main__":

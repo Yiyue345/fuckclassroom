@@ -94,16 +94,10 @@ class AppConfig:
 
     @property
     def hy2_source_dir(self) -> Path:
-        configured = os.getenv("FUCKCLASSROOM_HY2_SOURCE_DIR", self._settings().hy2_source_dir)
-        if configured:
-            return Path(configured).expanduser().resolve()
-        return (PROJECT_ROOT.parent / "guethub" / "rust_module" / "rust").resolve()
+        return PROJECT_ROOT / "rust_module" / "hy2_proxy"
 
     @property
     def hy2_runner_path(self) -> Path:
-        configured = os.getenv("FUCKCLASSROOM_HY2_RUNNER_PATH")
-        if configured:
-            return Path(configured).expanduser().resolve()
         runner_name = "hy2_serve.exe" if os.name == "nt" else "hy2_serve"
         return self.data_dir / "hy2" / runner_name
 

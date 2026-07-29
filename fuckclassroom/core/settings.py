@@ -20,7 +20,6 @@ class AppSettings:
     auto_open_outputs_after_extract: bool = False
     default_term_id: str = ""
     hy2_enabled: bool = False
-    hy2_source_dir: str = ""
     auto_selection_retry_seconds: int = 5
     auto_selection_session_retry_seconds: int = 30
     auto_selection_capacity_retry_seconds: int = 30
@@ -37,7 +36,6 @@ class AppSettings:
             auto_open_outputs_after_extract=_to_bool(data.get("auto_open_outputs_after_extract")),
             default_term_id=str(data.get("default_term_id") or ""),
             hy2_enabled=_to_bool(data.get("hy2_enabled")),
-            hy2_source_dir=str(data.get("hy2_source_dir") or "").strip(),
             auto_selection_retry_seconds=_bounded_int(
                 data.get("auto_selection_retry_seconds"),
                 cls.auto_selection_retry_seconds,
@@ -114,7 +112,6 @@ class SettingsStore:
                     "auto_selection_capacity_retry_seconds",
                     current.auto_selection_capacity_retry_seconds,
                 ),
-                "hy2_source_dir": form.get("hy2_source_dir", current.hy2_source_dir),
             }
         )
         self.save(settings)

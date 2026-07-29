@@ -113,21 +113,21 @@ class Hy2ProxyManager:
         source_dir = self.config.hy2_source_dir
         manifest = source_dir / "Cargo.toml"
         if not manifest.is_file():
-            raise Hy2ProxyError(f"没有找到 GUET Hub Rust 工程：{manifest}")
+            raise Hy2ProxyError(f"没有找到内置 Hy2 Rust 工程：{manifest}")
         cargo = shutil.which("cargo")
         if not cargo:
             raise Hy2ProxyError("没有找到 Cargo，请先安装 Rust 工具链")
 
         target_dir = self.config.data_dir / "hy2" / "build"
         target_dir.mkdir(parents=True, exist_ok=True)
-        _report(progress, 8, "正在编译 GUET Hub Hy2 代理组件")
+        _report(progress, 8, "正在编译内置 Hy2 代理组件")
         try:
             result = subprocess.run(
                 [
                     cargo,
                     "build",
                     "--release",
-                    "--example",
+                    "--bin",
                     "hy2_serve",
                     "--manifest-path",
                     str(manifest),
@@ -152,7 +152,7 @@ class Hy2ProxyManager:
             raise Hy2ProxyError(f"Hy2 代理组件构建失败：{detail or 'Cargo 返回非零状态'}")
 
         built_name = "hy2_serve.exe" if os.name == "nt" else "hy2_serve"
-        built_runner = target_dir / "release" / "examples" / built_name
+        built_runner = target_dir / "release" / built_name
         if not built_runner.is_file():
             raise Hy2ProxyError(f"构建完成但没有找到代理程序：{built_runner}")
         runner = self.config.hy2_runner_path

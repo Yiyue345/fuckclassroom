@@ -16,6 +16,7 @@ from fuckclassroom.config import AppConfig
 from fuckclassroom.course_selection import CourseSelectionAssistant, _selection_access
 from fuckclassroom.course_selection.proxy import (
     Hy2ProxyError,
+    Hy2ProxyManager,
     _ConnectProxyServer,
     _SocksEndpoint,
     _parse_authority,
@@ -91,6 +92,40 @@ class _FakeHy2Proxy:
 
 
 class Hy2ProxyTests(unittest.TestCase):
+    def test_config_uses_bundled_rust_source(self) -> None:
+        config = AppConfig()
+
+        self.assertEqual(
+            config.hy2_source_dir,
+            Path(__file__).resolve().parents[1] / "rust_module" / "hy2_proxy",
+        )
+        self.assertTrue((config.hy2_source_dir / "Cargo.toml").is_file())
+
+    def test_build_runner_compiles_bundled_binary(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            config = AppConfig(data_dir=Path(directory))
+            manager = Hy2ProxyManager(config)
+            built_name = "hy2_serve.exe" if config.hy2_runner_path.suffix == ".exe" else "hy2_serve"
+            built_runner = config.data_dir / "hy2" / "build" / "release" / built_name
+            built_runner.parent.mkdir(parents=True)
+            built_runner.write_bytes(b"runner")
+
+            with (
+                patch("fuckclassroom.course_selection.proxy.shutil.which", return_value="cargo"),
+                patch("fuckclassroom.course_selection.proxy.subprocess.run") as run,
+            ):
+                run.return_value.returncode = 0
+                run.return_value.stdout = ""
+                run.return_value.stderr = ""
+                manager.build_runner()
+
+            command = run.call_args.args[0]
+            self.assertIn("--bin", command)
+            self.assertIn("hy2_serve", command)
+            self.assertNotIn("--example", command)
+            self.assertEqual(Path(command[command.index("--manifest-path") + 1]), config.hy2_source_dir / "Cargo.toml")
+            self.assertEqual(config.hy2_runner_path.read_bytes(), b"runner")
+
     def test_connect_bridge_tunnels_data(self) -> None:
         socks = _FakeSocksServer(("127.0.0.1", 0), _FakeSocksHandler)
         socks_thread = threading.Thread(target=socks.serve_forever, daemon=True)
