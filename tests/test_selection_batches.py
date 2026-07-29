@@ -234,6 +234,29 @@ class SelectionBatchTests(unittest.TestCase):
         self.assertEqual(fetch_info.call_count, 2)
         verify.assert_called_once_with(timeout_ms=15_000, auto_relogin=True)
 
+    def test_empty_student_records_keep_session_valid(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = CourseSelectionAssistant(AppConfig(data_dir=Path(directory)))
+            with (
+                patch.object(
+                    assistant,
+                    "_fetch_selection_info_via_api",
+                    side_effect=CourseSelectionApiError(
+                        "选课接口没有返回可用的学生记录"
+                    ),
+                ),
+                patch.object(assistant, "verify_saved_session") as verify,
+                patch.object(assistant, "_write_session_check") as write_check,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "没有返回可用的学生记录"):
+                    assistant.refresh_selection_info_for_web()
+
+        verify.assert_not_called()
+        check = write_check.call_args.args[0]
+        self.assertTrue(check["is_valid"])
+        self.assertIn("教务会话有效", check["message"])
+
+
     def test_live_counts_retry_after_session_recovery(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             assistant = CourseSelectionAssistant(AppConfig(data_dir=Path(directory)))

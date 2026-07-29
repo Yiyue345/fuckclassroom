@@ -513,7 +513,17 @@ class SelectionApiMixin:
             )
         except CourseSelectionApiError as exc:
             message = str(exc)
-            self._write_session_check(_session_check(False, message, JW_WEBVPN_COURSE_SELECT_URL))
+            access = self._selection_access()
+            if any(marker in message for marker in _SELECTION_AUTH_FAILURE_MARKERS):
+                self._write_session_check(_session_check(False, message, access.course_select_url))
+            elif message == "选课接口没有返回可用的学生记录":
+                self._write_session_check(
+                    _session_check(
+                        True,
+                        f"{access.label}教务会话有效，当前没有可用选课学生记录",
+                        access.course_select_url,
+                    )
+                )
             raise RuntimeError(message) from exc
 
         _report(progress, 70, "正在整理教师、时间和容量信息")
