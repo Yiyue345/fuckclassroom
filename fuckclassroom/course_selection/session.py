@@ -388,11 +388,35 @@ class SelectionSessionMixin:
 
     def open_home_for_web(self, progress: ProgressCallback | None = None, timeout_ms: int = 1_800_000) -> str:
         _report(progress, 5, "正在验证本科教务系统")
-        return self._open_saved_session_page(self._selection_access().home_url, "本科教务会话可用", progress, timeout_ms)
+        error_url = self._verify_session_for_web(progress, timeout_ms)
+        if error_url:
+            return error_url
+        _report(progress, 100, "本科教务会话可用")
+        return "/selection"
 
     def open_course_select_for_web(self, progress: ProgressCallback | None = None, timeout_ms: int = 1_800_000) -> str:
         _report(progress, 5, "正在验证选课入口")
+        error_url = self._verify_session_for_web(progress, timeout_ms)
+        if error_url:
+            return error_url
         return self._open_saved_session_page(self._selection_access().course_select_url, "选课入口会话可用", progress, timeout_ms)
+
+    def _verify_session_for_web(
+        self,
+        progress: ProgressCallback | None,
+        timeout_ms: int,
+    ) -> str | None:
+        _report(progress, 15, "正在检查教务会话，失效时将自动重新登录")
+        status = self.verify_saved_session(
+            timeout_ms=min(timeout_ms, 15_000),
+            auto_relogin=True,
+        )
+        if status.is_valid is True:
+            _report(progress, 70, status.message)
+            return None
+        message = status.message or "会话已失效且自动登录失败，请手动登录"
+        _report(progress, 100, message)
+        return f"/selection?{urlencode({'select_error': message})}"
 
     def _open_saved_session_page(
         self,

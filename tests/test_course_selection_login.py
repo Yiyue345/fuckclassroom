@@ -66,6 +66,27 @@ class _InteractiveLoginAssistant(CourseSelectionAssistant):
         return "/selection"
 
 
+class _PageVerificationAssistant(CourseSelectionAssistant):
+    def __init__(self, config: AppConfig, status: WebVpnSessionStatus) -> None:
+        super().__init__(config, credential_store=_SavedCredentialStore())
+        self.status = status
+        self.verify_calls: list[tuple[int, bool]] = []
+        self.open_calls = 0
+
+    def verify_saved_session(
+        self,
+        timeout_ms: int = 15_000,
+        *,
+        auto_relogin: bool = True,
+    ) -> WebVpnSessionStatus:
+        self.verify_calls.append((timeout_ms, auto_relogin))
+        return self.status
+
+    def _open_saved_session_page(self, *args, **kwargs) -> str:
+        self.open_calls += 1
+        return "/selection"
+
+
 class _FakeVerificationPage:
     url = "http://cas.guet.edu.cn/authserver/login"
 
@@ -116,6 +137,38 @@ class CourseSelectionLoginTests(unittest.TestCase):
             self.assertFalse(check["is_valid"])
             self.assertIn("登录页", check["message"])
             self.assertNotIn("教务访问返回 405", check["message"])
+
+    def test_page_verification_automatically_recovers_before_opening(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = _PageVerificationAssistant(
+                AppConfig(data_dir=Path(directory)),
+                WebVpnSessionStatus(True, "Hy2 代理教务会话有效", is_valid=True),
+            )
+
+            home_result = assistant.open_home_for_web()
+            selection_result = assistant.open_course_select_for_web()
+
+            self.assertEqual(home_result, "/selection")
+            self.assertEqual(selection_result, "/selection")
+            self.assertEqual(assistant.verify_calls, [(15_000, True), (15_000, True)])
+            self.assertEqual(assistant.open_calls, 1)
+
+    def test_page_verification_returns_error_only_after_recovery_fails(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = _PageVerificationAssistant(
+                AppConfig(data_dir=Path(directory)),
+                WebVpnSessionStatus(
+                    True,
+                    "自动登录失败：统一认证要求输入图形验证码",
+                    is_valid=False,
+                ),
+            )
+
+            result = assistant.open_course_select_for_web()
+
+            self.assertIn("select_error=", result)
+            self.assertEqual(assistant.verify_calls, [(15_000, True)])
+            self.assertEqual(assistant.open_calls, 0)
 
 
 if __name__ == "__main__":
