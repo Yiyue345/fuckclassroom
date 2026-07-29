@@ -260,6 +260,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 "cache_error": request.query_params.get("cache_error"),
                 "credential_error": request.query_params.get("credential_error"),
                 "credentials_cleared": request.query_params.get("credentials_cleared") == "1",
+                "login_state_cleared": request.query_params.get("login_state_cleared") == "1",
+                "login_state_error": request.query_params.get("login_state_error"),
                 "selection_credentials": credential_store.public_status(),
                 "cache_info": cache_store.info(),
                 "hy2_status": hy2_proxy.get_status().to_dict(),
@@ -312,6 +314,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         except CredentialStoreError as exc:
             return RedirectResponse(f"/settings?credential_error={quote(str(exc))}", status_code=303)
         return RedirectResponse("/settings?credentials_cleared=1", status_code=303)
+
+    @app.post("/settings/login-state/clear")
+    def clear_login_state() -> RedirectResponse:
+        errors: list[str] = []
+        for clear in (auth_service.clear_session, course_selection.clear_session):
+            try:
+                clear()
+            except OSError as exc:
+                errors.append(str(exc))
+        if errors:
+            return RedirectResponse(
+                f"/settings?login_state_error={quote('; '.join(errors))}",
+                status_code=303,
+            )
+        return RedirectResponse("/settings?login_state_cleared=1", status_code=303)
+
     @app.post("/settings/cache/clear")
     def clear_cache() -> RedirectResponse:
         try:

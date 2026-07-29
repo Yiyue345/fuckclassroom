@@ -67,6 +67,19 @@ class SelectionSessionMixin:
     def get_credential_status(self) -> dict[str, object]:
         return self.credential_store.public_status()
 
+    def clear_session(self) -> None:
+        with self._login_lock:
+            with self._selection_token_lock:
+                self._selection_token = ""
+                self._selection_token_expires_at = 0.0
+                self._selection_token_mode = ""
+            for path in (
+                self.storage_state_path,
+                self.session_meta_path,
+                self.session_check_path,
+            ):
+                path.unlink(missing_ok=True)
+
     def verify_saved_session(
         self,
         timeout_ms: int = 15_000,
