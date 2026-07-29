@@ -11,6 +11,7 @@ from fuckclassroom.auth.cas import (
     LoginVerificationBroker,
     LoginVerificationError,
     run_sms_verification,
+    submit_saved_credentials,
 )
 from fuckclassroom.config import AppConfig
 from fuckclassroom.auth.credentials import SelectionCredentials
@@ -35,6 +36,50 @@ class _SavedCredentialStore:
         return SelectionCredentials("student-id", "saved-password")
 
 
+class _DelayedLoginLocator:
+    def __init__(self, page, selector: str) -> None:
+        self.page = page
+        self.selector = selector
+
+    def wait_for(self, *, state: str, timeout: int) -> None:
+        self.page.waited.append((self.selector, state, timeout))
+
+    def is_visible(self) -> bool:
+        return True
+
+    def fill(self, value: str) -> None:
+        self.page.filled[self.selector] = value
+
+    def count(self) -> int:
+        return 1
+
+    def is_checked(self) -> bool:
+        return False
+
+    def check(self) -> None:
+        self.page.remembered = True
+
+    def click(self) -> None:
+        self.page.submitted = True
+
+
+class _DelayedLoginPage:
+    def __init__(self) -> None:
+        self.waited: list[tuple[str, str, int]] = []
+        self.filled: dict[str, str] = {}
+        self.remembered = False
+        self.submitted = False
+
+    def locator(self, selector: str) -> _DelayedLoginLocator:
+        return _DelayedLoginLocator(self, selector)
+
+
+class _ManualLoginService(LoginSessionService):
+    def start_browser_login(self, progress=None, *, force_interactive: bool = False):
+        self.force_interactive = force_interactive
+        return SessionStatus(True, "logged in", cookie_count=1)
+
+
 class _AutoReloginService(LoginSessionService):
     def _verify_saved_session_once(self) -> SessionStatus:
         return SessionStatus(False, "expired")
@@ -46,6 +91,26 @@ class _AutoReloginService(LoginSessionService):
 
 
 class AuthVerificationTests(unittest.TestCase):
+    def test_saved_credentials_wait_for_delayed_cas_form(self) -> None:
+        page = _DelayedLoginPage()
+
+        submitted = submit_saved_credentials(page, SelectionCredentials("student-id", "saved-password"))
+
+        self.assertTrue(submitted)
+        self.assertEqual(len(page.waited), 3)
+        self.assertTrue(all(item[2] == 5_000 for item in page.waited))
+        self.assertTrue(page.remembered)
+        self.assertTrue(page.submitted)
+
+    def test_explicit_classroom_login_forces_visible_flow(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            service = _ManualLoginService(AppConfig(data_dir=Path(directory)))
+
+            result = service.login_for_web()
+
+            self.assertEqual(result, "/classroom#session")
+            self.assertTrue(service.force_interactive)
+
     def test_sms_challenge_sends_and_verifies_in_worker_thread(self) -> None:
         broker = LoginVerificationBroker()
         page = _FakeCasPage()

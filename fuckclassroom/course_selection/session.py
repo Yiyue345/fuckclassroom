@@ -149,6 +149,7 @@ class SelectionSessionMixin:
         force_interactive: bool = False,
     ) -> str:
         self._ensure_session_dir()
+        _report(progress, 1, "正在等待其他登录流程结束")
         with self._login_lock:
             try:
                 credentials = self.credential_store.load()

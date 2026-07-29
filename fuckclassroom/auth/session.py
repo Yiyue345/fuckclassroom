@@ -112,9 +112,15 @@ class LoginSessionService:
     def mark_login_started(self) -> None:
         self._write_login_status("running", "正在通过学校统一身份认证登录课程录播")
 
-    def start_browser_login(self, progress: ProgressCallback | None = None) -> SessionStatus:
+    def start_browser_login(
+        self,
+        progress: ProgressCallback | None = None,
+        *,
+        force_interactive: bool = False,
+    ) -> SessionStatus:
         self._ensure_auth_dir()
         self.mark_login_started()
+        _report(progress, 1, "正在等待其他登录流程结束")
         with self._login_lock:
             try:
                 credentials = self._load_credentials()
@@ -122,7 +128,7 @@ class LoginSessionService:
                 message = str(exc)
                 self._write_login_status("failed", message)
                 return SessionStatus(False, message)
-            if credentials is not None:
+            if credentials is not None and not force_interactive:
                 _report(progress, 5, "正在使用统一桂电账号自动登录课程录播")
                 status = self._start_browser_login(credentials, progress, headless=True)
                 if status.is_logged_in:
@@ -132,7 +138,7 @@ class LoginSessionService:
             return self._start_browser_login(credentials, progress, headless=False)
 
     def login_for_web(self, progress: ProgressCallback | None = None) -> str:
-        status = self.start_browser_login(progress)
+        status = self.start_browser_login(progress, force_interactive=True)
         if not status.is_logged_in:
             raise RuntimeError(status.message)
         return "/classroom#session"
@@ -151,7 +157,7 @@ class LoginSessionService:
         try:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=headless)
-                context = self._new_login_context(browser)
+                context = self._new_login_context(browser, reuse_saved_session=headless)
                 page = context.new_page()
                 page.goto(self.config.site_url, wait_until="domcontentloaded")
                 submitted = bool(credentials and submit_saved_credentials(page, credentials))
@@ -279,8 +285,8 @@ class LoginSessionService:
             return None
         return self.credential_store.load()
 
-    def _new_login_context(self, browser: Any) -> Any:
-        if self.config.storage_state_path.exists():
+    def _new_login_context(self, browser: Any, *, reuse_saved_session: bool = True) -> Any:
+        if reuse_saved_session and self.config.storage_state_path.exists():
             try:
                 return browser.new_context(storage_state=str(self.config.storage_state_path))
             except Exception:
@@ -325,6 +331,8 @@ class LoginSessionService:
                 page.goto(self.config.site_url, wait_until="domcontentloaded", timeout=30_000)
                 submitted = submit_saved_credentials(page, credentials) or submitted
                 continue
+            if headless and credentials and host == CAS_HOST and not submitted:
+                raise RuntimeError("统一认证页没有出现账号登录表单")
             reason = login_interaction_reason(page) if submitted else ""
             if reason and headless:
                 raise RuntimeError(reason)

@@ -132,6 +132,9 @@ def submit_saved_credentials(page: Any, credentials: SelectionCredentials) -> bo
         username = page.locator("#pwdFromId #username")
         password = page.locator("#pwdFromId #password")
         submit = page.locator("#login_submit")
+        username.wait_for(state="visible", timeout=5_000)
+        password.wait_for(state="visible", timeout=5_000)
+        submit.wait_for(state="visible", timeout=5_000)
         if not username.is_visible() or not password.is_visible() or not submit.is_visible():
             return False
         username.fill(credentials.username)
