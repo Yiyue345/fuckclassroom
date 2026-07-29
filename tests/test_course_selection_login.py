@@ -5,7 +5,11 @@ import unittest
 from pathlib import Path
 
 from fuckclassroom.config import AppConfig
-from fuckclassroom.course_selection import CourseSelectionAssistant, WebVpnSessionStatus
+from fuckclassroom.course_selection import (
+    CourseSelectionApiError,
+    CourseSelectionAssistant,
+    WebVpnSessionStatus,
+)
 from fuckclassroom.auth.credentials import SelectionCredentials
 
 
@@ -169,6 +173,42 @@ class CourseSelectionLoginTests(unittest.TestCase):
             self.assertIn("select_error=", result)
             self.assertEqual(assistant.verify_calls, [(15_000, True)])
             self.assertEqual(assistant.open_calls, 0)
+
+    def test_api_operation_retries_once_after_session_recovery(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = _PageVerificationAssistant(
+                AppConfig(data_dir=Path(directory)),
+                WebVpnSessionStatus(True, "Hy2 代理教务会话有效", is_valid=True),
+            )
+            attempts = 0
+
+            def operation() -> str:
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise CourseSelectionApiError("选课 token 已失效，请重新登录")
+                return "recovered"
+
+            result = assistant._run_with_session_recovery(operation)
+
+            self.assertEqual(result, "recovered")
+            self.assertEqual(attempts, 2)
+            self.assertEqual(assistant.verify_calls, [(15_000, True)])
+
+    def test_api_operation_does_not_relogin_for_business_failure(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = _PageVerificationAssistant(
+                AppConfig(data_dir=Path(directory)),
+                WebVpnSessionStatus(True, "Hy2 代理教务会话有效", is_valid=True),
+            )
+
+            def operation() -> str:
+                raise CourseSelectionApiError("课程容量已满")
+
+            with self.assertRaisesRegex(CourseSelectionApiError, "课程容量已满"):
+                assistant._run_with_session_recovery(operation)
+
+            self.assertEqual(assistant.verify_calls, [])
 
 
 if __name__ == "__main__":

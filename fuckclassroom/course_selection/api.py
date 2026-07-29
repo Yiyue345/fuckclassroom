@@ -9,7 +9,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from http.cookiejar import Cookie, CookieJar
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, HTTPCookieProcessor, ProxyHandler, Request, build_opener
@@ -27,7 +27,44 @@ from .proxy import Hy2ProxyError, Hy2ProxyManager
 from .helpers import *
 from .models import *
 
+
+_SELECTION_AUTH_FAILURE_MARKERS = (
+    "401",
+    "403",
+    "重新登录",
+    "登录页面",
+    "登录页",
+    "会话已失效",
+    "会话无效",
+    "token",
+)
+
+
 class SelectionApiMixin:
+    def _run_with_session_recovery(
+        self,
+        operation: Callable[[], Any],
+        *,
+        progress: ProgressCallback | None = None,
+        timeout_ms: int = 60_000,
+    ) -> Any:
+        try:
+            return operation()
+        except (CourseSelectionApiError, RuntimeError) as exc:
+            if not any(marker in str(exc) for marker in _SELECTION_AUTH_FAILURE_MARKERS):
+                raise
+            _report(progress, 18, "教务会话已失效，正在使用保存的账号自动登录")
+            self._invalidate_selection_token()
+            status = self.verify_saved_session(
+                timeout_ms=min(timeout_ms, 15_000),
+                auto_relogin=True,
+            )
+            if status.is_valid is not True:
+                message = status.message or str(exc)
+                raise type(exc)(message) from exc
+            _report(progress, 24, "登录状态已恢复，正在重试刚才的操作")
+            return operation()
+
     def list_captures(self) -> list[CaptureFile]:
         if not self.capture_dir.exists():
             return []
@@ -457,11 +494,15 @@ class SelectionApiMixin:
         _report(progress, 5, "正在读取 WebVPN 会话")
         timeout_seconds = max(5.0, min(timeout_ms / 1000, 60.0))
         try:
-            raw_info, batch = self._fetch_selection_info_via_api(
-                progress,
-                timeout_seconds,
-                student_id=student_id,
-                turn_id=turn_id,
+            raw_info, batch = self._run_with_session_recovery(
+                lambda: self._fetch_selection_info_via_api(
+                    progress,
+                    timeout_seconds,
+                    student_id=student_id,
+                    turn_id=turn_id,
+                ),
+                progress=progress,
+                timeout_ms=timeout_ms,
             )
         except CourseSelectionApiError as exc:
             message = str(exc)
@@ -479,6 +520,15 @@ class SelectionApiMixin:
         return result_url
 
     def get_live_selection_counts(self, timeout_ms: int = 60_000) -> dict[str, Any]:
+        return self._run_with_session_recovery(
+            lambda: self._get_live_selection_counts_once(timeout_ms),
+            timeout_ms=timeout_ms,
+        )
+
+    def _get_live_selection_counts_once(
+        self,
+        timeout_ms: int,
+    ) -> dict[str, Any]:
         info = self.get_selection_info("all")
         course_by_id: dict[int, dict[str, Any]] = {}
         for courses in info.sections.values():
@@ -536,12 +586,16 @@ class SelectionApiMixin:
         result_url: str = "/selection/info",
     ) -> str:
         with self._selection_action_lock:
-            return self._run_cached_lesson_action(
-                lesson_id=lesson_id,
-                action="select",
+            return self._run_with_session_recovery(
+                lambda: self._run_cached_lesson_action(
+                    lesson_id=lesson_id,
+                    action="select",
+                    progress=progress,
+                    timeout_ms=timeout_ms,
+                    result_url=result_url,
+                ),
                 progress=progress,
                 timeout_ms=timeout_ms,
-                result_url=result_url,
             )
 
     def drop_cached_lesson_for_web(
@@ -552,12 +606,16 @@ class SelectionApiMixin:
         result_url: str = "/selection/info/selected",
     ) -> str:
         with self._selection_action_lock:
-            return self._run_cached_lesson_action(
-                lesson_id=lesson_id,
-                action="drop",
+            return self._run_with_session_recovery(
+                lambda: self._run_cached_lesson_action(
+                    lesson_id=lesson_id,
+                    action="drop",
+                    progress=progress,
+                    timeout_ms=timeout_ms,
+                    result_url=result_url,
+                ),
                 progress=progress,
                 timeout_ms=timeout_ms,
-                result_url=result_url,
             )
 
     def select_lesson_for_batch_once(

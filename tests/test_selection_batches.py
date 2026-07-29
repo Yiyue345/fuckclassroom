@@ -12,6 +12,7 @@ from fuckclassroom.course_selection import (
     CourseSelectionApiError,
     CourseSelectionAssistant,
     SelectionBatch,
+    WebVpnSessionStatus,
     _selection_batches_from_api,
 )
 
@@ -157,6 +158,84 @@ class SelectionBatchTests(unittest.TestCase):
             student_id=1,
             turn_id=20,
         )
+
+    def test_refresh_retries_after_session_recovery(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = CourseSelectionAssistant(AppConfig(data_dir=Path(directory)))
+            batch = SelectionBatch(1, 20, "第二批次", "selected")
+            with (
+                patch.object(
+                    assistant,
+                    "_fetch_selection_info_via_api",
+                    side_effect=[
+                        CourseSelectionApiError("选课 token 已失效，请重新登录"),
+                        (
+                            {
+                                "turnId": 20,
+                                "studentId": 1,
+                                "title": "第二批次",
+                                "batches": [],
+                            },
+                            batch,
+                        ),
+                    ],
+                ) as fetch_info,
+                patch.object(
+                    assistant,
+                    "verify_saved_session",
+                    return_value=WebVpnSessionStatus(True, "会话有效", is_valid=True),
+                ) as verify,
+            ):
+                result = assistant.refresh_selection_info_for_web()
+
+        self.assertEqual(result, "/selection/info")
+        self.assertEqual(fetch_info.call_count, 2)
+        verify.assert_called_once_with(timeout_ms=15_000, auto_relogin=True)
+
+    def test_live_counts_retry_after_session_recovery(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = CourseSelectionAssistant(AppConfig(data_dir=Path(directory)))
+            expected = {"updated_at": "now", "courses": {}}
+            with (
+                patch.object(
+                    assistant,
+                    "_get_live_selection_counts_once",
+                    side_effect=[CourseSelectionApiError("教务接口返回 401"), expected],
+                ) as fetch_counts,
+                patch.object(
+                    assistant,
+                    "verify_saved_session",
+                    return_value=WebVpnSessionStatus(True, "会话有效", is_valid=True),
+                ) as verify,
+            ):
+                result = assistant.get_live_selection_counts()
+
+        self.assertEqual(result, expected)
+        self.assertEqual(fetch_counts.call_count, 2)
+        verify.assert_called_once_with(timeout_ms=15_000, auto_relogin=True)
+
+    def test_manual_selection_actions_retry_after_session_recovery(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = CourseSelectionAssistant(AppConfig(data_dir=Path(directory)))
+            for method_name in ("select_cached_lesson_for_web", "drop_cached_lesson_for_web"):
+                with (
+                    self.subTest(method=method_name),
+                    patch.object(
+                        assistant,
+                        "_run_cached_lesson_action",
+                        side_effect=[RuntimeError("会话已失效，请重新登录"), "/selection/info"],
+                    ) as action,
+                    patch.object(
+                        assistant,
+                        "verify_saved_session",
+                        return_value=WebVpnSessionStatus(True, "会话有效", is_valid=True),
+                    ) as verify,
+                ):
+                    result = getattr(assistant, method_name)(88)
+
+                self.assertEqual(result, "/selection/info")
+                self.assertEqual(action.call_count, 2)
+                verify.assert_called_once_with(timeout_ms=15_000, auto_relogin=True)
 
 if __name__ == "__main__":
     unittest.main()
