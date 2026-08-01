@@ -108,8 +108,81 @@ class _FakeVerificationPage:
         }
 
 
+class _FakeLdapLocator:
+    def __init__(self, page, selector: str) -> None:
+        self.page = page
+        self.selector = selector
+
+    @property
+    def first(self):
+        return self
+
+    def count(self) -> int:
+        return int(self.selector in self.page.visible_selectors)
+
+    def wait_for(self, *, state: str, timeout: int) -> None:
+        self.page.waited.append((self.selector, state, timeout))
+
+    def is_visible(self) -> bool:
+        return self.selector in self.page.visible_selectors
+
+    def fill(self, value: str) -> None:
+        self.page.filled[self.selector] = value
+
+    def evaluate(self, _script: str) -> None:
+        self.page.submitted = True
+
+    def inner_text(self) -> str:
+        return self.page.error_text
+
+
+class _FakeLdapPage:
+    url = "https://bkjwtest.guet.edu.cn/student/ldap/login"
+
+    def __init__(self, *visible_selectors: str, error_text: str = "") -> None:
+        self.visible_selectors = set(visible_selectors)
+        self.error_text = error_text
+        self.waited: list[tuple[str, str, int]] = []
+        self.filled: dict[str, str] = {}
+        self.submitted = False
+
+    def locator(self, selector: str) -> _FakeLdapLocator:
+        return _FakeLdapLocator(self, selector)
+
+
 
 class CourseSelectionLoginTests(unittest.TestCase):
+    def test_public_ldap_form_uses_saved_credentials(self) -> None:
+        page = _FakeLdapPage(
+            'input[placeholder="用户名"]',
+            'input[placeholder="密码"]',
+            'button:has-text("登录")',
+        )
+
+        submitted = CourseSelectionAssistant._submit_saved_credentials(
+            page,
+            SelectionCredentials("student-id", "saved-password"),
+        )
+
+        self.assertTrue(submitted)
+        self.assertEqual(page.filled['input[placeholder="用户名"]'], "student-id")
+        self.assertEqual(page.filled['input[placeholder="密码"]'], "saved-password")
+        self.assertTrue(page.submitted)
+
+    def test_public_ldap_interaction_reason_exposes_captcha_and_error(self) -> None:
+        captcha_page = _FakeLdapPage('input[placeholder="验证码"]')
+        error_page = _FakeLdapPage(".text-danger", error_text="认证服务暂不可用")
+
+        self.assertEqual(
+            CourseSelectionAssistant._login_interaction_reason(captcha_page),
+            "公网教务登录要求输入图形验证码",
+        )
+        self.assertEqual(
+            CourseSelectionAssistant._login_interaction_reason(error_page),
+            "公网教务返回：认证服务暂不可用",
+        )
+
+
     def test_expired_session_uses_saved_credentials_once(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             assistant = _AutoReloginAssistant(AppConfig(data_dir=Path(directory)))

@@ -354,10 +354,35 @@ class SelectionSessionMixin:
 
     @staticmethod
     def _submit_saved_credentials(page: Any, credentials: SelectionCredentials) -> bool:
+        try:
+            username = page.locator('input[placeholder="用户名"]')
+            if "/student/ldap/login" in str(page.url):
+                password = page.locator('input[placeholder="密码"]')
+                submit = page.locator('button:has-text("登录")').first
+                username.wait_for(state="visible", timeout=5_000)
+                password.wait_for(state="visible", timeout=5_000)
+                submit.wait_for(state="visible", timeout=5_000)
+                username.fill(credentials.username)
+                password.fill(credentials.password)
+                submit.evaluate("element => setTimeout(() => element.click(), 0)")
+                return True
+        except Exception:
+            return False
         return submit_saved_credentials(page, credentials)
 
     @staticmethod
     def _login_interaction_reason(page: Any) -> str:
+        try:
+            captcha = page.locator('input[placeholder="验证码"]')
+            if captcha.count() and captcha.is_visible():
+                return "公网教务登录要求输入图形验证码"
+            error_tip = page.locator(".text-danger")
+            if error_tip.count() and error_tip.is_visible():
+                message = error_tip.inner_text().strip()
+                if message:
+                    return f"公网教务返回：{message}"
+        except Exception:
+            pass
         return login_interaction_reason(page)
 
     def _goto_login_page(self, page: Any, url: str, timeout_ms: int) -> None:
