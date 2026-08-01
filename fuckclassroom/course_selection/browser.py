@@ -771,6 +771,10 @@ class SelectionBrowserMixin:
         )
 
     def _playwright_proxy_options(self, access: SelectionAccess) -> dict[str, Any]:
+        if access.mode == "public":
+            return {
+                "args": ["--proxy-server=direct://", "--proxy-bypass-list=*"],
+            }
         if access.mode != "hy2":
             return {}
         return {"proxy": {"server": self.hy2_proxy.ensure_started()}}

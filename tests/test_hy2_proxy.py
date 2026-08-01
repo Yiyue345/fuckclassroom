@@ -176,6 +176,34 @@ class Hy2ProxyTests(unittest.TestCase):
         self.assertTrue(access.login_url.endswith("/student/ldap/login"))
         self.assertIn("bkjwtest.guet.edu.cn", access.api_base_url)
 
+    def test_public_playwright_bypasses_system_proxy(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = CourseSelectionAssistant(AppConfig(data_dir=Path(directory)))
+
+            self.assertEqual(
+                assistant._playwright_proxy_options(_selection_access("public")),
+                {
+                    "args": ["--proxy-server=direct://", "--proxy-bypass-list=*"],
+                },
+            )
+            self.assertEqual(
+                assistant._playwright_proxy_options(_selection_access("campus")),
+                {},
+            )
+
+    def test_hy2_playwright_uses_managed_proxy(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            proxy = _FakeHy2Proxy()
+            assistant = CourseSelectionAssistant(
+                AppConfig(data_dir=Path(directory)), hy2_proxy=proxy
+            )
+
+            self.assertEqual(
+                assistant._playwright_proxy_options(_selection_access("hy2")),
+                {"proxy": {"server": "http://127.0.0.1:19090"}},
+            )
+            self.assertEqual(proxy.starts, 1)
+
     def test_detection_uses_hy2_after_direct_probe_fails(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             config = _hy2_config(Path(directory))
