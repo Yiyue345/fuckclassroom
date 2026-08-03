@@ -27,6 +27,17 @@ from .proxy import Hy2ProxyError, Hy2ProxyManager
 from .helpers import *
 from .models import *
 
+PUBLIC_LDAP_LOGIN_TIMEOUT_MS = 45_000
+
+
+def _interactive_login_timeout_ms(
+    access: SelectionAccess, submitted: bool, timeout_ms: int
+) -> int:
+    if access.mode == "public" and submitted:
+        return min(timeout_ms, PUBLIC_LDAP_LOGIN_TIMEOUT_MS)
+    return timeout_ms
+
+
 class SelectionSessionMixin:
     def get_session_status(self) -> WebVpnSessionStatus:
         access = self._selection_access()
@@ -216,10 +227,12 @@ class SelectionSessionMixin:
                 context = self._new_login_context(browser, reuse_saved_session=reuse_saved_session)
                 page = context.new_page()
                 self._goto_login_page(page, access.login_url, timeout_ms)
-                if credentials and self._submit_saved_credentials(page, credentials):
+                submitted = bool(credentials and self._submit_saved_credentials(page, credentials))
+                if submitted:
                     _report(progress, 15, "已填入保存的账号密码，正在等待统一认证")
                 _report(progress, 20, f"请在弹出的浏览器中完成{access.label}统一身份认证，认证成功后程序会自动保存并关闭窗口")
-                deadline = datetime.now(timezone.utc).timestamp() + timeout_ms / 1000
+                wait_timeout_ms = _interactive_login_timeout_ms(access, submitted, timeout_ms)
+                deadline = datetime.now(timezone.utc).timestamp() + wait_timeout_ms / 1000
                 next_home_attempt_at = 0.0
                 while datetime.now(timezone.utc).timestamp() < deadline:
                     if page.is_closed():
@@ -267,6 +280,13 @@ class SelectionSessionMixin:
                             pass
                         continue
                     page.wait_for_timeout(500)
+                if access.mode == "public" and submitted:
+                    browser.close()
+                    message = "公网教务 LDAP 登录接口长时间没有响应，请稍后重试"
+                    self._write_session_check(
+                        _session_check(False, message, access.login_url)
+                    )
+                    raise CourseSelectionApiError(message)
                 context.storage_state(path=str(self.storage_state_path))
                 self._write_session_meta(page.url if not page.is_closed() else "")
                 browser.close()

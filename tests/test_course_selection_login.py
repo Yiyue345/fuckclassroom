@@ -9,6 +9,11 @@ from fuckclassroom.course_selection import (
     CourseSelectionApiError,
     CourseSelectionAssistant,
     WebVpnSessionStatus,
+    _selection_access,
+)
+from fuckclassroom.course_selection.session import (
+    PUBLIC_LDAP_LOGIN_TIMEOUT_MS,
+    _interactive_login_timeout_ms,
 )
 from fuckclassroom.auth.credentials import SelectionCredentials
 
@@ -152,6 +157,23 @@ class _FakeLdapPage:
 
 
 class CourseSelectionLoginTests(unittest.TestCase):
+    def test_public_ldap_auto_submit_uses_bounded_wait(self) -> None:
+        public = _selection_access("public")
+        webvpn = _selection_access("webvpn")
+
+        self.assertEqual(
+            _interactive_login_timeout_ms(public, True, 600_000),
+            PUBLIC_LDAP_LOGIN_TIMEOUT_MS,
+        )
+        self.assertEqual(
+            _interactive_login_timeout_ms(public, False, 600_000),
+            600_000,
+        )
+        self.assertEqual(
+            _interactive_login_timeout_ms(webvpn, True, 600_000),
+            600_000,
+        )
+
     def test_public_ldap_form_uses_saved_credentials(self) -> None:
         page = _FakeLdapPage(
             'input[placeholder="用户名"]',
