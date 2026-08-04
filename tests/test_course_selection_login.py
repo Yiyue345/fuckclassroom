@@ -32,8 +32,11 @@ class _AutoReloginAssistant(CourseSelectionAssistant):
         super().__init__(config, credential_store=_SavedCredentialStore())
         self.login_calls = 0
         self.verify_calls = 0
+        self.verify_timeouts: list[int] = []
+        self.login_timeout_ms: int | None = None
 
     def _verify_saved_session_once(self, timeout_ms: int) -> WebVpnSessionStatus:
+        self.verify_timeouts.append(timeout_ms)
         self.verify_calls += 1
         if self.verify_calls == 1:
             return WebVpnSessionStatus(True, "expired", is_valid=False)
@@ -46,6 +49,7 @@ class _AutoReloginAssistant(CourseSelectionAssistant):
         timeout_ms: int,
     ) -> None:
         self.login_calls += 1
+        self.login_timeout_ms = timeout_ms
         self.assert_credentials = credentials
 
 class _InteractiveLoginAssistant(CourseSelectionAssistant):
@@ -254,11 +258,14 @@ class CourseSelectionLoginTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             assistant = _AutoReloginAssistant(AppConfig(data_dir=Path(directory)))
 
-            status = assistant.verify_saved_session()
+            status = assistant.verify_saved_session(timeout_ms=15_000)
 
             self.assertTrue(status.is_valid)
             self.assertEqual(assistant.login_calls, 1)
             self.assertEqual(assistant.verify_calls, 2)
+            self.assertEqual(assistant.verify_timeouts, [5_000, 5_000])
+            self.assertIsNotNone(assistant.login_timeout_ms)
+            self.assertLessEqual(assistant.login_timeout_ms, 15_000)
             self.assertEqual(assistant.assert_credentials.username, "student-id")
 
     def test_explicit_login_skips_headless_attempt_and_uses_clean_context(self) -> None:

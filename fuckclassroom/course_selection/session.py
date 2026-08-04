@@ -98,7 +98,8 @@ class SelectionSessionMixin:
         auto_relogin: bool = True,
     ) -> WebVpnSessionStatus:
         with self._login_lock:
-            status = self._verify_saved_session_once(timeout_ms)
+            deadline = time.monotonic() + max(1.0, timeout_ms / 1000)
+            status = self._verify_saved_session_once(min(timeout_ms, 5_000))
             if status.is_valid is True or not auto_relogin:
                 return status
             try:
@@ -108,12 +109,18 @@ class SelectionSessionMixin:
                 return self.get_session_status()
             if credentials is None:
                 return status
+            remaining_ms = int(max(0.0, deadline - time.monotonic()) * 1000)
+            if remaining_ms < 1_000:
+                return status
             try:
-                self._login_with_saved_credentials(credentials, timeout_ms=max(timeout_ms, 45_000))
+                self._login_with_saved_credentials(credentials, timeout_ms=remaining_ms)
             except CourseSelectionApiError as exc:
                 self._write_session_check(_session_check(False, f"自动登录失败：{exc}"))
                 return self.get_session_status()
-            return self._verify_saved_session_once(timeout_ms)
+            remaining_ms = int(max(0.0, deadline - time.monotonic()) * 1000)
+            if remaining_ms < 1_000:
+                return self.get_session_status()
+            return self._verify_saved_session_once(min(remaining_ms, 5_000))
 
     def _verify_saved_session_once(self, timeout_ms: int) -> WebVpnSessionStatus:
         status = self.get_session_status()
@@ -306,6 +313,7 @@ class SelectionSessionMixin:
         self._ensure_session_dir()
         access = self._selection_access(force=True)
         self._invalidate_selection_token()
+        deadline = time.monotonic() + max(1.0, min(timeout_ms / 1000, 60.0))
         with self._playwright() as playwright:
             browser = playwright.chromium.launch(
                 headless=True,
@@ -321,7 +329,6 @@ class SelectionSessionMixin:
                 if not self._submit_saved_credentials(page, credentials):
                     raise CourseSelectionApiError("统一认证页没有出现账号登录表单")
 
-                deadline = time.monotonic() + max(10.0, min(timeout_ms / 1000, 60.0))
                 next_home_attempt_at = 0.0
                 while time.monotonic() < deadline:
                     open_pages = [item for item in context.pages if not item.is_closed()]
@@ -339,7 +346,8 @@ class SelectionSessionMixin:
                             "本科教务",
                             progress,
                         )
-                        self._goto_login_page(page, access.login_url, min(timeout_ms, 30_000))
+                        remaining_ms = max(1_000, int((deadline - time.monotonic()) * 1000))
+                        self._goto_login_page(page, access.login_url, min(remaining_ms, 30_000))
                         if not self._looks_like_jw_home(page):
                             self._submit_saved_credentials(page, credentials)
                         continue
@@ -355,7 +363,8 @@ class SelectionSessionMixin:
                         and now >= next_home_attempt_at
                     ):
                         next_home_attempt_at = now + 3
-                        self._goto_login_page(page, access.home_url, min(timeout_ms, 30_000))
+                        remaining_ms = max(1_000, int((deadline - time.monotonic()) * 1000))
+                        self._goto_login_page(page, access.home_url, min(remaining_ms, 30_000))
                         continue
                     page.wait_for_timeout(400)
                 context.storage_state(path=str(self.storage_state_path))

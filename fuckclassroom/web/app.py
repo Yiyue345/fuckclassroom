@@ -106,14 +106,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
 
     def verify_classroom_session():
-        return auth_service.verify_saved_session()
+        return auth_service.verify_saved_session(auto_relogin=False)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         async def verify_saved_sessions() -> None:
             results = await asyncio.gather(
                 asyncio.to_thread(verify_classroom_session),
-                asyncio.to_thread(course_selection.verify_saved_session),
+                asyncio.to_thread(
+                    course_selection.verify_saved_session,
+                    auto_relogin=False,
+                ),
                 return_exceptions=True,
             )
             labels = ("课程录播", "WebVPN/教务")
