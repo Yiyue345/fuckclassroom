@@ -16,6 +16,7 @@ from fuckclassroom.course_selection.session import (
     _interactive_login_timeout_ms,
 )
 from fuckclassroom.auth.credentials import SelectionCredentials
+from fuckclassroom.web.app import _login_and_refresh_selection_info
 
 
 class _SavedCredentialStore:
@@ -73,6 +74,25 @@ class _InteractiveLoginAssistant(CourseSelectionAssistant):
         self.interactive_credentials = credentials
         self.reused_saved_session = reuse_saved_session
         return "/selection"
+
+
+class _LoginRefreshAssistant:
+    def __init__(self, *, fail_login: bool = False) -> None:
+        self.fail_login = fail_login
+        self.calls: list[str] = []
+
+    def login_for_web(self, *, progress, force_interactive: bool) -> str:
+        self.calls.append("login")
+        if self.fail_login:
+            raise CourseSelectionApiError("登录失败")
+        self.force_interactive = force_interactive
+        progress(100, "登录成功")
+        return "/selection"
+
+    def refresh_selection_info_for_web(self, *, progress, result_url: str) -> str:
+        self.calls.append("refresh")
+        progress(100, "批次已刷新")
+        return result_url
 
 
 class _PageVerificationAssistant(CourseSelectionAssistant):
@@ -157,6 +177,31 @@ class _FakeLdapPage:
 
 
 class CourseSelectionLoginTests(unittest.TestCase):
+    def test_successful_login_refreshes_selection_info(self) -> None:
+        assistant = _LoginRefreshAssistant()
+        updates: list[tuple[int, str]] = []
+
+        result = _login_and_refresh_selection_info(
+            assistant,
+            lambda value, message: updates.append((value, message)),
+        )
+
+        self.assertEqual(result, "/selection")
+        self.assertEqual(assistant.calls, ["login", "refresh"])
+        self.assertTrue(assistant.force_interactive)
+        self.assertEqual([value for value, _ in updates], [70, 100])
+
+    def test_failed_login_does_not_refresh_selection_info(self) -> None:
+        assistant = _LoginRefreshAssistant(fail_login=True)
+
+        with self.assertRaisesRegex(CourseSelectionApiError, "登录失败"):
+            _login_and_refresh_selection_info(
+                assistant,
+                lambda _value, _message: None,
+            )
+
+        self.assertEqual(assistant.calls, ["login"])
+
     def test_public_ldap_auto_submit_uses_bounded_wait(self) -> None:
         public = _selection_access("public")
         webvpn = _selection_access("webvpn")

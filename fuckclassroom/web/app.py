@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qs
 from urllib.parse import quote
@@ -34,6 +35,26 @@ from ..course_selection.proxy import Hy2ProxyManager
 
 templates = Jinja2Templates(directory=str(PROJECT_ROOT / "templates"))
 logger = logging.getLogger(__name__)
+
+
+def _login_and_refresh_selection_info(
+    course_selection: CourseSelectionAssistant,
+    progress: Callable[[int, str], None],
+) -> str:
+    def login_progress(value: int, message: str) -> None:
+        progress(round(value * 0.7), message)
+
+    def refresh_progress(value: int, message: str) -> None:
+        progress(70 + round(value * 0.3), message)
+
+    result_url = course_selection.login_for_web(
+        progress=login_progress,
+        force_interactive=True,
+    )
+    return course_selection.refresh_selection_info_for_web(
+        progress=refresh_progress,
+        result_url=result_url,
+    )
 
 
 def _unified_credential_path(config: AppConfig):
@@ -635,7 +656,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def start_webvpn_login(request: Request) -> Response:
         task = task_manager.start(
             "本科教务登录",
-            lambda progress: course_selection.login_for_web(progress=progress, force_interactive=True),
+            lambda progress: _login_and_refresh_selection_info(course_selection, progress),
         )
         return task_started_response(request, task, "/selection")
 
