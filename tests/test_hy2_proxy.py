@@ -214,7 +214,7 @@ class Hy2ProxyTests(unittest.TestCase):
             ):
                 self.assertEqual(assistant._detect_access_mode(force=True), "hy2")
 
-    def test_detection_uses_public_ldap_before_hy2(self) -> None:
+    def test_detection_prefers_hy2_before_public_ldap(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             config = _hy2_config(Path(directory))
             proxy = _FakeHy2Proxy()
@@ -223,8 +223,21 @@ class Hy2ProxyTests(unittest.TestCase):
                 "fuckclassroom.course_selection.browser.build_opener",
                 side_effect=[_FailingOpener(), _SuccessfulOpener()],
             ):
+                self.assertEqual(assistant._detect_access_mode(force=True), "hy2")
+            self.assertEqual(proxy.starts, 1)
+
+    def test_detection_uses_public_ldap_when_hy2_cannot_start(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            config = _hy2_config(Path(directory))
+            assistant = CourseSelectionAssistant(
+                config,
+                hy2_proxy=_FakeHy2Proxy(Hy2ProxyError("unavailable")),
+            )
+            with patch(
+                "fuckclassroom.course_selection.browser.build_opener",
+                side_effect=[_FailingOpener(), _SuccessfulOpener()],
+            ):
                 self.assertEqual(assistant._detect_access_mode(force=True), "public")
-            self.assertEqual(proxy.starts, 0)
 
     def test_detection_falls_back_when_hy2_cannot_start(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:

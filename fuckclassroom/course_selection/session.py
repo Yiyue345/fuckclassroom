@@ -234,18 +234,28 @@ class SelectionSessionMixin:
                 context = self._new_login_context(browser, reuse_saved_session=reuse_saved_session)
                 page = context.new_page()
                 self._goto_login_page(page, access.login_url, timeout_ms)
-                submitted = bool(credentials and self._submit_saved_credentials(page, credentials))
-                if submitted:
-                    _report(progress, 15, "已填入保存的账号密码，正在等待统一认证")
+                filled = False
+                submitted = False
+                if credentials:
+                    if access.mode == "public":
+                        filled = self._fill_public_credentials(page, credentials)
+                    else:
+                        submitted = self._submit_saved_credentials(page, credentials)
+                        filled = submitted
+                if filled:
+                    message = (
+                        "已填入保存的账号密码，请确认后登录"
+                        if access.mode == "public"
+                        else "已填入保存的账号密码，正在等待统一认证"
+                    )
+                    _report(progress, 15, message)
                 _report(progress, 20, f"请在弹出的浏览器中完成{access.label}统一身份认证，认证成功后程序会自动保存并关闭窗口")
                 wait_timeout_ms = _interactive_login_timeout_ms(access, submitted, timeout_ms)
                 deadline = datetime.now(timezone.utc).timestamp() + wait_timeout_ms / 1000
                 next_home_attempt_at = 0.0
                 while datetime.now(timezone.utc).timestamp() < deadline:
                     if page.is_closed():
-                        context.storage_state(path=str(self.storage_state_path))
-                        self._write_session_meta("")
-                        self._write_access_mode(access.mode)
+                        self._save_closed_login_context(context, access)
                         browser.close()
                         _report(progress, 100, "浏览器已关闭，会话已尽量保存")
                         return "/selection"
@@ -286,7 +296,14 @@ class SelectionSessionMixin:
                         except Exception:  # The navigation may continue after Playwright times out.
                             pass
                         continue
-                    page.wait_for_timeout(500)
+                    try:
+                        page.wait_for_timeout(500)
+                    except Exception as exc:
+                        if "closed" not in str(exc).lower():
+                            raise
+                        self._save_closed_login_context(context, access)
+                        _report(progress, 100, "浏览器已关闭，会话已尽量保存")
+                        return "/selection"
                 if access.mode == "public" and submitted:
                     browser.close()
                     message = "公网教务 LDAP 登录接口长时间没有响应，请稍后重试"
@@ -382,22 +399,43 @@ class SelectionSessionMixin:
         return browser.new_context()
 
     @staticmethod
-    def _submit_saved_credentials(page: Any, credentials: SelectionCredentials) -> bool:
+    def _fill_public_credentials(page: Any, credentials: SelectionCredentials) -> bool:
         try:
             username = page.locator('input[placeholder="用户名"]')
+            password = page.locator('input[placeholder="密码"]')
+            username.wait_for(state="visible", timeout=5_000)
+            password.wait_for(state="visible", timeout=5_000)
+            username.fill(credentials.username)
+            password.fill(credentials.password)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _submit_saved_credentials(page: Any, credentials: SelectionCredentials) -> bool:
+        try:
             if "/student/ldap/login" in str(page.url):
-                password = page.locator('input[placeholder="密码"]')
                 submit = page.locator('button:has-text("登录")').first
-                username.wait_for(state="visible", timeout=5_000)
-                password.wait_for(state="visible", timeout=5_000)
                 submit.wait_for(state="visible", timeout=5_000)
-                username.fill(credentials.username)
-                password.fill(credentials.password)
+                if not SelectionSessionMixin._fill_public_credentials(page, credentials):
+                    return False
                 submit.evaluate("element => setTimeout(() => element.click(), 0)")
                 return True
         except Exception:
             return False
         return submit_saved_credentials(page, credentials)
+
+    def _save_closed_login_context(
+        self,
+        context: Any,
+        access: SelectionAccess,
+    ) -> None:
+        try:
+            context.storage_state(path=str(self.storage_state_path))
+        except Exception:
+            pass
+        self._write_session_meta("")
+        self._write_access_mode(access.mode)
 
     @staticmethod
     def _login_interaction_reason(page: Any) -> str:

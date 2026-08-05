@@ -715,23 +715,6 @@ class SelectionBrowserMixin:
                         mode = "campus"
             except (HTTPError, URLError, TimeoutError, OSError):
                 pass
-            if mode == "webvpn":
-                public_request = Request(
-                    JW_PUBLIC_LOGIN_URL,
-                    headers={"User-Agent": "Mozilla/5.0", "Accept": "text/html,*/*"},
-                )
-                try:
-                    with build_opener(_NoRedirectHandler()).open(
-                        public_request,
-                        timeout=2,
-                    ) as response:
-                        if 200 <= int(response.status) < 400:
-                            mode = "public"
-                except HTTPError as exc:
-                    if 300 <= exc.code < 400:
-                        mode = "public"
-                except (URLError, TimeoutError, OSError):
-                    pass
             if mode == "webvpn" and self.config.hy2_enabled:
                 try:
                     proxy_url = self.hy2_proxy.ensure_started()
@@ -751,6 +734,23 @@ class SelectionBrowserMixin:
                         if 300 <= exc.code < 500:
                             mode = "hy2"
                 except (Hy2ProxyError, URLError, TimeoutError, OSError):
+                    pass
+            if mode == "webvpn":
+                public_request = Request(
+                    JW_PUBLIC_LOGIN_URL,
+                    headers={"User-Agent": "Mozilla/5.0", "Accept": "text/html,*/*"},
+                )
+                try:
+                    with build_opener(_NoRedirectHandler()).open(
+                        public_request,
+                        timeout=2,
+                    ) as response:
+                        if 200 <= int(response.status) < 400:
+                            mode = "public"
+                except HTTPError as exc:
+                    if 300 <= exc.code < 400:
+                        mode = "public"
+                except (URLError, TimeoutError, OSError):
                     pass
             self._access_mode = mode
             self._access_mode_checked_at = now

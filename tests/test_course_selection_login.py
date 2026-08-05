@@ -240,6 +240,22 @@ class CourseSelectionLoginTests(unittest.TestCase):
         self.assertEqual(page.filled['input[placeholder="密码"]'], "saved-password")
         self.assertTrue(page.submitted)
 
+    def test_public_ldap_manual_login_only_prefills_saved_credentials(self) -> None:
+        page = _FakeLdapPage(
+            'input[placeholder="用户名"]',
+            'input[placeholder="密码"]',
+        )
+
+        filled = CourseSelectionAssistant._fill_public_credentials(
+            page,
+            SelectionCredentials("student-id", "saved-password"),
+        )
+
+        self.assertTrue(filled)
+        self.assertEqual(page.filled['input[placeholder="用户名"]'], "student-id")
+        self.assertEqual(page.filled['input[placeholder="密码"]'], "saved-password")
+        self.assertFalse(page.submitted)
+
     def test_public_ldap_interaction_reason_exposes_captcha_and_error(self) -> None:
         captcha_page = _FakeLdapPage('input[placeholder="验证码"]')
         error_page = _FakeLdapPage(".text-danger", error_text="认证服务暂不可用")
