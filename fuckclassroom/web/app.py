@@ -456,6 +456,160 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             },
         )
 
+    @app.get("/selection/catalog", response_class=HTMLResponse)
+    def selection_catalog(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "selection_catalog.html",
+            {
+                "session": course_selection.get_session_status(),
+                "catalog_targets": settings_store.load().catalog_lesson_name_targets,
+            },
+        )
+
+    @app.get("/api/selection/catalog")
+    def selection_catalog_api(request: Request) -> JSONResponse:
+        allowed = {
+            "semester_id",
+            "course_code",
+            "course_name",
+            "lesson_code",
+            "lesson_name",
+            "room",
+            "teacher_id",
+            "department_id",
+            "campus_id",
+            "course_type_id",
+            "exam_mode_id",
+            "grade",
+            "week_start",
+            "week_end",
+            "weekday",
+            "max_count_min",
+            "max_count_max",
+            "selected_count_min",
+            "selected_count_max",
+            "credits_min",
+            "credits_max",
+            "compulsory",
+        }
+        filters = {
+            key: request.query_params.get(key, "")
+            for key in allowed
+            if request.query_params.get(key, "") != ""
+        }
+        filters["periods"] = request.query_params.getlist("periods")
+        try:
+            page = int(request.query_params.get("page", "1"))
+            page_size = int(request.query_params.get("page_size", "50"))
+            targets = settings_store.load().catalog_lesson_name_targets
+            targets_only = request.query_params.get("targets_only") == "1" and bool(targets)
+            if targets_only and targets:
+                merged: dict[int, dict[str, object]] = {}
+                first_result = None
+                for target in targets:
+                    target_filters = dict(filters)
+                    target_filters["lesson_name"] = target
+                    result = course_selection.query_whole_school_courses(
+                        target_filters,
+                        page=1,
+                        page_size=100,
+                    )
+                    if first_result is None:
+                        first_result = result
+                    for course in result["courses"]:
+                        lesson_id = course.get("lesson_id")
+                        if isinstance(lesson_id, int):
+                            merged[lesson_id] = course
+                result = first_result or course_selection.query_whole_school_courses(
+                    filters,
+                    page=1,
+                    page_size=20,
+                )
+                result["courses"] = list(merged.values())
+                total = len(result["courses"])
+                result["pagination"] = {
+                    "page": 1,
+                    "page_size": total or 1,
+                    "total": total,
+                    "pages": 1,
+                }
+            else:
+                result = course_selection.query_whole_school_courses(
+                    filters,
+                    page=page,
+                    page_size=page_size,
+                )
+            queued_ids = auto_selection.active_lesson_ids()
+            for course in result["courses"]:
+                lesson_name = str(course.get("lesson_name") or "").casefold()
+                course["matched_targets"] = [
+                    target for target in targets if target.casefold() in lesson_name
+                ]
+                course["is_queued"] = course.get("lesson_id") in queued_ids
+            result["targets"] = list(targets)
+            result["targets_only"] = targets_only
+            return JSONResponse(result)
+        except (CourseSelectionApiError, RuntimeError, TypeError, ValueError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @app.get("/api/selection/catalog/teachers")
+    def selection_catalog_teachers_api(q: str = "") -> JSONResponse:
+        try:
+            return JSONResponse(
+                {"teachers": course_selection.query_course_catalog_teachers(q)}
+            )
+        except (CourseSelectionApiError, RuntimeError, ValueError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @app.post("/selection/catalog/action")
+    async def selection_catalog_action(request: Request) -> Response:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        action = (parsed.get("action") or [""])[-1]
+        try:
+            lesson_id = int((parsed.get("lesson_id") or [""])[-1])
+            course_selection.get_cached_catalog_course(lesson_id)
+            if action not in {"select", "drop"}:
+                raise ValueError("课程操作无效")
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+
+        label = "退课" if action == "drop" else "选课"
+        task = task_manager.start(
+            f"全校开课{label}",
+            lambda progress: course_selection.run_catalog_lesson_action_for_web(
+                lesson_id,
+                action,
+                progress=progress,
+            ),
+        )
+        return task_started_response(request, task, "/selection/catalog")
+
+    @app.post("/selection/catalog/queue")
+    async def selection_catalog_queue(request: Request) -> JSONResponse:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        try:
+            lesson_id = int((parsed.get("lesson_id") or [""])[-1])
+            course = course_selection.get_cached_catalog_course(lesson_id)
+            batch = course_selection.get_selection_info("all").current_batch
+            try:
+                job, created = auto_selection.add_job(lesson_id, course, batch)
+            except ValueError as exc:
+                if batch is None or "批次" in str(exc) or "已经结束" in str(exc):
+                    job, created = auto_selection.add_job(lesson_id, course, None)
+                else:
+                    raise
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        return JSONResponse(
+            {
+                "job": job.to_dict(display=True),
+                "message": "已加入定时队列" if created else "这门课已经在定时队列中",
+            }
+        )
+
     @app.get("/selection/info", response_class=HTMLResponse)
     def selection_info(request: Request) -> HTMLResponse:
         return _selection_info_response(request, "major-plan")

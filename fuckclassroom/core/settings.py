@@ -23,6 +23,7 @@ class AppSettings:
     auto_selection_retry_seconds: int = 5
     auto_selection_session_retry_seconds: int = 30
     auto_selection_capacity_retry_seconds: int = 30
+    catalog_lesson_name_targets: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
@@ -53,6 +54,9 @@ class AppSettings:
                 cls.auto_selection_capacity_retry_seconds,
                 15,
                 3600,
+            ),
+            catalog_lesson_name_targets=_lesson_name_targets(
+                data.get("catalog_lesson_name_targets")
             ),
         )
 
@@ -112,10 +116,30 @@ class SettingsStore:
                     "auto_selection_capacity_retry_seconds",
                     current.auto_selection_capacity_retry_seconds,
                 ),
+                "catalog_lesson_name_targets": form.get(
+                    "catalog_lesson_name_targets",
+                    current.catalog_lesson_name_targets,
+                ),
             }
         )
         self.save(settings)
         return settings
+
+
+def _lesson_name_targets(value: Any) -> tuple[str, ...]:
+    if isinstance(value, (list, tuple)):
+        values = value
+    else:
+        values = str(value or "").replace("，", ",").replace("；", ",").replace(";", ",")
+        values = values.replace("\r", "\n").replace(",", "\n").split("\n")
+    targets: list[str] = []
+    for item in values:
+        target = " ".join(str(item or "").split())
+        if target and target not in targets:
+            targets.append(target[:80])
+        if len(targets) >= 20:
+            break
+    return tuple(targets)
 
 
 def _valid_ocr_engine(value: Any) -> str:

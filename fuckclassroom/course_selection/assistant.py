@@ -19,11 +19,13 @@ from ..auth.credentials import SelectionCredentialStore
 from ..core.config import AppConfig
 from .api import SelectionApiMixin
 from .browser import SelectionBrowserMixin
+from .catalog import SelectionCatalogMixin
 from .proxy import Hy2ProxyManager
 from .session import SelectionSessionMixin
 
 class CourseSelectionAssistant(
     SelectionSessionMixin,
+    SelectionCatalogMixin,
     SelectionApiMixin,
     SelectionBrowserMixin,
 ):

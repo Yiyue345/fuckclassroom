@@ -39,6 +39,19 @@ class AutoSelectionSettingsTests(unittest.TestCase):
         self.assertEqual(updated.auto_selection_capacity_retry_seconds, 75)
         self.assertEqual(restored, updated)
 
+    def test_catalog_lesson_targets_are_normalized_and_persisted(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            store = SettingsStore(Path(directory) / "settings.json")
+            updated = store.update_from_form(
+                {
+                    "catalog_lesson_name_targets": "数据结构-01\n数据结构-01， 操作系统-02",
+                }
+            )
+            restored = store.load()
+
+        self.assertEqual(updated.catalog_lesson_name_targets, ("数据结构-01", "操作系统-02"))
+        self.assertEqual(restored.catalog_lesson_name_targets, updated.catalog_lesson_name_targets)
+
     def test_legacy_hy2_source_path_is_removed_on_save(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             path = Path(directory) / "settings.json"

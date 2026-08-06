@@ -94,6 +94,19 @@ class FakeAssistant:
         return SimpleNamespace(is_valid=False, message="未保存可用的自动登录会话")
 
 
+class PendingBatchAssistant(FakeAssistant):
+    def __init__(self, batch: dict | Exception) -> None:
+        super().__init__()
+        self.batch = batch
+        self.batch_calls = 0
+
+    def get_available_catalog_batch(self, timeout_ms: int = 60_000) -> dict:
+        self.batch_calls += 1
+        if isinstance(self.batch, Exception):
+            raise self.batch
+        return self.batch
+
+
 class AutoSelectionServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.zone = timezone(timedelta(hours=8))
@@ -391,6 +404,45 @@ class AutoSelectionServiceTests(unittest.TestCase):
             self.assertEqual(service.list_jobs()[0]["status"], "expired")
             self.assertEqual(job.attempts, 0)
             self.assertEqual(assistant.calls, [])
+
+
+    def test_pending_catalog_job_binds_batch_before_selecting(self) -> None:
+        start = self.clock.value - timedelta(minutes=1)
+        batch = self.batch(start, start + timedelta(hours=1))
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = PendingBatchAssistant(batch)
+            service = self.service(directory, assistant)
+            service.add_job(88, self.course, None)
+
+            waiting = service.list_jobs()[0]
+            self.assertEqual(waiting["status"], "waiting_batch")
+            self.assertEqual(waiting["attempts"], 0)
+
+            self.assertTrue(service.run_due_once())
+            bound = service.list_jobs()[0]
+            self.assertEqual(bound["status"], "scheduled")
+            self.assertEqual(bound["turn_id"], 2)
+            self.assertEqual(bound["attempts"], 0)
+
+            self.assertTrue(service.run_due_once())
+            selected = service.list_jobs()[0]
+
+        self.assertEqual(selected["status"], "selected")
+        self.assertEqual(selected["attempts"], 1)
+        self.assertEqual(assistant.batch_calls, 1)
+
+    def test_pending_catalog_job_keeps_waiting_without_batch(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = PendingBatchAssistant(RuntimeError("当前还没有正式选课批次"))
+            service = self.service(directory, assistant)
+            service.add_job(88, self.course, None)
+
+            self.assertTrue(service.run_due_once())
+            waiting = service.list_jobs()[0]
+
+        self.assertEqual(waiting["status"], "waiting_batch")
+        self.assertEqual(waiting["attempts"], 0)
+        self.assertIn("稍后自动检查", waiting["message"])
 
 
 class CourseSelectionCapacityTests(unittest.TestCase):

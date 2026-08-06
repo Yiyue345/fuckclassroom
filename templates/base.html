@@ -54,6 +54,9 @@
             <a class="nav-item{% if active_nav == 'selection_info' and (not info or info.active_view != 'selected') %} active{% endif %}" href="/selection/info">
               <svg class="icon"><use href="/static/icons.svg#check-square"></use></svg><span>选课中心</span>
             </a>
+            <a class="nav-item{% if active_nav == 'selection_catalog' %} active{% endif %}" href="/selection/catalog">
+              <svg class="icon"><use href="/static/icons.svg#book-open"></use></svg><span>全校开课</span>
+            </a>
             <a class="nav-item{% if active_nav == 'selection_selected' or (info is defined and info.active_view == 'selected') %} active{% endif %}" href="/selection/info/selected">
               <svg class="icon"><use href="/static/icons.svg#list-checks"></use></svg><span>已选课程</span>
               {% if info is defined %}<span class="nav-badge">{{ info.sections.get('selected', [])|length }}</span>{% endif %}
