@@ -12,20 +12,12 @@
       <p class="page-description">最近课程、下载文件和文字提取任务集中在这里。</p>
     </div>
     <div class="head-actions">
-      <form method="post" action="/auth/verify" data-inline-task data-task-status="#auth-task-status" data-task-group="auth" data-task-starting="正在启动会话验证" data-task-fallback="会话验证失败" data-task-success="会话状态已更新"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>验证会话</button></form>
+      <a class="btn" href="/accounts"><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>账户与认证</a>
       <a class="btn primary" href="/courses">浏览全部课程</a>
     </div>
   </div>
 
   {% if course_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ course_error }}</span></div>{% endif %}
-  <div class="notice inline-task-status hidden" id="auth-task-status" role="status" aria-live="polite">
-    <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
-    <div class="inline-task-body">
-      <div class="inline-task-message" data-task-message>正在准备登录</div>
-      <div class="progress" aria-hidden="true"><span data-task-progress></span></div>
-    </div>
-  </div>
-
   <section class="stat-band">
     <div class="stat"><div class="stat-label">当前课程</div><div class="stat-value">{{ courses|length }}</div><div class="stat-foot">按默认学期加载</div></div>
     <div class="stat"><div class="stat-label">本地文件</div><div class="stat-value">{{ files|length }}</div><div class="stat-foot">课件、转写与提取结果</div></div>
@@ -69,23 +61,4 @@
     </section>
   </div>
 
-  <section class="section" id="session">
-    <div class="section-head"><h2>登录会话</h2><span class="status {% if session.is_logged_in %}green{% else %}red{% endif %}"><span class="tiny-dot"></span>{{ "已保存" if session.is_logged_in else "未登录" }}</span></div>
-    <div class="session-overview">
-      <div class="surface session-details">
-        <div class="session-state"><span class="session-dot {% if session.is_logged_in %}valid{% else %}invalid{% endif %}"></span><div><strong>{{ session.message }}</strong><span>登录任务：{{ login_run.message }}</span></div></div>
-        <div class="detail-grid">
-          <div class="detail-item"><label>保存时间</label><strong>{{ session.saved_at or "无" }}</strong></div>
-          <div class="detail-item"><label>Cookie 数量</label><strong>{{ session.cookie_count }}</strong></div>
-          <div class="detail-item"><label>任务状态</label><strong>{{ login_run.state }}</strong></div>
-          <div class="detail-item"><label>最后页面</label><strong title="{{ session.final_url or '' }}">{{ session.final_url or "无" }}</strong></div>
-        </div>
-      </div>
-      <div class="surface session-actions">
-        <form method="post" action="/auth/start" data-inline-task data-task-status="#auth-task-status" data-task-group="auth" data-task-starting="正在启动统一账号登录" data-task-fallback="登录失败" data-task-success="课程录播登录成功"><button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>使用统一账号登录</button></form>
-        <form method="post" action="/auth/verify" data-inline-task data-task-status="#auth-task-status" data-task-group="auth" data-task-starting="正在启动会话验证" data-task-fallback="会话验证失败" data-task-success="会话状态已更新"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>验证保存会话</button></form>
-        <form method="post" action="/auth/logout" data-confirm="确认清除课程录播登录会话？"><button class="btn danger" type="submit"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除登录会话</button></form>
-      </div>
-    </div>
-  </section>
 {% endblock %}

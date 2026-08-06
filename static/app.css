@@ -423,3 +423,20 @@ a.resource-chip:hover { border-color: var(--primary); color: var(--primary); }
 .catalog-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .catalog-pagination { min-height: 66px; color: var(--text-soft); font-size: 11px; }
 .catalog-next-icon { transform: rotate(180deg); }
+
+/* Account and session management */
+.session-pair { display: inline-flex; align-items: center; gap: 5px; }
+.session-pair .session-dot { width: 7px; height: 7px; }
+.account-session-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
+.account-session-panel { display: flex; min-width: 0; flex-direction: column; scroll-margin-top: 92px; padding: 22px; }
+.account-session-header { display: flex; min-height: 44px; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); padding-bottom: 18px; }
+.account-session-name { display: flex; min-width: 0; align-items: center; gap: 11px; }
+.account-session-name h2 { margin: 0; font-size: 15px; }
+.account-session-name > div > span { display: block; overflow: hidden; margin-top: 4px; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.account-session-panel .session-state { min-height: 54px; margin: 18px 0; }
+.account-session-panel .detail-grid { margin-bottom: 20px; }
+.detail-item.detail-wide { grid-column: 1 / -1; }
+.account-session-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: auto; }
+.account-session-actions .btn { width: 100%; }
+.capture-toolbar { display: grid; grid-template-columns: minmax(220px, 360px) auto; align-items: end; gap: 12px; margin-bottom: 18px; padding: 16px; }
+.capture-toolbar .btn { height: 36px; }

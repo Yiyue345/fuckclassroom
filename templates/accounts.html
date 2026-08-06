@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% set active_system = "accounts" %}
+{% set active_nav = "accounts" %}
+
+{% block title %}账户与认证 · 学业助手{% endblock %}
+{% block page_title %}账户与认证{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <div><h1>账户与认证</h1></div>
+    <div class="head-actions">
+      <a class="btn" href="/courses"><svg class="icon"><use href="/static/icons.svg#book-open"></use></svg>课程录播</a>
+      <a class="btn primary" href="/selection/info"><svg class="icon"><use href="/static/icons.svg#check-square"></use></svg>本科选课</a>
+    </div>
+  </div>
+
+  {% if select_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ select_error }}</span></div>{% endif %}
+
+  <div class="notice inline-task-status hidden" id="account-task-status" role="status" aria-live="polite">
+    <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
+    <div class="inline-task-body">
+      <div class="inline-task-message" data-task-message>正在准备认证</div>
+      <div class="progress" aria-hidden="true"><span data-task-progress></span></div>
+    </div>
+  </div>
+
+  <section class="account-session-grid">
+    <article class="surface account-session-panel" id="classroom-session">
+      <header class="account-session-header">
+        <div class="account-session-name">
+          <span class="workspace-icon"><svg class="icon"><use href="/static/icons.svg#book-open"></use></svg></span>
+          <div><h2>课程录播</h2><span>课堂录像、课件与课程资源</span></div>
+        </div>
+        <span class="status {% if classroom_session.is_logged_in %}green{% else %}red{% endif %}"><span class="tiny-dot"></span>{{ "已连接" if classroom_session.is_logged_in else "未登录" }}</span>
+      </header>
+
+      <div class="session-state">
+        <span class="session-dot {% if classroom_session.is_logged_in %}valid{% else %}invalid{% endif %}"></span>
+        <div><strong>{{ classroom_session.message }}</strong><span>{{ classroom_login_run.message }}</span></div>
+      </div>
+
+      <div class="detail-grid">
+        <div class="detail-item"><label>保存时间</label><strong>{{ classroom_session.saved_at or "无" }}</strong></div>
+        <div class="detail-item"><label>Cookie 数量</label><strong>{{ classroom_session.cookie_count }}</strong></div>
+        <div class="detail-item detail-wide"><label>最后页面</label><strong title="{{ classroom_session.final_url or '' }}">{{ classroom_session.final_url or "无" }}</strong></div>
+      </div>
+
+      <div class="account-session-actions">
+        <form method="post" action="/auth/start" data-inline-task data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在打开课程录播登录窗口" data-task-fallback="课程录播登录失败" data-task-success="课程录播登录完成"><button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>登录</button></form>
+        <form method="post" action="/auth/verify" data-inline-task data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在验证课程录播会话" data-task-fallback="课程录播验证失败" data-task-success="课程录播会话已更新"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>验证会话</button></form>
+        <form method="post" action="/auth/logout" data-confirm="确认清除课程录播登录会话？"><button class="btn danger" type="submit"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除会话</button></form>
+      </div>
+    </article>
+
+    <article class="surface account-session-panel" id="selection-session">
+      <header class="account-session-header">
+        <div class="account-session-name">
+          <span class="workspace-icon"><svg class="icon"><use href="/static/icons.svg#check-square"></use></svg></span>
+          <div><h2>本科教务</h2><span>{{ selection_access.label }}入口 · {{ credentials.message }}</span></div>
+        </div>
+        <span class="status {% if selection_session.is_saved and selection_session.is_valid is not sameas false %}green{% else %}red{% endif %}"><span class="tiny-dot"></span>{% if selection_session.is_valid is sameas true %}有效{% elif selection_session.is_saved %}待验证{% else %}未登录{% endif %}</span>
+      </header>
+
+      <div class="session-state">
+        <span class="session-dot {% if selection_session.is_saved and selection_session.is_valid is not sameas false %}valid{% else %}invalid{% endif %}"></span>
+        <div><strong>{{ selection_session.message }}</strong><span>{% if selection_session.is_valid is sameas true %}已通过本科教务页面验证{% elif selection_session.is_valid is sameas false %}需要重新登录本科教务{% else %}尚未验证教务页面{% endif %}</span></div>
+      </div>
+
+      <div class="detail-grid">
+        <div class="detail-item"><label>保存时间</label><strong>{{ selection_session.saved_at or "无" }}</strong></div>
+        <div class="detail-item"><label>验证时间</label><strong>{{ selection_session.checked_at or "尚未验证" }}</strong></div>
+        <div class="detail-item detail-wide"><label>最后页面</label><strong title="{{ selection_session.final_url or '' }}">{{ selection_session.final_url or "无" }}</strong></div>
+      </div>
+
+      <div class="account-session-actions">
+        <form method="post" action="/selection/login" data-inline-task data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在打开本科教务登录窗口" data-task-fallback="本科教务登录失败" data-task-success="本科教务登录完成"><button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>登录</button></form>
+        <form method="post" action="/selection/open" data-inline-task data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在验证本科教务会话" data-task-fallback="本科教务验证失败" data-task-success="本科教务会话已更新"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>验证会话</button></form>
+        <form method="post" action="/selection/open-course-select" data-inline-task data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在验证选课入口" data-task-fallback="选课入口验证失败" data-task-success="选课入口已验证"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#check-square"></use></svg>验证选课入口</button></form>
+        <form method="post" action="/selection/logout" data-confirm="确认清除本科教务登录会话？"><button class="btn danger" type="submit"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除会话</button></form>
+      </div>
+    </article>
+  </section>
+{% endblock %}

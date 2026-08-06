@@ -6,7 +6,20 @@
 {% block page_title %}接口记录{% endblock %}
 
 {% block content %}
-  <div class="page-head"><div><h1>接口记录</h1><p class="page-description">查看选课页面抓取到的请求与字段整理结果。</p></div><div class="head-actions"><a class="btn" href="/selection"><svg class="icon"><use href="/static/icons.svg#activity"></use></svg>新建抓取</a></div></div>
+  <div class="page-head"><div><h1>接口记录</h1></div></div>
+
+  <div class="notice inline-task-status hidden" id="capture-task-status" role="status" aria-live="polite">
+    <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
+    <div class="inline-task-body">
+      <div class="inline-task-message" data-task-message>正在准备接口抓取</div>
+      <div class="progress" aria-hidden="true"><span data-task-progress></span></div>
+    </div>
+  </div>
+
+  <form class="surface capture-toolbar" method="post" action="/selection/capture" data-inline-task data-task-status="#capture-task-status" data-task-group="selection-capture" data-task-starting="正在启动接口抓取" data-task-fallback="接口抓取失败" data-task-success="接口抓取已完成">
+    <div class="field"><label for="duration_seconds">抓取时长（秒）</label><input class="input" id="duration_seconds" name="duration_seconds" type="number" min="30" max="900" value="180"></div>
+    <button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#activity"></use></svg>开始抓取</button>
+  </form>
 
   <div class="table-wrap">
     <table>

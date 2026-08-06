@@ -1,5 +1,7 @@
 {% set active_system = active_system|default("classroom") %}
 {% set active_nav = active_nav|default("") %}
+{% set classroom_session_status = request.app.state.get_classroom_session_status() %}
+{% set selection_session_status = request.app.state.get_selection_session_status() %}
 <!doctype html>
 <html lang="zh-CN" data-theme="light" data-theme-mode="auto">
   <head>
@@ -28,11 +30,11 @@
         <div class="workspace-switcher" data-workspace-switcher>
           <button class="workspace-button" type="button" aria-expanded="false" data-workspace-button>
             <span class="workspace-icon">
-              <svg class="icon large"><use href="/static/icons.svg#{% if active_system == 'selection' %}check-square{% else %}book-open{% endif %}"></use></svg>
+              <svg class="icon large"><use href="/static/icons.svg#{% if active_system == 'accounts' %}shield-check{% elif active_system == 'selection' %}check-square{% else %}book-open{% endif %}"></use></svg>
             </span>
             <span class="workspace-copy">
               <span class="workspace-label">当前系统</span>
-              <span class="workspace-name">{% if active_system == "selection" %}本科选课{% else %}课程录播{% endif %}</span>
+              <span class="workspace-name">{% if active_system == "accounts" %}账户与认证{% elif active_system == "selection" %}本科选课{% else %}课程录播{% endif %}</span>
             </span>
             <svg class="icon small"><use href="/static/icons.svg#chevron-down"></use></svg>
           </button>
@@ -45,10 +47,21 @@
               <span class="workspace-icon"><svg class="icon"><use href="/static/icons.svg#check-square"></use></svg></span>
               <span><strong>本科选课</strong><small>课程查询、选课与退课</small></span>
             </a>
+            <a class="workspace-option{% if active_system == 'accounts' %} active{% endif %}" href="/accounts">
+              <span class="workspace-icon"><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg></span>
+              <span><strong>账户与认证</strong><small>统一账号与独立会话</small></span>
+            </a>
           </div>
         </div>
 
-        {% if active_system == "selection" %}
+        {% if active_system == "accounts" %}
+          <nav class="nav" aria-label="账户导航">
+            <div class="nav-label">账户</div>
+            <a class="nav-item active" href="/accounts">
+              <svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg><span>账户与认证</span>
+            </a>
+          </nav>
+        {% elif active_system == "selection" %}
           <nav class="nav" aria-label="本科选课导航">
             <div class="nav-label">本科选课</div>
             <a class="nav-item{% if active_nav == 'selection_info' and (not info or info.active_view != 'selected') %} active{% endif %}" href="/selection/info">
@@ -89,24 +102,14 @@
         {% endif %}
 
         <div class="sidebar-bottom">
-          {% if active_system == "selection" %}
-            <a class="session-card" href="/selection">
-              {% if session is defined and session.is_saved %}
-                <span class="session-dot{% if session.is_valid is sameas false %} invalid{% else %} valid{% endif %}"></span>
-                <span><span class="session-title">{% if session.is_valid is sameas false %}教务会话无效{% elif session.is_valid is sameas true %}教务会话有效{% else %}教务会话已保存{% endif %}</span><span class="session-meta">{{ session.checked_at or session.saved_at or "尚未验证" }}</span></span>
-              {% else %}
-                <span class="session-dot invalid"></span><span><span class="session-title">尚未登录本科教务</span><span class="session-meta">点击打开会话管理</span></span>
-              {% endif %}
-            </a>
-          {% else %}
-            <a class="session-card" href="/classroom#session">
-              {% if session is defined and session.is_logged_in %}
-                <span class="session-dot valid"></span><span><span class="session-title">录播平台已连接</span><span class="session-meta">{{ session.saved_at or "已保存登录会话" }}</span></span>
-              {% else %}
-                <span class="session-dot invalid"></span><span><span class="session-title">录播平台未登录</span><span class="session-meta">点击进入登录管理</span></span>
-              {% endif %}
-            </a>
-          {% endif %}
+          <a class="session-card" href="/accounts#classroom-session" data-sidebar-session="classroom">
+            <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}"></span>
+            <span><span class="session-title">课程录播</span><span class="session-meta">{% if classroom_session_status.is_logged_in %}已连接 · {{ classroom_session_status.saved_at or "会话已保存" }}{% else %}未登录{% endif %}</span></span>
+          </a>
+          <a class="session-card" href="/accounts#selection-session" data-sidebar-session="selection">
+            <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}"></span>
+            <span><span class="session-title">本科教务</span><span class="session-meta">{% if selection_session_status.is_valid is sameas true %}会话有效 · {{ selection_session_status.checked_at or "刚刚验证" }}{% elif selection_session_status.is_saved %}会话待验证{% else %}未登录{% endif %}</span></span>
+          </a>
           <div class="sidebar-actions">
             <a class="nav-item{% if active_nav == 'settings' %} active{% endif %}" href="/settings">
               <svg class="icon"><use href="/static/icons.svg#settings"></use></svg><span>设置</span>
@@ -121,7 +124,7 @@
       <main class="main">
         <header class="topbar">
           <div class="breadcrumb">
-            <span>{% block breadcrumb_parent %}{% if active_system == "selection" %}本科选课{% else %}课程录播{% endif %}{% endblock %}</span>
+            <span>{% block breadcrumb_parent %}{% if active_system == "accounts" %}账户{% elif active_system == "selection" %}本科选课{% else %}课程录播{% endif %}{% endblock %}</span>
             <span>/</span>
             <strong>{% block breadcrumb_current %}{% block page_title %}概览{% endblock %}{% endblock %}</strong>
           </div>
@@ -129,11 +132,13 @@
             <a class="btn icon-only" href="/tasks" title="查看任务">
               <svg class="icon"><use href="/static/icons.svg#list-todo"></use></svg>
             </a>
-            {% if active_system == "selection" %}
-              <a class="btn" href="/selection"><span class="session-dot{% if session is defined and session.is_saved and session.is_valid is not sameas false %} valid{% else %} invalid{% endif %}"></span>会话状态</a>
-            {% else %}
-              <a class="btn" href="/classroom#session"><span class="session-dot{% if session is defined and session.is_logged_in %} valid{% else %} invalid{% endif %}"></span>平台状态</a>
-            {% endif %}
+            <a class="btn" href="/accounts">
+              <span class="session-pair" aria-hidden="true">
+                <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}"></span>
+                <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}"></span>
+              </span>
+              会话状态
+            </a>
           </div>
         </header>
 

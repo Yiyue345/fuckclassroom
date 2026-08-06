@@ -71,6 +71,11 @@ def _unified_credential_path(config: AppConfig):
         return legacy
 
 
+def _run_for_result(operation: Callable[[], object], result_url: str) -> str:
+    operation()
+    return result_url
+
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
     app_config = config or AppConfig()
     classroom_client = ClassroomClient(app_config)
@@ -141,6 +146,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             hy2_proxy.stop()
 
     app = FastAPI(title="Fuck Classroom", lifespan=lifespan)
+    app.state.get_classroom_session_status = auth_service.get_session_status
+    app.state.get_selection_session_status = course_selection.get_session_status
     app.mount("/static", StaticFiles(directory=str(PROJECT_ROOT / "static")), name="static")
     def task_started_response(request: Request, task, result_url: str | None = None) -> Response:
         if "application/json" in request.headers.get("accept", ""):
@@ -174,7 +181,6 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "login.html",
             {
                 "session": session,
-                "login_run": auth_service.get_login_run_status(),
                 "courses": courses,
                 "course_error": course_error,
                 "files": files,
@@ -187,21 +193,29 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.post("/auth/start")
     def start_login(request: Request) -> Response:
         task = task_manager.start(
-            "课程录播登录", lambda progress: auth_service.login_for_web(progress)
+            "课程录播登录",
+            lambda progress: _run_for_result(
+                lambda: auth_service.login_for_web(progress),
+                "/accounts#classroom-session",
+            ),
         )
-        return task_started_response(request, task, "/classroom#session")
+        return task_started_response(request, task, "/accounts#classroom-session")
 
     @app.post("/auth/verify")
     def verify_login(request: Request) -> Response:
         task = task_manager.start(
-            "验证课程录播会话", lambda progress: auth_service.verify_for_web(progress)
+            "验证课程录播会话",
+            lambda progress: _run_for_result(
+                lambda: auth_service.verify_for_web(progress),
+                "/accounts#classroom-session",
+            ),
         )
-        return task_started_response(request, task, "/classroom#session")
+        return task_started_response(request, task, "/accounts#classroom-session")
 
     @app.post("/auth/logout")
     def logout() -> RedirectResponse:
         auth_service.clear_session()
-        return RedirectResponse("/classroom", status_code=303)
+        return RedirectResponse("/accounts#classroom-session", status_code=303)
 
     @app.get("/api/auth/challenge")
     def current_auth_challenge() -> JSONResponse:
@@ -443,18 +457,24 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             return RedirectResponse(f"/downloads?delete_error={quote(str(exc))}", status_code=303)
         return RedirectResponse("/downloads?deleted=1", status_code=303)
 
-    @app.get("/selection", response_class=HTMLResponse)
-    def selection(request: Request) -> HTMLResponse:
+    @app.get("/accounts", response_class=HTMLResponse)
+    def accounts(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
-            "selection.html",
+            "accounts.html",
             {
-                "session": course_selection.get_session_status(),
-                "access": course_selection.get_access_info(),
+                "classroom_session": auth_service.get_session_status(),
+                "classroom_login_run": auth_service.get_login_run_status(),
+                "selection_session": course_selection.get_session_status(),
+                "selection_access": course_selection.get_access_info(),
                 "credentials": course_selection.get_credential_status(),
                 "select_error": request.query_params.get("select_error"),
             },
         )
+
+    @app.get("/selection")
+    def selection() -> RedirectResponse:
+        return RedirectResponse("/accounts#selection-session", status_code=307)
 
     @app.get("/selection/catalog", response_class=HTMLResponse)
     def selection_catalog(request: Request) -> HTMLResponse:
@@ -813,25 +833,39 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def start_webvpn_login(request: Request) -> Response:
         task = task_manager.start(
             "本科教务登录",
-            lambda progress: _login_and_refresh_selection_info(course_selection, progress),
+            lambda progress: _run_for_result(
+                lambda: _login_and_refresh_selection_info(course_selection, progress),
+                "/accounts#selection-session",
+            ),
         )
-        return task_started_response(request, task, "/selection")
+        return task_started_response(request, task, "/accounts#selection-session")
 
     @app.post("/selection/open")
     def open_selection_home(request: Request) -> Response:
         task = task_manager.start(
             "打开本科教务",
-            lambda progress: course_selection.open_home_for_web(progress=progress),
+            lambda progress: _run_for_result(
+                lambda: course_selection.open_home_for_web(progress=progress),
+                "/accounts#selection-session",
+            ),
         )
-        return task_started_response(request, task, "/selection")
+        return task_started_response(request, task, "/accounts#selection-session")
 
     @app.post("/selection/open-course-select")
     def open_course_select(request: Request) -> Response:
         task = task_manager.start(
             "打开选课入口",
-            lambda progress: course_selection.open_course_select_for_web(progress=progress),
+            lambda progress: _run_for_result(
+                lambda: course_selection.open_course_select_for_web(progress=progress),
+                "/accounts#selection-session",
+            ),
         )
-        return task_started_response(request, task, "/selection")
+        return task_started_response(request, task, "/accounts#selection-session")
+
+    @app.post("/selection/logout")
+    def selection_logout() -> RedirectResponse:
+        course_selection.clear_session()
+        return RedirectResponse("/accounts#selection-session", status_code=303)
 
     @app.post("/selection/capture")
     async def capture_selection_interfaces(request: Request) -> Response:
@@ -844,9 +878,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             duration_seconds = 180
         task = task_manager.start(
             "抓取选课接口",
-            lambda progress: course_selection.capture_interfaces_for_web(
-                progress=progress,
-                duration_seconds=duration_seconds,
+            lambda progress: _run_for_result(
+                lambda: course_selection.capture_interfaces_for_web(
+                    progress=progress,
+                    duration_seconds=duration_seconds,
+                ),
+                "/selection/captures",
             ),
         )
         return task_started_response(request, task, "/selection/captures")
