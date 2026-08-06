@@ -30,6 +30,7 @@ from ..course_selection import (
     SelectionTarget,
 )
 from ..course_selection.automation import AutoSelectionService
+from ..course_selection.helpers import _group_plan_courses
 from ..course_selection.proxy import Hy2ProxyManager
 
 
@@ -641,12 +642,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return _selection_info_response(request, view)
 
     def _selection_info_response(request: Request, view: str) -> HTMLResponse:
+        info = course_selection.get_selection_info(view)
+        course_sections = (
+            _group_plan_courses(info.courses)
+            if info.active_view == "major-plan"
+            else [{"label": "", "courses": info.courses}]
+        )
         return templates.TemplateResponse(
             request,
             "selection_info.html",
             {
                 "session": course_selection.get_session_status(),
-                "info": course_selection.get_selection_info(view),
+                "info": info,
+                "course_sections": course_sections,
                 "views": SELECTION_INFO_VIEWS,
                 "last_action": course_selection.pop_selection_action_result(),
                 "select_error": request.query_params.get("select_error"),

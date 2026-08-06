@@ -525,6 +525,32 @@ def _selection_predicate_message(payload: Any, lesson_id: int) -> str:
     return _selection_response_message(value) or str(value)
 
 
+_PLAN_COURSE_CATEGORIES = ("必修", "实践", "专业限选", "专业任选", "通识")
+
+
+def _plan_course_category(course: dict[str, Any]) -> str:
+    course_property = str(course.get("course_property") or "").strip()
+    course_type = str(course.get("course_type") or "").strip()
+    for category in _PLAN_COURSE_CATEGORIES:
+        if category in course_property:
+            return category
+    for category in _PLAN_COURSE_CATEGORIES:
+        if category in course_type:
+            return category
+    return "其他"
+
+
+def _group_plan_courses(courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped = {category: [] for category in (*_PLAN_COURSE_CATEGORIES, "其他")}
+    for course in courses:
+        grouped[_plan_course_category(course)].append(course)
+    return [
+        {"label": category, "courses": grouped[category]}
+        for category in (*_PLAN_COURSE_CATEGORIES, "其他")
+        if grouped[category]
+    ]
+
+
 def _normalize_lesson(lesson: dict[str, Any], count_map: dict[int, int], selected_ids: set[int]) -> dict[str, Any]:
     course = lesson.get("course") if isinstance(lesson.get("course"), dict) else {}
     campus = lesson.get("campus") if isinstance(lesson.get("campus"), dict) else {}

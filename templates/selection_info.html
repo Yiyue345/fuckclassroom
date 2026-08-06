@@ -81,10 +81,20 @@
     </div>
   </div>
 
-  <div class="selection-course-list" id="selection-table">
-    {% for course_name, course_group in info.courses|groupby("course_name", default="未命名课程") %}
+  <div class="{% if info.active_view == 'major-plan' %}selection-plan-list{% else %}selection-course-list{% endif %}" id="selection-table">
+    {% for course_section in course_sections %}
+      {% set section_loop = loop %}
+      {% if course_section.label %}
+        <section class="selection-plan-section" data-filter-row>
+          <div class="selection-plan-section-head">
+            <h2>{{ course_section.label }}</h2>
+            <span>{{ course_section.courses|groupby("course_name", default="未命名课程")|length }} 门课程 · {{ course_section.courses|length }} 个教学班</span>
+          </div>
+          <div class="selection-course-list">
+      {% endif %}
+    {% for course_name, course_group in course_section.courses|groupby("course_name", default="未命名课程") %}
       {% set group_course = course_group|first %}
-      <details class="selection-course-group" data-filter-row{% if loop.first %} open{% endif %}>
+      <details class="selection-course-group" data-filter-row{% if section_loop.first and loop.first %} open{% endif %}>
         <summary class="selection-course-summary">
           <span class="selection-course-chevron"><svg class="icon small"><use href="/static/icons.svg#chevron-down"></use></svg></span>
           <span class="selection-course-copy">
@@ -129,9 +139,15 @@
           </table>
         </div>
       </details>
-    {% else %}
-      <div class="table-wrap"><div class="table-empty">暂无缓存课程，点击右上角刷新</div></div>
     {% endfor %}
+      {% if course_section.label %}
+          </div>
+        </section>
+      {% endif %}
+    {% endfor %}
+    {% if not info.courses %}
+      <div class="table-wrap"><div class="table-empty">暂无缓存课程，点击右上角刷新</div></div>
+    {% endif %}
   </div>
 
   {% if last_action %}

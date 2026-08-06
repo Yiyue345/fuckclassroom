@@ -252,6 +252,11 @@ a.resource-chip:hover { border-color: var(--primary); color: var(--primary); }
 .capacity-label { color: var(--text-muted); font-size: 9px; }
 .capacity .progress { margin: 0; }
 .schedule { line-height: 1.6; white-space: pre-line; }
+.selection-plan-list { display: grid; gap: 24px; }
+.selection-plan-section { min-width: 0; }
+.selection-plan-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); margin-bottom: 10px; padding: 0 2px 10px; }
+.selection-plan-section-head h2 { margin: 0; font-size: 14px; }
+.selection-plan-section-head span { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
 .selection-course-list { display: grid; gap: 10px; }
 .selection-course-group { overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
 .selection-course-summary { display: grid; min-height: 66px; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; list-style: none; }
