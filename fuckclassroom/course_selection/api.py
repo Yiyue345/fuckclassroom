@@ -145,6 +145,17 @@ class SelectionApiMixin:
         payload = self._read_json(self.selection_action_path, default=None)
         return payload if isinstance(payload, dict) else None
 
+    def pop_selection_action_result(self) -> dict[str, Any] | None:
+        with self._selection_action_lock:
+            payload = self.get_selection_action_result()
+            if payload is None:
+                return None
+            try:
+                self.selection_action_path.unlink(missing_ok=True)
+            except OSError:
+                return payload
+            return payload
+
     def _fetch_selection_info_via_api(
         self,
         progress: ProgressCallback | None,

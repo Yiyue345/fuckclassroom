@@ -19,6 +19,22 @@ from fuckclassroom.course_selection import (
 
 
 class SelectionBatchTests(unittest.TestCase):
+    def test_selection_action_result_is_consumed_once(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = CourseSelectionAssistant(AppConfig(data_dir=Path(directory)))
+            assistant.selection_action_path.parent.mkdir(parents=True, exist_ok=True)
+            assistant.selection_action_path.write_text(
+                json.dumps({"status": "成功", "message": "选课成功"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                assistant.pop_selection_action_result(),
+                {"status": "成功", "message": "选课成功"},
+            )
+            self.assertIsNone(assistant.pop_selection_action_result())
+            self.assertFalse(assistant.selection_action_path.exists())
+
     def test_batch_parser_keeps_open_time_range(self) -> None:
         now = datetime(2026, 7, 29, 12, 0, tzinfo=timezone(timedelta(hours=8)))
         batches = _selection_batches_from_api(

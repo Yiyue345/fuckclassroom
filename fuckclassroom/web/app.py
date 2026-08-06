@@ -628,7 +628,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 "session": course_selection.get_session_status(),
                 "info": course_selection.get_selection_info(view),
                 "views": SELECTION_INFO_VIEWS,
-                "last_action": course_selection.get_selection_action_result(),
+                "last_action": course_selection.pop_selection_action_result(),
                 "select_error": request.query_params.get("select_error"),
                 "auto_lesson_ids": auto_selection.active_lesson_ids(),
             },
@@ -757,7 +757,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.get("/api/selection/action-result")
     def selection_action_result() -> JSONResponse:
-        return JSONResponse(course_selection.get_selection_action_result() or {})
+        return JSONResponse(course_selection.pop_selection_action_result() or {})
 
     @app.post("/selection/info/select")
     async def select_cached_lesson(request: Request) -> Response:
