@@ -112,7 +112,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
 
     def verify_classroom_session():
-        return auth_service.verify_saved_session(auto_relogin=False)
+        return auth_service.verify_saved_session(auto_relogin=True)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -121,7 +121,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 asyncio.to_thread(verify_classroom_session),
                 asyncio.to_thread(
                     course_selection.verify_saved_session,
-                    auto_relogin=False,
+                    timeout_ms=60_000,
+                    auto_relogin=True,
                 ),
                 return_exceptions=True,
             )
