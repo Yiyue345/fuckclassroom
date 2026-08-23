@@ -15,7 +15,9 @@ class ThemeTransitionTests(unittest.TestCase):
         self.assertIn("root.dataset.theme !== nextTheme", script)
         self.assertIn("@media (prefers-reduced-motion: no-preference)", styles)
         self.assertIn("html.theme-transitioning body *", styles)
-        self.assertIn("transition-duration: 240ms", styles)
+        self.assertIn("transition-duration: 480ms", styles)
+        self.assertIn("transition-timing-function: ease-in-out", styles)
+        self.assertIn("}, 520);", script)
 
 
 if __name__ == "__main__":

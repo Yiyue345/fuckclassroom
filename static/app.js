@@ -36,7 +36,7 @@
       themeTransitionTimer = window.setTimeout(() => {
         root.classList.remove("theme-transitioning");
         themeTransitionTimer = null;
-      }, 260);
+      }, 520);
     }
   }
 

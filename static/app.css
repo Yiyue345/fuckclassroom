@@ -66,8 +66,8 @@ form { margin: 0; }
   html.theme-transitioning body *::before,
   html.theme-transitioning body *::after {
     transition-property: background-color, border-color, color, box-shadow, fill, stroke;
-    transition-duration: 240ms;
-    transition-timing-function: ease-out;
+    transition-duration: 480ms;
+    transition-timing-function: ease-in-out;
   }
 }
 
