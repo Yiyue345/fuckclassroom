@@ -59,6 +59,18 @@ h2 { margin-bottom: 16px; font-size: 17px; font-weight: 680; line-height: 1.35; 
 h3 { margin-bottom: 6px; font-size: 14px; font-weight: 680; line-height: 1.4; letter-spacing: 0; }
 form { margin: 0; }
 
+@media (prefers-reduced-motion: no-preference) {
+  html.theme-transitioning,
+  html.theme-transitioning body,
+  html.theme-transitioning body *,
+  html.theme-transitioning body *::before,
+  html.theme-transitioning body *::after {
+    transition-property: background-color, border-color, color, box-shadow, fill, stroke;
+    transition-duration: 240ms;
+    transition-timing-function: ease-out;
+  }
+}
+
 .icon { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
 .icon.small { width: 15px; height: 15px; }
 .icon.large { width: 21px; height: 21px; }

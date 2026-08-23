@@ -1,6 +1,8 @@
 (() => {
   const root = document.documentElement;
   const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let themeTransitionTimer = null;
 
   function resolveTheme(mode) {
     return mode === "auto" ? (media.matches ? "dark" : "light") : mode;
@@ -8,11 +10,34 @@
 
   function applyTheme(mode) {
     const normalized = ["light", "dark", "auto"].includes(mode) ? mode : "auto";
+    const nextTheme = resolveTheme(normalized);
+    const shouldAnimate = Boolean(root.dataset.theme)
+      && root.dataset.theme !== nextTheme
+      && !reducedMotion.matches;
+
+    if (themeTransitionTimer !== null) {
+      window.clearTimeout(themeTransitionTimer);
+      themeTransitionTimer = null;
+    }
+    if (shouldAnimate) {
+      root.classList.add("theme-transitioning");
+      void root.offsetWidth;
+    } else {
+      root.classList.remove("theme-transitioning");
+    }
+
     root.dataset.themeMode = normalized;
-    root.dataset.theme = resolveTheme(normalized);
+    root.dataset.theme = nextTheme;
     document.querySelectorAll("[data-theme-option]").forEach((button) => {
       button.classList.toggle("active", button.dataset.themeOption === normalized);
     });
+
+    if (shouldAnimate) {
+      themeTransitionTimer = window.setTimeout(() => {
+        root.classList.remove("theme-transitioning");
+        themeTransitionTimer = null;
+      }, 260);
+    }
   }
 
   function saveTheme(mode) {
