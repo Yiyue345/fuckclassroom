@@ -20,6 +20,16 @@ class ServerStartupTests(unittest.TestCase):
         self.assertEqual(port, main.DEFAULT_PORT)
         probe.assert_called_once_with("127.0.0.1", main.DEFAULT_PORT)
 
+    def test_run_reuses_the_existing_application_instance(self) -> None:
+        environment = {
+            "FUCKCLASSROOM_HOST": "127.0.0.1",
+            "FUCKCLASSROOM_PORT": "9010",
+        }
+        with patch.dict(main.os.environ, environment), patch.object(main.uvicorn, "run") as uvicorn_run:
+            main.run()
+
+        uvicorn_run.assert_called_once_with(main.app, host="127.0.0.1", port=9010)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,7 +40,7 @@ def _select_server_port(host: str, preferred_port: int) -> int:
     return preferred_port
 
 
-if __name__ == "__main__":
+def run() -> None:
     host = os.getenv("FUCKCLASSROOM_HOST", "127.0.0.1")
     configured_port = os.getenv("FUCKCLASSROOM_PORT")
     preferred_port = int(configured_port) if configured_port else DEFAULT_PORT
@@ -50,4 +50,8 @@ if __name__ == "__main__":
             f"端口 {preferred_port} 被 Windows 保留，自动改用 http://{host}:{port}",
             flush=True,
         )
-    uvicorn.run("main:app", host=host, port=port)
+    uvicorn.run(app, host=host, port=port)
+
+
+if __name__ == "__main__":
+    run()
