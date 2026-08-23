@@ -61,21 +61,6 @@
     }
   });
 
-  const switcher = document.querySelector("[data-workspace-switcher]");
-  const switcherButton = document.querySelector("[data-workspace-button]");
-  if (switcher && switcherButton) {
-    switcherButton.addEventListener("click", () => {
-      const open = switcher.classList.toggle("open");
-      switcherButton.setAttribute("aria-expanded", String(open));
-    });
-    document.addEventListener("click", (event) => {
-      if (!switcher.contains(event.target)) {
-        switcher.classList.remove("open");
-        switcherButton.setAttribute("aria-expanded", "false");
-      }
-    });
-  }
-
   document.querySelectorAll("[data-filter-input]").forEach((input) => {
     const target = document.querySelector(input.dataset.filterInput || "");
     if (!target) return;
