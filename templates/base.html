@@ -32,7 +32,7 @@
             <div class="nav-label">
               <span>课程录播</span>
               <span class="nav-label-status" title="{% if classroom_session_status.is_logged_in %}已连接{% else %}未登录{% endif %}">
-                <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}"></span>
+                <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}" data-session-indicator="classroom"></span>
               </span>
             </div>
             <a class="nav-item{% if active_nav == 'overview' %} active{% endif %}" href="/classroom">
@@ -55,7 +55,7 @@
             <div class="nav-label">
               <span>本科选课</span>
               <span class="nav-label-status" title="{% if selection_session_status.is_valid is sameas true %}会话有效{% elif selection_session_status.is_saved %}会话待验证{% else %}未登录{% endif %}">
-                <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}"></span>
+                <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}" data-session-indicator="selection"></span>
               </span>
             </div>
             <a class="nav-item{% if active_nav == 'selection_info' and (info is not defined or info.active_view != 'selected') %} active{% endif %}" href="/selection/info">
@@ -96,12 +96,12 @@
           </div>
           <div class="session-list">
             <a class="session-card" href="/accounts#classroom-session" data-sidebar-session="classroom" title="{% if classroom_session_status.is_logged_in %}已连接 · {{ classroom_session_status.saved_at or '会话已保存' }}{% else %}未登录{% endif %}">
-              <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}"></span>
-              <span><span class="session-title">课程录播</span><span class="session-meta">{% if classroom_session_status.is_logged_in %}已连接{% else %}未登录{% endif %}</span></span>
+              <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}" data-session-indicator="classroom"></span>
+              <span><span class="session-title">课程录播</span><span class="session-meta" data-session-label="classroom">{% if classroom_session_status.is_logged_in %}已连接{% else %}未登录{% endif %}</span></span>
             </a>
             <a class="session-card" href="/accounts#selection-session" data-sidebar-session="selection" title="{% if selection_session_status.is_valid is sameas true %}会话有效 · {{ selection_session_status.checked_at or '刚刚验证' }}{% elif selection_session_status.is_saved %}会话待验证{% else %}未登录{% endif %}">
-              <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}"></span>
-              <span><span class="session-title">本科教务</span><span class="session-meta">{% if selection_session_status.is_valid is sameas true %}会话有效{% elif selection_session_status.is_saved %}待验证{% else %}未登录{% endif %}</span></span>
+              <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}" data-session-indicator="selection"></span>
+              <span><span class="session-title">本科教务</span><span class="session-meta" data-session-label="selection">{% if selection_session_status.is_valid is sameas true %}会话有效{% elif selection_session_status.is_saved %}待验证{% else %}未登录{% endif %}</span></span>
             </a>
           </div>
         </div>
@@ -120,8 +120,8 @@
             </a>
             <a class="btn" href="/accounts">
               <span class="session-pair" aria-hidden="true">
-                <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}"></span>
-                <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}"></span>
+                <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}" data-session-indicator="classroom"></span>
+                <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}" data-session-indicator="selection"></span>
               </span>
               会话状态
             </a>

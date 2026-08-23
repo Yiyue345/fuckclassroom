@@ -46,7 +46,7 @@
       </div>
 
       <div class="account-session-actions">
-        <form method="post" action="/auth/start" data-inline-task data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在打开课程录播登录窗口" data-task-fallback="课程录播登录失败" data-task-success="课程录播登录完成"><button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>登录</button></form>
+        <form method="post" action="/auth/start" data-inline-task data-session-login="classroom" data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在打开课程录播登录窗口" data-task-fallback="课程录播登录失败" data-task-success="课程录播登录完成"><button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>登录</button></form>
         <form method="post" action="/auth/verify" data-inline-task data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在验证课程录播会话" data-task-fallback="课程录播验证失败" data-task-success="课程录播会话已更新"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>验证会话</button></form>
         <form method="post" action="/auth/logout" data-confirm="确认清除课程录播登录会话？"><button class="btn danger" type="submit"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除会话</button></form>
       </div>
@@ -73,7 +73,7 @@
       </div>
 
       <div class="account-session-actions">
-        <form method="post" action="/selection/login" data-inline-task data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在打开本科教务登录窗口" data-task-fallback="本科教务登录失败" data-task-success="本科教务登录完成"><button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>登录</button></form>
+        <form method="post" action="/selection/login" data-inline-task data-session-login="selection" data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在打开本科教务登录窗口" data-task-fallback="本科教务登录失败" data-task-success="本科教务登录完成"><button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>登录</button></form>
         <form method="post" action="/selection/open" data-inline-task data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在验证本科教务会话" data-task-fallback="本科教务验证失败" data-task-success="本科教务会话已更新"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>验证会话</button></form>
         <form method="post" action="/selection/open-course-select" data-inline-task data-task-status="#account-task-status" data-task-group="account-auth" data-task-starting="正在验证选课入口" data-task-fallback="选课入口验证失败" data-task-success="选课入口已验证"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#check-square"></use></svg>验证选课入口</button></form>
         <form method="post" action="/selection/logout" data-confirm="确认清除本科教务登录会话？"><button class="btn danger" type="submit"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除会话</button></form>

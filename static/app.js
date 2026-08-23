@@ -84,6 +84,33 @@
 
   const sleep = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
+  function markSessionLoggingIn(system) {
+    document.querySelectorAll(`[data-session-indicator="${system}"]`).forEach((indicator) => {
+      indicator.dataset.previousSessionState = indicator.classList.contains("valid") ? "valid" : "invalid";
+      indicator.classList.remove("valid", "invalid");
+      indicator.classList.add("logging-in");
+    });
+    document.querySelectorAll(`[data-session-label="${system}"]`).forEach((label) => {
+      label.dataset.previousSessionLabel = label.textContent || "";
+      label.textContent = "登录中";
+    });
+  }
+
+  function restoreSessionState(system) {
+    document.querySelectorAll(`[data-session-indicator="${system}"]`).forEach((indicator) => {
+      const previousState = indicator.dataset.previousSessionState || "invalid";
+      indicator.classList.remove("logging-in", "valid", "invalid");
+      indicator.classList.add(previousState);
+      delete indicator.dataset.previousSessionState;
+    });
+    document.querySelectorAll(`[data-session-label="${system}"]`).forEach((label) => {
+      if (label.dataset.previousSessionLabel !== undefined) {
+        label.textContent = label.dataset.previousSessionLabel;
+        delete label.dataset.previousSessionLabel;
+      }
+    });
+  }
+
   document.querySelectorAll("form[data-inline-task]").forEach((form) => {
     const statusBox = document.querySelector(form.dataset.taskStatus || "");
     const message = statusBox && statusBox.querySelector("[data-task-message]");
@@ -101,10 +128,12 @@
       (button) => groupForms.includes(button.form)
     );
     const fallbackText = form.dataset.taskFallback || "刷新课程失败";
+    const loginSystem = form.dataset.sessionLogin || "";
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (groupForms.some((item) => item.dataset.taskRunning === "true")) return;
+      let taskSucceeded = false;
 
       groupForms.forEach((item) => {
         item.dataset.taskRunning = "true";
@@ -114,6 +143,7 @@
       statusBox.classList.remove("hidden", "error", "success");
       message.textContent = form.dataset.taskStarting || "正在启动刷新任务";
       progress.style.width = "4%";
+      if (loginSystem) markSessionLoggingIn(loginSystem);
 
       try {
         const response = await fetch(form.action, {
@@ -140,6 +170,7 @@
             throw new Error(task.error || fallbackText);
           }
           if (task.status === "succeeded") {
+            taskSucceeded = true;
             statusBox.classList.add("success");
             message.textContent = form.dataset.taskSuccess || "任务已完成";
             progress.style.width = "100%";
@@ -154,6 +185,7 @@
         message.textContent = error && error.message ? error.message : fallbackText;
         progress.style.width = "100%";
       } finally {
+        if (loginSystem && !taskSucceeded) restoreSessionState(loginSystem);
         groupForms.forEach((item) => {
           item.dataset.taskRunning = "false";
           item.removeAttribute("aria-busy");
