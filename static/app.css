@@ -207,6 +207,11 @@ td.actions-cell { text-align: right; white-space: nowrap; }
 .table-title { color: var(--text); font-size: 13px; font-weight: 670; }
 .table-subtitle { margin-top: 4px; color: var(--text-muted); font-size: 10px; }
 .table-empty { padding: 44px 20px; color: var(--text-muted); text-align: center; }
+.download-table .download-select-cell { width: 44px; padding-right: 0; text-align: center; }
+.download-checkbox { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); cursor: pointer; vertical-align: middle; }
+.download-checkbox:disabled { cursor: default; }
+.download-table tr[data-download-selected="true"] { background: var(--primary-soft); }
+.download-table tr[data-download-selected="true"]:hover { background: var(--primary-soft); }
 
 .list { overflow: hidden; }
 .list-header, .list-row { display: grid; align-items: center; gap: 16px; padding: 0 18px; }

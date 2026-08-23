@@ -56,6 +56,29 @@ class LocalFileActionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 library.open_file("../outside.txt")
 
+    def test_library_validates_every_path_before_batch_deletion(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory) / "downloads"
+            first = root / "course" / "slides.pdf"
+            second = root / "course" / "notes.txt"
+            first.parent.mkdir(parents=True)
+            first.write_bytes(b"pdf")
+            second.write_text("notes", encoding="utf-8")
+            library = DownloadLibrary(root)
+
+            with self.assertRaises(ValueError):
+                library.delete_many(["course/slides.pdf", "../outside.txt"])
+            self.assertTrue(first.exists())
+
+            deleted = library.delete_many(
+                ["course/slides.pdf", "course/notes.txt", "course/slides.pdf"]
+            )
+
+            self.assertEqual(deleted, 2)
+            self.assertFalse(first.exists())
+            self.assertFalse(second.exists())
+            self.assertFalse((root / "course").exists())
+
     def test_local_file_route_dispatches_without_returning_file_content(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             app = create_app(AppConfig(data_dir=Path(directory)))
@@ -92,6 +115,36 @@ class LocalFileActionTests(unittest.TestCase):
         self.assertIn('title="在文件夹中打开"', template)
         self.assertIn('form[data-local-file-action]', script)
         self.assertIn('headers: { Accept: "application/json" }', script)
+
+    def test_batch_delete_route_accepts_multiple_relative_paths(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            app = create_app(AppConfig(data_dir=Path(directory)))
+            route = next(
+                item for item in app.routes if getattr(item, "path", "") == "/downloads/delete-many"
+            )
+            request = _post_request(
+                app,
+                "/downloads/delete-many",
+                "relative_path=course%2Fslides.pdf&relative_path=course%2Fnotes.txt",
+            )
+
+            with patch.object(DownloadLibrary, "delete_many", return_value=2) as delete_many:
+                response = asyncio.run(route.endpoint(request))
+            payload = json.loads(response.body)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(payload["deleted"], 2)
+            delete_many.assert_called_once_with(["course/slides.pdf", "course/notes.txt"])
+
+    def test_download_page_supports_visible_multi_selection(self) -> None:
+        template = Path("templates/downloads.html").read_text(encoding="utf-8")
+        script = Path("static/app.js").read_text(encoding="utf-8")
+
+        self.assertIn("data-download-select-all", template)
+        self.assertIn("data-download-delete-selected", template)
+        self.assertIn('data-delete-endpoint="/downloads/delete-many"', template)
+        self.assertIn("renderDownloadSelection", script)
+        self.assertIn('requestBody.append("relative_path", checkbox.value)', script)
 
 
 if __name__ == "__main__":

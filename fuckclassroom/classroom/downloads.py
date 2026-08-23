@@ -45,6 +45,20 @@ class DownloadLibrary:
         path.unlink()
         self._remove_empty_parents(path.parent)
 
+    def delete_many(self, relative_paths: list[str]) -> int:
+        unique_paths = list(dict.fromkeys(relative_paths))
+        paths = [self.resolve(relative_path) for relative_path in unique_paths]
+        for path in paths:
+            path.unlink()
+        parents = sorted(
+            {path.parent for path in paths},
+            key=lambda item: len(item.parts),
+            reverse=True,
+        )
+        for parent in parents:
+            self._remove_empty_parents(parent)
+        return len(paths)
+
     def open_file(self, relative_path: str) -> Path:
         path = self.resolve(relative_path)
         _open_local_file(path)

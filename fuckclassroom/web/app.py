@@ -486,6 +486,30 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             return RedirectResponse(f"/downloads?delete_error={quote(str(exc))}", status_code=303)
         return RedirectResponse("/downloads?deleted=1", status_code=303)
 
+    @app.post("/downloads/delete-many")
+    async def delete_downloads(request: Request) -> JSONResponse:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        relative_paths = [value for value in parsed.get("relative_path", []) if value]
+        if not relative_paths:
+            return JSONResponse({"detail": "请先选择要删除的文件"}, status_code=400)
+        if len(relative_paths) > 500:
+            return JSONResponse({"detail": "单次最多删除 500 个文件"}, status_code=400)
+        try:
+            deleted_count = download_library.delete_many(relative_paths)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        except FileNotFoundError:
+            return JSONResponse({"detail": "部分文件已不存在，请刷新后重试"}, status_code=404)
+        except OSError as exc:
+            return JSONResponse({"detail": f"批量删除失败：{exc}"}, status_code=409)
+        return JSONResponse(
+            {
+                "deleted": deleted_count,
+                "message": f"已删除 {deleted_count} 个文件",
+            }
+        )
+
     @app.get("/accounts", response_class=HTMLResponse)
     def accounts(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
