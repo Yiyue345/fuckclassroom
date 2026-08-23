@@ -21,6 +21,7 @@
   --red: #bd3d45;
   --red-soft: #fff0f1;
   --shadow: 0 1px 2px rgba(18, 29, 39, 0.04), 0 10px 30px rgba(18, 29, 39, 0.04);
+  --theme-transition-duration: 960ms;
 }
 
 html[data-theme="dark"] {
@@ -59,16 +60,14 @@ h2 { margin-bottom: 16px; font-size: 17px; font-weight: 680; line-height: 1.35; 
 h3 { margin-bottom: 6px; font-size: 14px; font-weight: 680; line-height: 1.4; letter-spacing: 0; }
 form { margin: 0; }
 
-@media (prefers-reduced-motion: no-preference) {
-  html.theme-transitioning,
-  html.theme-transitioning body,
-  html.theme-transitioning body *,
-  html.theme-transitioning body *::before,
-  html.theme-transitioning body *::after {
-    transition-property: background-color, border-color, color, box-shadow, fill, stroke;
-    transition-duration: 480ms;
-    transition-timing-function: ease-in-out;
-  }
+html.theme-transitioning,
+html.theme-transitioning body,
+html.theme-transitioning body *,
+html.theme-transitioning body *::before,
+html.theme-transitioning body *::after {
+  transition-property: background-color, border-color, color, box-shadow, fill, stroke;
+  transition-duration: var(--theme-transition-duration);
+  transition-timing-function: ease-in-out;
 }
 
 .icon { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }

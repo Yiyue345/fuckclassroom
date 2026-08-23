@@ -1,19 +1,24 @@
 (() => {
   const root = document.documentElement;
   const media = window.matchMedia("(prefers-color-scheme: dark)");
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   let themeTransitionTimer = null;
 
   function resolveTheme(mode) {
     return mode === "auto" ? (media.matches ? "dark" : "light") : mode;
   }
 
+  function themeTransitionDurationMs() {
+    const raw = getComputedStyle(root).getPropertyValue("--theme-transition-duration").trim();
+    const value = Number.parseFloat(raw);
+    if (!Number.isFinite(value)) return 960;
+    return raw.endsWith("ms") ? value : value * 1000;
+  }
+
   function applyTheme(mode) {
     const normalized = ["light", "dark", "auto"].includes(mode) ? mode : "auto";
     const nextTheme = resolveTheme(normalized);
     const shouldAnimate = Boolean(root.dataset.theme)
-      && root.dataset.theme !== nextTheme
-      && !reducedMotion.matches;
+      && root.dataset.theme !== nextTheme;
 
     if (themeTransitionTimer !== null) {
       window.clearTimeout(themeTransitionTimer);
@@ -36,7 +41,7 @@
       themeTransitionTimer = window.setTimeout(() => {
         root.classList.remove("theme-transitioning");
         themeTransitionTimer = null;
-      }, 520);
+      }, themeTransitionDurationMs() + 40);
     }
   }
 
