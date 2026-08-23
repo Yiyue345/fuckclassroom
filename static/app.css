@@ -413,6 +413,13 @@ a.resource-chip:hover { border-color: var(--primary); color: var(--primary); }
 .catalog-table th:nth-child(6) { width: 7%; }
 .catalog-table th:nth-child(7) { width: 13%; }
 .catalog-table td { line-height: 1.5; }
+.catalog-table td:nth-child(2) { overflow: hidden; }
+.catalog-table td:nth-child(2) .table-title,
+.catalog-table td:nth-child(2) .table-subtitle {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .table-title.compact { font-size: 12px; }
 .catalog-cell-main { color: var(--text); font-size: 11px; font-weight: 620; }
 .catalog-match { display: inline-flex; margin-top: 7px; }
