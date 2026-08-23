@@ -39,6 +39,19 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn('active_system == "common"', base)
         self.assertIn("通用", base)
 
+    def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:
+        styles = Path("static/app.css").read_text(encoding="utf-8")
+
+        self.assertRegex(styles, r"\.sidebar-footer-head \{[^}]*height: 32px;")
+        self.assertIn(
+            ".sidebar-footer-head > span { display: flex; height: 32px; align-items: center; }",
+            styles,
+        )
+        self.assertIn(
+            ".sidebar-theme-toggle.btn.icon-only { width: 32px; height: 32px; min-height: 32px; flex: 0 0 32px; }",
+            styles,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
