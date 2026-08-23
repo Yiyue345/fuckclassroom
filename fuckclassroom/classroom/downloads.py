@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +45,16 @@ class DownloadLibrary:
         path.unlink()
         self._remove_empty_parents(path.parent)
 
+    def open_file(self, relative_path: str) -> Path:
+        path = self.resolve(relative_path)
+        _open_local_file(path)
+        return path
+
+    def reveal_file(self, relative_path: str) -> Path:
+        path = self.resolve(relative_path)
+        _show_in_file_manager(path)
+        return path
+
     def resolve(self, relative_path: str) -> Path:
         root = self.root.resolve()
         path = (self.root / relative_path).resolve()
@@ -71,3 +84,21 @@ def _format_size(size_bytes: int) -> str:
             return f"{value:.1f} {unit}"
         value /= 1024
     return f"{size_bytes} B"
+
+
+def _open_local_file(path: Path) -> None:
+    if os.name == "nt":
+        os.startfile(path)
+        return
+    command = ["open", str(path)] if sys.platform == "darwin" else ["xdg-open", str(path)]
+    subprocess.Popen(command)
+
+
+def _show_in_file_manager(path: Path) -> None:
+    if os.name == "nt":
+        command = ["explorer.exe", f"/select,{path}"]
+    elif sys.platform == "darwin":
+        command = ["open", "-R", str(path)]
+    else:
+        command = ["xdg-open", str(path.parent)]
+    subprocess.Popen(command)

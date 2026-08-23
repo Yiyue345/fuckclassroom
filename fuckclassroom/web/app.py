@@ -448,6 +448,33 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="文件不存在") from exc
         return FileResponse(path, filename=path.name)
 
+    @app.post("/downloads/local/{action}")
+    async def local_download_action(action: str, request: Request) -> JSONResponse:
+        if action not in {"open", "reveal"}:
+            return JSONResponse({"detail": "不支持的文件操作"}, status_code=400)
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        relative_path = (parsed.get("relative_path") or [""])[-1]
+        action_label = "打开文件" if action == "open" else "在文件夹中显示"
+        try:
+            path = (
+                download_library.open_file(relative_path)
+                if action == "open"
+                else download_library.reveal_file(relative_path)
+            )
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        except FileNotFoundError:
+            return JSONResponse({"detail": "文件不存在"}, status_code=404)
+        except OSError as exc:
+            return JSONResponse({"detail": f"{action_label}失败：{exc}"}, status_code=409)
+        message = (
+            f"已使用系统默认应用打开 {path.name}"
+            if action == "open"
+            else f"已在文件夹中定位 {path.name}"
+        )
+        return JSONResponse({"action": action, "message": message})
+
     @app.post("/downloads/delete")
     async def delete_download(request: Request) -> RedirectResponse:
         body = (await request.body()).decode("utf-8", errors="replace")

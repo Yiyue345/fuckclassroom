@@ -218,6 +218,40 @@
     window.setTimeout(() => toast.remove(), 6000);
   }
 
+  document.querySelectorAll("form[data-local-file-action]").forEach((form) => {
+    const submitButton = form.querySelector("button[type='submit']");
+    if (!submitButton) return;
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (form.dataset.running === "true") return;
+      const actionLabel = form.dataset.localFileAction || "文件操作";
+      const fileName = form.dataset.fileName || "文件";
+      form.dataset.running = "true";
+      form.setAttribute("aria-busy", "true");
+      submitButton.disabled = true;
+      try {
+        const response = await fetch(form.action, {
+          method: "POST",
+          body: new URLSearchParams(new FormData(form)),
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) throw new Error(await readResponseError(response, actionLabel + "失败"));
+        const payload = await response.json();
+        showSelectionToast(actionLabel + "成功", payload.message || fileName);
+      } catch (error) {
+        showSelectionToast(
+          actionLabel + "未完成",
+          error && error.message ? error.message : actionLabel + "失败",
+          true
+        );
+      } finally {
+        form.dataset.running = "false";
+        form.removeAttribute("aria-busy");
+        submitButton.disabled = false;
+      }
+    });
+  });
+
   function applySelectionActionState(form, action) {
     const row = form.closest("tr[data-lesson-id]");
     const button = form.querySelector("[data-selection-submit]");

@@ -13,7 +13,7 @@
 
   <div class="toolbar">
     <div class="toolbar-left"><div class="search"><svg class="icon"><use href="/static/icons.svg#search"></use></svg><input class="input" type="search" placeholder="搜索文件或路径" data-filter-input="#download-table"></div></div>
-    <div class="toolbar-right"><span class="section-meta">文件已存在时下载操作会直接复用</span></div>
+    <div class="toolbar-right"><span class="section-meta">打开的是本地原文件，不会重复下载</span></div>
   </div>
 
   <div class="table-wrap" id="download-table">
@@ -27,7 +27,8 @@
             <td>{{ file.updated_at }}</td>
             <td class="actions-cell">
               <span class="actions" style="justify-content:flex-end">
-                <a class="btn small" href="/downloads/file/{{ file.relative_path }}"><svg class="icon small"><use href="/static/icons.svg#download"></use></svg>下载</a>
+                <form method="post" action="/downloads/local/open" data-local-file-action="打开文件" data-file-name="{{ file.name }}"><input type="hidden" name="relative_path" value="{{ file.relative_path }}"><button class="btn small" type="submit"><svg class="icon small"><use href="/static/icons.svg#external-link"></use></svg>打开</button></form>
+                <form method="post" action="/downloads/local/reveal" data-local-file-action="在文件夹中显示" data-file-name="{{ file.name }}"><input type="hidden" name="relative_path" value="{{ file.relative_path }}"><button class="btn small icon-only" type="submit" title="在文件夹中打开" aria-label="在文件夹中打开 {{ file.name }}"><svg class="icon small"><use href="/static/icons.svg#folder"></use></svg></button></form>
                 <form method="post" action="/downloads/delete" data-confirm="确认删除 {{ file.name }}？"><input type="hidden" name="relative_path" value="{{ file.relative_path }}"><button class="btn small danger icon-only" type="submit" title="删除"><svg class="icon small"><use href="/static/icons.svg#trash-2"></use></svg></button></form>
               </span>
             </td>
