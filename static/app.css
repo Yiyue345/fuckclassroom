@@ -93,8 +93,8 @@ html.theme-transitioning body *::after {
 .nav-item.active { background: var(--primary-soft); color: var(--primary); font-weight: 680; }
 .nav-badge { margin-left: auto; min-width: 20px; border-radius: 10px; background: var(--surface-subtle); color: var(--text-muted); padding: 1px 6px; font-size: 10px; text-align: center; }
 .sidebar-bottom { display: grid; flex: 0 0 auto; gap: 7px; border-top: 1px solid var(--border); padding: 10px 12px 12px; }
-.sidebar-footer-head { display: flex; height: 32px; align-items: center; justify-content: space-between; color: var(--text-muted); padding-left: 2px; font-size: 10px; font-weight: 700; }
-.sidebar-footer-head > span { display: flex; height: 32px; align-items: center; }
+.sidebar-footer-head { display: grid; height: 32px; grid-template-columns: minmax(0, 1fr) 32px; align-items: stretch; color: var(--text-muted); font-size: 10px; font-weight: 700; }
+.sidebar-footer-title { height: 32px; padding-left: 2px; line-height: 32px; }
 .sidebar-theme-toggle.btn.icon-only { width: 32px; height: 32px; min-height: 32px; flex: 0 0 32px; }
 .session-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .session-card { display: flex; min-width: 0; align-items: center; gap: 7px; border-radius: 7px; background: var(--surface-subtle); padding: 8px; }

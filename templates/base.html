@@ -16,7 +16,7 @@
         document.documentElement.dataset.theme = mode === "auto" ? (dark ? "dark" : "light") : mode;
       })();
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=20260824-1">
+    <link rel="stylesheet" href="/static/app.css?v=20260824-2">
     {% block head_extra %}{% endblock %}
   </head>
   <body>
@@ -89,7 +89,7 @@
 
         <div class="sidebar-bottom">
           <div class="sidebar-footer-head">
-            <span>会话状态</span>
+            <span class="sidebar-footer-title">会话状态</span>
             <button class="btn icon-only sidebar-theme-toggle" type="button" title="切换浅色/深色主题" data-theme-toggle>
               <svg class="icon"><use href="/static/icons.svg#sun-moon"></use></svg>
             </button>

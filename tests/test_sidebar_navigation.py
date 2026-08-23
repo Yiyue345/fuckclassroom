@@ -40,11 +40,16 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("通用", base)
 
     def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:
+        template = Path("templates/base.html").read_text(encoding="utf-8")
         styles = Path("static/app.css").read_text(encoding="utf-8")
 
-        self.assertRegex(styles, r"\.sidebar-footer-head \{[^}]*height: 32px;")
+        self.assertIn('<span class="sidebar-footer-title">会话状态</span>', template)
+        self.assertRegex(
+            styles,
+            r"\.sidebar-footer-head \{[^}]*height: 32px;[^}]*grid-template-columns: minmax\(0, 1fr\) 32px;",
+        )
         self.assertIn(
-            ".sidebar-footer-head > span { display: flex; height: 32px; align-items: center; }",
+            ".sidebar-footer-title { height: 32px; padding-left: 2px; line-height: 32px; }",
             styles,
         )
         self.assertIn(
