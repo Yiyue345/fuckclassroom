@@ -153,6 +153,45 @@ class SelectionBatchTests(unittest.TestCase):
 
         fetch_payload.assert_not_called()
 
+    def test_automatic_refresh_prefers_latest_api_batch_over_cached_batch(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            assistant = CourseSelectionAssistant(AppConfig(data_dir=Path(directory)))
+            current = SelectionBatch(1, 30, "当前开放批次", "current", is_open=True)
+            cached = SelectionBatch(1, 20, "旧缓存批次", "cached")
+            assistant.selection_info_path.parent.mkdir(parents=True, exist_ok=True)
+            assistant.selection_info_path.write_text(
+                json.dumps(
+                    {
+                        "turn_id": cached.turn_id,
+                        "student_id": cached.student_id,
+                        "sections": {"major-plan": []},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            opener = object()
+            jar = object()
+            with (
+                patch.object(assistant, "_selection_http_client", return_value=(opener, jar)),
+                patch.object(
+                    assistant,
+                    "_fetch_selection_batches",
+                    return_value=([current, cached], "token"),
+                ),
+                patch.object(
+                    assistant,
+                    "_fetch_selection_batch_payload",
+                    return_value={"turnId": current.turn_id, "studentId": current.student_id},
+                ) as fetch_payload,
+                patch.object(assistant, "_persist_selection_cookies"),
+            ):
+                payload, batch = assistant._fetch_selection_info_via_api(None, 10)
+
+        self.assertEqual(batch, current)
+        self.assertEqual(payload["title"], current.label)
+        fetch_payload.assert_called_once_with(opener, "token", current, 10)
+
     def test_cached_info_exposes_current_batch(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             assistant = CourseSelectionAssistant(AppConfig(data_dir=Path(directory)))

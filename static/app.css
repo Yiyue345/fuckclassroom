@@ -1,3 +1,23 @@
+@property --bg { syntax: "<color>"; inherits: true; initial-value: #f4f6f8; }
+@property --surface { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+@property --surface-subtle { syntax: "<color>"; inherits: true; initial-value: #f8fafb; }
+@property --surface-hover { syntax: "<color>"; inherits: true; initial-value: #f1f5f9; }
+@property --text { syntax: "<color>"; inherits: true; initial-value: #18212b; }
+@property --text-soft { syntax: "<color>"; inherits: true; initial-value: #53606d; }
+@property --text-muted { syntax: "<color>"; inherits: true; initial-value: #7a8794; }
+@property --border { syntax: "<color>"; inherits: true; initial-value: #dde3e8; }
+@property --border-strong { syntax: "<color>"; inherits: true; initial-value: #cbd4dc; }
+@property --primary { syntax: "<color>"; inherits: true; initial-value: #2468d8; }
+@property --primary-soft { syntax: "<color>"; inherits: true; initial-value: #eaf2ff; }
+@property --primary-hover { syntax: "<color>"; inherits: true; initial-value: #1d58b8; }
+@property --primary-on { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+@property --green { syntax: "<color>"; inherits: true; initial-value: #21865c; }
+@property --green-soft { syntax: "<color>"; inherits: true; initial-value: #e9f7f0; }
+@property --amber { syntax: "<color>"; inherits: true; initial-value: #a46612; }
+@property --amber-soft { syntax: "<color>"; inherits: true; initial-value: #fff6df; }
+@property --red { syntax: "<color>"; inherits: true; initial-value: #bd3d45; }
+@property --red-soft { syntax: "<color>"; inherits: true; initial-value: #fff0f1; }
+
 :root {
   color-scheme: light;
   font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
@@ -21,7 +41,7 @@
   --red: #bd3d45;
   --red-soft: #fff0f1;
   --shadow: 0 1px 2px rgba(18, 29, 39, 0.04), 0 10px 30px rgba(18, 29, 39, 0.04);
-  --theme-transition-duration: 960ms;
+  --theme-transition-duration: 480ms;
 }
 
 html[data-theme="dark"] {
@@ -60,12 +80,17 @@ h2 { margin-bottom: 16px; font-size: 17px; font-weight: 680; line-height: 1.35; 
 h3 { margin-bottom: 6px; font-size: 14px; font-weight: 680; line-height: 1.4; letter-spacing: 0; }
 form { margin: 0; }
 
-html.theme-transitioning,
+html.theme-transitioning {
+  transition-property: --bg, --surface, --surface-subtle, --surface-hover, --text, --text-soft, --text-muted, --border, --border-strong, --primary, --primary-soft, --primary-hover, --primary-on, --green, --green-soft, --amber, --amber-soft, --red, --red-soft;
+  transition-duration: var(--theme-transition-duration);
+  transition-timing-function: ease-in-out;
+}
+
 html.theme-transitioning body,
 html.theme-transitioning body *,
 html.theme-transitioning body *::before,
 html.theme-transitioning body *::after {
-  transition-property: background-color, border-color, color, box-shadow, fill, stroke;
+  transition-property: box-shadow;
   transition-duration: var(--theme-transition-duration);
   transition-timing-function: ease-in-out;
 }

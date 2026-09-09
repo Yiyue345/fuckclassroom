@@ -27,6 +27,11 @@ class StartupSessionRecoveryTests(unittest.TestCase):
                     "verify_saved_session",
                     return_value=WebVpnSessionStatus(True, "教务会话已恢复", is_valid=True),
                 ) as selection_verify,
+                patch.object(
+                    CourseSelectionAssistant,
+                    "refresh_selection_info_for_web",
+                    return_value="/selection/info",
+                ) as selection_refresh,
                 patch.object(AutoSelectionService, "start"),
                 patch.object(AutoSelectionService, "stop"),
             ):
@@ -40,6 +45,7 @@ class StartupSessionRecoveryTests(unittest.TestCase):
 
         classroom_verify.assert_called_once_with(auto_relogin=True)
         selection_verify.assert_called_once_with(timeout_ms=60_000, auto_relogin=True)
+        selection_refresh.assert_called_once_with(timeout_ms=60_000)
 
 
 if __name__ == "__main__":

@@ -183,9 +183,7 @@ class SelectionApiMixin:
                 raise CourseSelectionApiError("所选批次当前不可用，请重新刷新批次列表")
             candidate_batches = [requested_batch]
         else:
-            preferred_batch = self._match_cached_batch(batches, self.get_selection_info("all"))
-            candidate_batches = [preferred_batch] if preferred_batch is not None else []
-            candidate_batches.extend(batch for batch in batches if batch != preferred_batch)
+            candidate_batches = batches
 
         errors: list[str] = []
         for index, batch in enumerate(candidate_batches):

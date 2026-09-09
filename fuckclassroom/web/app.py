@@ -132,6 +132,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     logger.warning("启动时%s会话检测失败：%s", label, result)
                 else:
                     logger.info("启动时%s会话状态：%s", label, result.message)
+            selection_result = results[1]
+            if not isinstance(selection_result, Exception) and selection_result.is_valid is True:
+                try:
+                    await asyncio.to_thread(
+                        course_selection.refresh_selection_info_for_web,
+                        timeout_ms=60_000,
+                    )
+                except Exception as exc:  # noqa: BLE001 - startup refresh must not stop the app.
+                    logger.warning("启动时选课信息刷新失败：%s", exc)
 
         startup_check = asyncio.create_task(verify_saved_sessions())
         auto_selection.start()

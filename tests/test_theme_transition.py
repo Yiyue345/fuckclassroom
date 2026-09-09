@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -15,7 +16,10 @@ class ThemeTransitionTests(unittest.TestCase):
         self.assertIn('root.classList.remove("theme-transitioning")', script)
         self.assertIn("root.dataset.theme !== nextTheme", script)
         self.assertIn("html.theme-transitioning body *", styles)
-        self.assertIn("--theme-transition-duration: 960ms", styles)
+        self.assertIsNotNone(re.search(r"--theme-transition-duration:\s+\d+ms", styles))
+        self.assertIn('@property --text { syntax: "<color>"; inherits: true;', styles)
+        self.assertIn("transition-property: --bg, --surface", styles)
+        self.assertNotIn("transition-property: background-color, border-color, color", styles)
         self.assertIn("transition-duration: var(--theme-transition-duration)", styles)
         self.assertIn("transition-timing-function: ease-in-out", styles)
         self.assertIn("themeTransitionDurationMs() + 40", script)
