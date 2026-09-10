@@ -12,6 +12,13 @@
       <p class="page-description">教学班、授课教师、上课安排与容量。</p>
     </div>
     <div class="head-actions">
+      <label class="catalog-queue-batch" for="catalog-queue-batch">
+        <span>队列批次</span>
+        <select class="select" id="catalog-queue-batch">
+          <option value="">请选择队列批次</option>
+          <option value="pending">等待新批次自动匹配</option>
+        </select>
+      </label>
       <button class="btn" type="button" data-catalog-refresh><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>刷新</button>
     </div>
   </div>
@@ -82,4 +89,4 @@
   </div>
 {% endblock %}
 
-{% block scripts %}<script src="/static/selection_catalog.js"></script>{% endblock %}
+{% block scripts %}<script src="/static/selection_catalog.js?v=20260910-1"></script>{% endblock %}

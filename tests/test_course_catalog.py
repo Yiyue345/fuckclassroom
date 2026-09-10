@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from fuckclassroom.course_selection.catalog import (
     _CatalogOptionsParser,
@@ -8,9 +9,40 @@ from fuckclassroom.course_selection.catalog import (
     _normalize_catalog_course,
 )
 from fuckclassroom.course_selection.models import CourseSelectionApiError
+from fuckclassroom.web.app import _resolve_catalog_queue_batch
 
 
 class CatalogParsingTests(unittest.TestCase):
+    def test_catalog_queue_resolves_the_explicit_batch_instead_of_current_batch(self) -> None:
+        batches = [
+            {"student_id": 7, "turn_id": 101, "label": "第一批次"},
+            {"student_id": 7, "turn_id": 202, "label": "第二批次"},
+        ]
+
+        selected = _resolve_catalog_queue_batch(batches, "7:202")
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected["turn_id"], 202)
+        self.assertEqual(selected["label"], "第二批次")
+        self.assertIsNone(_resolve_catalog_queue_batch(batches, "pending"))
+
+    def test_catalog_queue_rejects_missing_or_stale_batch(self) -> None:
+        with self.assertRaisesRegex(ValueError, "请选择有效"):
+            _resolve_catalog_queue_batch([], "")
+        with self.assertRaisesRegex(ValueError, "已不可用"):
+            _resolve_catalog_queue_batch(
+                [{"student_id": 7, "turn_id": 101, "label": "第一批次"}],
+                "7:202",
+            )
+
+    def test_catalog_page_sends_the_selected_queue_batch(self) -> None:
+        script = Path("static/selection_catalog.js").read_text(encoding="utf-8")
+        template = Path("templates/selection_catalog.html").read_text(encoding="utf-8")
+
+        self.assertIn('id="catalog-queue-batch"', template)
+        self.assertIn("batch_key: queueBatch.value", script)
+        self.assertIn("populateQueueBatches(payload.selection_batches", script)
+
     def test_parses_official_filter_options(self) -> None:
         parser = _CatalogOptionsParser()
         parser.feed(

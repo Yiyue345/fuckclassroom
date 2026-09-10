@@ -38,6 +38,33 @@ templates = Jinja2Templates(directory=str(PROJECT_ROOT / "templates"))
 logger = logging.getLogger(__name__)
 
 
+def _resolve_catalog_queue_batch(
+    batches: list[dict[str, object]],
+    batch_key: str,
+) -> dict[str, object] | None:
+    if batch_key == "pending":
+        return None
+    try:
+        student_id_text, turn_id_text = batch_key.split(":", 1)
+        student_id = int(student_id_text)
+        turn_id = int(turn_id_text)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("请选择有效的定时选课批次") from exc
+
+    batch = next(
+        (
+            item
+            for item in batches
+            if str(item.get("student_id") or "") == str(student_id)
+            and str(item.get("turn_id") or "") == str(turn_id)
+        ),
+        None,
+    )
+    if batch is None:
+        raise ValueError("所选定时选课批次已不可用，请刷新后重试")
+    return dict(batch)
+
+
 def _login_and_refresh_selection_info(
     course_selection: CourseSelectionAssistant,
     progress: Callable[[int, str], None],
@@ -629,6 +656,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     target for target in targets if target.casefold() in lesson_name
                 ]
                 course["is_queued"] = course.get("lesson_id") in queued_ids
+            selection_info = course_selection.get_selection_info("all")
+            result["selection_batches"] = selection_info.batches
             result["targets"] = list(targets)
             result["targets_only"] = targets_only
             return JSONResponse(result)
@@ -675,14 +704,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         try:
             lesson_id = int((parsed.get("lesson_id") or [""])[-1])
             course = course_selection.get_cached_catalog_course(lesson_id)
-            batch = course_selection.get_selection_info("all").current_batch
-            try:
-                job, created = auto_selection.add_job(lesson_id, course, batch)
-            except ValueError as exc:
-                if batch is None or "批次" in str(exc) or "已经结束" in str(exc):
-                    job, created = auto_selection.add_job(lesson_id, course, None)
-                else:
-                    raise
+            batch_key = (parsed.get("batch_key") or [""])[-1]
+            batches = course_selection.get_selection_info("all").batches
+            batch = _resolve_catalog_queue_batch(batches, batch_key)
+            job, created = auto_selection.add_job(lesson_id, course, batch)
         except (TypeError, ValueError) as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
         return JSONResponse(

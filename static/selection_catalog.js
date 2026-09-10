@@ -12,6 +12,7 @@
   const previous = document.querySelector("[data-catalog-prev]");
   const next = document.querySelector("[data-catalog-next]");
   const refresh = document.querySelector("[data-catalog-refresh]");
+  const queueBatch = document.querySelector("#catalog-queue-batch");
   const teacherTerm = document.querySelector("#catalog-teacher-term");
   const teacherSelect = document.querySelector("#catalog-teacher");
   let currentPage = 1;
@@ -71,6 +72,19 @@
     });
   }
 
+  function populateQueueBatches(batches) {
+    const selected = queueBatch.value;
+    const nodes = [new Option("请选择队列批次", ""), new Option("等待新批次自动匹配", "pending")];
+    (Array.isArray(batches) ? batches : []).forEach((batch) => {
+      const key = String(batch.student_id) + ":" + String(batch.turn_id);
+      nodes.push(new Option(batch.label || ("选课批次 " + batch.turn_id), key));
+    });
+    queueBatch.replaceChildren(...nodes);
+    if (selected && Array.from(queueBatch.options).some((item) => item.value === selected)) {
+      queueBatch.value = selected;
+    }
+  }
+
   function capacityNode(course) {
     const wrap = element("div", "capacity");
     if (course.selected_count === null || course.max_count === null || !course.max_count) {
@@ -105,12 +119,20 @@
     button.type = "button";
     button.disabled = Boolean(course.is_queued);
     button.addEventListener("click", async () => {
+      if (!queueBatch.value) {
+        showStatus("请先选择定时选课批次", "error");
+        queueBatch.focus();
+        return;
+      }
       button.disabled = true;
       showStatus("正在加入定时队列");
       try {
         const response = await fetch("/selection/catalog/queue", {
           method: "POST",
-          body: new URLSearchParams({lesson_id: String(course.lesson_id)}),
+          body: new URLSearchParams({
+            lesson_id: String(course.lesson_id),
+            batch_key: queueBatch.value,
+          }),
           headers: {Accept: "application/json"},
         });
         if (!response.ok) throw new Error(await responseError(response, "加入队列失败"));
@@ -204,6 +226,7 @@
     previous.disabled = currentPage <= 1 || payload.targets_only;
     next.disabled = currentPage >= totalPages || payload.targets_only;
     populateOptions(payload.options || {}, payload.semester_id);
+    populateQueueBatches(payload.selection_batches || []);
   }
 
   async function load(page = 1) {
