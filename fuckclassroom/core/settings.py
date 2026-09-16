@@ -17,6 +17,7 @@ class AppSettings:
     ocr_model: str = "gpt-4o-mini"
     ocr_engine: str = "auto"
     ocr_max_images: int = 120
+    ocr_workers: int = 4
     asr_model: str = "small"
     asr_device: str = "cpu"
     asr_compute_type: str = "int8"
@@ -43,6 +44,7 @@ class AppSettings:
             ocr_model=str(data.get("ocr_model") or data.get("ai_model") or cls.ocr_model),
             ocr_engine=_valid_ocr_engine(data.get("ocr_engine")),
             ocr_max_images=_positive_int(data.get("ocr_max_images"), cls.ocr_max_images),
+            ocr_workers=_bounded_int(data.get("ocr_workers"), cls.ocr_workers, 1, 16),
             asr_model=str(data.get("asr_model") or cls.asr_model).strip() or cls.asr_model,
             asr_device=_valid_asr_device(data.get("asr_device")),
             asr_compute_type=str(data.get("asr_compute_type") or cls.asr_compute_type).strip().lower(),
@@ -124,6 +126,7 @@ class SettingsStore:
                 "ocr_model": form.get("ocr_model", current.ocr_model),
                 "ocr_engine": form.get("ocr_engine", current.ocr_engine),
                 "ocr_max_images": form.get("ocr_max_images", current.ocr_max_images),
+                "ocr_workers": form.get("ocr_workers", current.ocr_workers),
                 "asr_model": form.get("asr_model", current.asr_model),
                 "asr_device": form.get("asr_device", current.asr_device),
                 "asr_compute_type": form.get("asr_compute_type", current.asr_compute_type),
