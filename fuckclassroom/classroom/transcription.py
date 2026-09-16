@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,7 @@ _TRANSCRIPTION_CONDITION = threading.Condition()
 _ACTIVE_TRANSCRIPTIONS = 0
 _OPENCC_CONVERTER = None
 _OPENCC_LOCK = threading.Lock()
+_PREPARATION_HEARTBEAT_SECONDS = 10.0
 _MODEL_ALLOW_PATTERNS = [
     "config.json",
     "preprocessor_config.json",
@@ -81,8 +83,11 @@ class LocalTranscriptionService:
             _report(
                 progress,
                 12,
-                f"正在连接课堂录像并流式读取音频（并发上限 {self.config.asr_max_concurrent_tasks}）",
+                "正在连接课堂录像并准备音频；首次输出前需要完成远程解码、VAD 和特征准备"
+                f"（并发上限 {self.config.asr_max_concurrent_tasks}）",
             )
+            heartbeat = _PreparationHeartbeat(progress)
+            heartbeat.start()
             try:
                 transcriber = model
                 transcribe_kwargs = {
@@ -103,7 +108,12 @@ class LocalTranscriptionService:
                 segments, info = transcriber.transcribe(video_url, **transcribe_kwargs)
                 duration = float(getattr(info, "duration", 0.0) or 0.0)
                 lines: list[str] = []
+                first_segment = True
                 for segment in segments:
+                    if first_segment:
+                        heartbeat.stop()
+                        first_segment = False
+
                     raw_text = str(getattr(segment, "text", "") or "").strip()
                     text = self._normalize_text(raw_text)
                     if not text:
@@ -112,12 +122,19 @@ class LocalTranscriptionService:
                     end = float(getattr(segment, "end", start) or start)
                     lines.append(f"[{_timestamp(start)} - {_timestamp(end)}] {text}")
                     if duration > 0:
+                        media_percent = max(0, min(100, int((end / duration) * 100)))
                         percent = 15 + min(80, int((end / duration) * 80))
-                        _report(progress, percent, f"正在本地转写：{_timestamp(end)} / {_timestamp(duration)}")
+                        _report(
+                            progress,
+                            percent,
+                            f"正在本地转写：{_timestamp(end)} / {_timestamp(duration)}（{media_percent}%）",
+                        )
                     else:
                         _report(progress, 55, f"正在本地转写：已处理到 {_timestamp(end)}")
             except Exception as exc:  # faster-whisper/PyAV can raise several backend-specific errors.
                 raise LocalTranscriptionError(f"本地语音转写失败：{exc}") from exc
+            finally:
+                heartbeat.stop()
 
         if not lines:
             raise LocalTranscriptionError("录像中没有识别到可用语音")
@@ -341,6 +358,48 @@ class LocalTranscriptionService:
             )
         except Exception as exc:
             raise LocalTranscriptionError(f"语音模型下载完成但本地快照不可用：{exc}") from exc
+
+
+class _PreparationHeartbeat:
+    """Keep long media preparation visibly alive until faster-whisper yields its first segment."""
+
+    def __init__(self, progress: ProgressCallback | None) -> None:
+        self.progress = progress
+        self.started_at = time.monotonic()
+        self.stop_event = threading.Event()
+        self.thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self.progress is None:
+            return
+        self.thread = threading.Thread(
+            target=self._run,
+            name="asr-preparation-heartbeat",
+            daemon=True,
+        )
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        thread = self.thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=0.25)
+
+    def _run(self) -> None:
+        while not self.stop_event.wait(_PREPARATION_HEARTBEAT_SECONDS):
+            elapsed = time.monotonic() - self.started_at
+            try:
+                _report(
+                    self.progress,
+                    12,
+                    "正在读取并预处理课堂录像音频："
+                    f"已等待 {_timestamp(elapsed)}；正在进行远程解码 / VAD / 特征准备，"
+                    "完成后会开始显示媒体转写百分比",
+                )
+            except Exception:
+                # The main worker owns task failure/cancellation. A UI heartbeat must never
+                # terminate the transcription thread or produce an unhandled thread exception.
+                return
 
 
 @contextmanager
