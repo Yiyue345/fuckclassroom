@@ -35,7 +35,7 @@ class LocalTranscriptionTests(unittest.TestCase):
                     )
                     return segments, SimpleNamespace(duration=12.0)
 
-            service._get_model = lambda: FakeModel()  # type: ignore[method-assign]
+            service._get_model = lambda progress=None: FakeModel()  # type: ignore[method-assign]
             target = Path(directory) / "local_transcript.txt"
             progress: list[tuple[int, str]] = []
 
@@ -51,7 +51,7 @@ class LocalTranscriptionTests(unittest.TestCase):
             self.assertEqual(calls, ["https://example.test/lesson.mp4"])
             self.assertEqual(progress[-1][0], 100)
 
-            service._get_model = lambda: self.fail("cached transcription should not reload the model")  # type: ignore[method-assign]
+            service._get_model = lambda progress=None: self.fail("cached transcription should not reload the model")  # type: ignore[method-assign]
             cached = service.transcribe_url("https://example.test/lesson.mp4", target)
             self.assertTrue(cached.cached)
             self.assertEqual(cached.text, result.text)
