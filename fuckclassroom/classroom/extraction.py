@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import mimetypes
+import re
 import shutil
 import subprocess
 import tempfile
@@ -64,10 +65,38 @@ class LessonExtractionService:
         warnings: list[str] = []
         transcript_path = output_dir / "transcript.md"
         transcript_text = ""
-
+        video_resource = _find_resource(lesson, "video")
         platform_transcript = _find_resource(lesson, "transcript")
-        if platform_transcript is not None:
-            _report(progress, 12, "正在检查平台转写")
+        need_platform_fallback = not bool(video_resource and video_resource.url)
+
+        # The platform transcript endpoint is not a trustworthy source of classroom speech.
+        # When a recording exists, local ASR is the source of truth. Platform text is only a
+        # fallback for lessons without a recording or when local ASR cannot complete.
+        if video_resource is not None and video_resource.url:
+            _report(progress, 10, "检测到课堂录像，优先使用本地语音转写")
+            _task_log(
+                progress,
+                "检测到课堂录像：平台转写不作为主文本，本次优先使用本地 Whisper。",
+                "info",
+            )
+            try:
+                def asr_progress(value: int, message: str) -> None:
+                    _report(progress, 10 + int(value * 0.42), message)
+
+                transcript_path = self._transcribe_lesson(
+                    detail,
+                    lesson,
+                    progress=asr_progress,
+                )
+                transcript_text = transcript_path.read_text(encoding="utf-8")
+            except LocalTranscriptionError as exc:
+                warning = f"本地语音转写失败，尝试平台转写兜底：{exc}"
+                warnings.append(warning)
+                _task_log(progress, warning, "warning")
+                need_platform_fallback = True
+
+        if need_platform_fallback and platform_transcript is not None:
+            _report(progress, 12, "正在检查平台转写兜底")
             try:
                 transcript_file, transcript_from_cache = self._download_export(
                     course_id, lesson_id, "transcript", work_dir
@@ -76,13 +105,20 @@ class LessonExtractionService:
                     _report(progress, 16, "已复用本地平台转写")
                 else:
                     _report(progress, 16, "平台转写已下载")
-                transcript_text = extract_docx_text(transcript_file)
-                if transcript_text.strip():
+                candidate = extract_docx_text(transcript_file)
+                usable, reason = _platform_transcript_is_usable(
+                    candidate,
+                    course_title=detail.course.title,
+                    lesson=lesson,
+                )
+                if usable:
+                    transcript_text = candidate
                     transcript_path.write_text(
-                        _section("平台转写", transcript_text), encoding="utf-8"
+                        _section("平台转写（兜底）", transcript_text), encoding="utf-8"
                     )
+                    _task_log(progress, f"平台转写兜底通过质量检查：{reason}", "warning")
                 else:
-                    warning = "平台转写为空，已尝试改用本地语音转写。"
+                    warning = f"平台转写已拒绝，改用空转写占位：{reason}"
                     warnings.append(warning)
                     _task_log(progress, warning, "warning")
             except (
@@ -91,41 +127,18 @@ class LessonExtractionService:
                 zipfile.BadZipFile,
                 ET.ParseError,
             ) as exc:
-                warning = f"平台转写不可用，已尝试改用本地语音转写：{exc}"
+                warning = f"平台转写兜底不可用：{exc}"
                 warnings.append(warning)
                 _task_log(progress, warning, "warning")
-        else:
-            warning = "平台未提供可用转写，已尝试改用本地语音转写。"
+        elif need_platform_fallback and platform_transcript is None:
+            warning = "本课次没有可用录像，平台也未提供可信转写。"
             warnings.append(warning)
             _task_log(progress, warning, "warning")
 
         if not transcript_text.strip():
-            video_resource = _find_resource(lesson, "video")
-            if video_resource is not None and video_resource.url:
-                def asr_progress(value: int, message: str) -> None:
-                    _report(progress, 18 + int(value * 0.34), message)
-
-                try:
-                    transcript_path = self._transcribe_lesson(
-                        detail,
-                        lesson,
-                        progress=asr_progress,
-                    )
-                    transcript_text = transcript_path.read_text(encoding="utf-8")
-                except LocalTranscriptionError as exc:
-                    warning = str(exc)
-                    warnings.append(warning)
-                    _task_log(progress, warning, "warning")
-                    transcript_path.write_text(
-                        _section("语音转写", "（本地语音转写失败）"), encoding="utf-8"
-                    )
-            else:
-                warning = "本课次没有可用录像，无法执行本地语音转写。"
-                warnings.append(warning)
-                _task_log(progress, warning, "warning")
-                transcript_path.write_text(
-                    _section("语音转写", "（本课次暂无可用转写或录像）"), encoding="utf-8"
-                )
+            transcript_path.write_text(
+                _section("语音转写", "（本课次暂无可用的可信转写）"), encoding="utf-8"
+            )
 
         ppt_text_path = output_dir / "ppt_ocr.md"
         ppt_text = ""
@@ -359,6 +372,48 @@ def extract_docx_text(path: Path) -> str:
             root = ET.fromstring(archive.read(name))
             texts.extend(_xml_texts(root))
     return "\n".join(line for line in texts if line.strip()).strip()
+
+
+def _platform_transcript_is_usable(
+    text: str,
+    *,
+    course_title: str,
+    lesson: Lesson,
+) -> tuple[bool, str]:
+    candidate = text.strip()
+    if not candidate:
+        return False, "内容为空"
+
+    # Platform exports sometimes contain only course metadata such as:
+    # “课程名 授课老师：某某 2026-03-03第1-2节”. Remove those fields before
+    # estimating whether there is any actual classroom speech left.
+    body = candidate
+    if course_title.strip():
+        body = body.replace(course_title.strip(), " ")
+    if lesson.title.strip():
+        body = body.replace(lesson.title.strip(), " ")
+    body = re.sub(r"授课老师\s*[：:]\s*[\u4e00-\u9fffA-Za-z·.]{1,40}", " ", body)
+    body = re.sub(r"\b\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?\b", " ", body)
+    body = re.sub(r"第\s*\d+\s*[-—~～至到]\s*\d+\s*节", " ", body)
+    body = re.sub(r"(?:课程名称|课程名|教师|老师|上课时间)\s*[：:]?", " ", body)
+    meaningful = re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", body)
+
+    duration_seconds = max(0, int(getattr(lesson, "duration_seconds", 0) or 0))
+    duration_minutes = duration_seconds / 60 if duration_seconds else 0.0
+    minimum_chars = 120
+    if duration_minutes:
+        # A deliberately loose floor: only ~8 useful characters per minute. This is far
+        # below normal lecture speech, so it rejects metadata-only/obviously truncated
+        # exports without demanding a near-complete transcript.
+        minimum_chars = max(120, min(1000, int(duration_minutes * 8)))
+
+    if len(meaningful) < minimum_chars:
+        return (
+            False,
+            f"去除课程/教师/日期/节次元信息后仅剩 {len(meaningful)} 个有效字符，"
+            f"低于本课次最低可信阈值 {minimum_chars}",
+        )
+    return True, f"有效正文约 {len(meaningful)} 个字符"
 
 
 def extract_pptx_text(
