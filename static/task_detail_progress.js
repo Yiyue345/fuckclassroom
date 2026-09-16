@@ -59,7 +59,7 @@
     document.querySelectorAll('.inline-task-status').forEach((statusBox) => {
       const detail = ensureDetail(statusBox);
       if (!detail) return;
-      if (!progressState || task.status === 'failed' || task.status === 'succeeded') {
+      if (!progressState || task.status === 'failed' || task.status === 'succeeded' || task.status === 'cancelled') {
         hideDetail(statusBox);
         return;
       }
@@ -85,11 +85,27 @@
     try {
       const input = args[0];
       const url = typeof input === 'string' ? input : input?.url || '';
-      if (url.includes('/api/tasks/')) {
-        response.clone().json().then(renderTaskDetail).catch(() => {});
+      if (url.includes('/api/tasks/') && !url.endsWith('/cancel')) {
+        const task = await response.clone().json();
+        renderTaskDetail(task);
+
+        // static/app.js predates the explicit `cancelled` task state and only exits
+        // its polling loop for succeeded/failed. On inline-task pages translate the
+        // terminal state so controls are re-enabled instead of polling forever.
+        if (task?.status === 'cancelled' && document.querySelector('form[data-inline-task]')) {
+          return new Response(
+            JSON.stringify({ ...task, status: 'failed', error: '任务已取消' }),
+            {
+              status: response.status,
+              statusText: response.statusText,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
       }
     } catch (_) {
-      // Detail progress is optional and must never interfere with the main task poller.
+      // Detail progress/cancellation compatibility is optional and must never
+      // interfere with the main task poller.
     }
     return response;
   };
