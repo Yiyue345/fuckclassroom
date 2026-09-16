@@ -89,8 +89,16 @@ class PlatformTranscriptPolicyTests(unittest.TestCase):
                         raise AssertionError(f"{left!r} != {right!r}")
 
             class FakeTranscription:
-                def transcribe_url(self, video_url: str, output_path: Path, progress=None, force=False):
+                def transcribe_url(
+                    self,
+                    video_url: str,
+                    output_path: Path,
+                    progress=None,
+                    force=False,
+                    duration_hint_seconds=None,
+                ):
                     self.assertEqual(video_url, "https://example.test/lesson.mp4")
+                    self.assertEqual(duration_hint_seconds, 90 * 60)
                     if progress:
                         progress(100, "本地语音转写完成")
                     return SimpleNamespace(
