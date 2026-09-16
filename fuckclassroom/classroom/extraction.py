@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Callable
 
@@ -168,7 +169,20 @@ class LessonExtractionService:
                     _report(progress, 58, "已复用本地课件")
                 else:
                     _report(progress, 58, "课件已下载")
-                ocr_callback = self._ocr_image if run_ocr and self._can_ocr(ppt_warnings) else None
+
+                ocr_stats = {"cache_hits": 0, "inferences": 0}
+                ocr_stats_lock = threading.Lock()
+
+                def ocr_callback(image_bytes: bytes, image_name: str) -> str:
+                    return self._ocr_image(
+                        image_bytes,
+                        image_name,
+                        stats=ocr_stats,
+                        stats_lock=ocr_stats_lock,
+                    )
+
+                can_ocr = run_ocr and self._can_ocr(ppt_warnings)
+                selected_ocr_callback = ocr_callback if can_ocr else None
 
                 def ppt_progress(done: int, total: int, image_name: str) -> None:
                     if total <= 0:
@@ -184,19 +198,33 @@ class LessonExtractionService:
                 )
                 _task_log(
                     progress,
-                    f"PPT OCR 配置：engine={self.config.ocr_engine}, workers={self.config.ocr_workers}, max_images={self.config.ocr_max_images}, dedup=true",
+                    "PPT OCR 配置："
+                    f"engine={self.config.ocr_engine}, workers={self.config.ocr_workers}, "
+                    f"onnx_threads={self.config.ocr_onnx_threads}, max_side={self.config.ocr_max_side}, "
+                    f"angle_cls={str(self.config.ocr_use_angle_cls).lower()}, "
+                    f"cache={str(self.config.ocr_cache_enabled).lower()}, "
+                    f"max_images={self.config.ocr_max_images}, dedup=true",
                     "debug",
                 )
                 cancel_check = getattr(progress, "raise_if_cancelled", None)
                 ppt_text, ocr_warnings = extract_pptx_text(
                     ppt_file,
-                    ocr_callback,
+                    selected_ocr_callback,
                     self.config.ocr_max_images,
                     progress=ppt_progress,
                     ocr_workers=self.config.ocr_workers,
                     cancel_check=cancel_check if callable(cancel_check) else None,
                     event_log=lambda message, level="info": _task_log(progress, message, level),
                 )
+                if can_ocr:
+                    with ocr_stats_lock:
+                        cache_hits = ocr_stats["cache_hits"]
+                        inferences = ocr_stats["inferences"]
+                    _task_log(
+                        progress,
+                        f"OCR 运行统计：缓存命中 {cache_hits} 张，实际推理 {inferences} 张",
+                        "info",
+                    )
                 ppt_warnings.extend(ocr_warnings)
                 for warning in ocr_warnings:
                     _task_log(progress, warning, "warning")
@@ -330,25 +358,68 @@ class LessonExtractionService:
         exported = self.classroom.download_lesson_export(course_id, lesson_id, kind)
         return exported.saved_path, exported.from_cache
 
-    def _ocr_image(self, image_bytes: bytes, image_name: str) -> str:
+    def _ocr_image(
+        self,
+        image_bytes: bytes,
+        image_name: str,
+        *,
+        stats: dict[str, int] | None = None,
+        stats_lock: threading.Lock | None = None,
+    ) -> str:
         engine = self.config.ocr_engine
         if engine in ("auto", "rapidocr"):
             try:
-                return _rapidocr_ocr(image_bytes)
+                cache_path = self._rapidocr_cache_path(image_bytes)
+                if cache_path is not None and cache_path.exists():
+                    try:
+                        text = cache_path.read_text(encoding="utf-8")
+                    except OSError:
+                        pass
+                    else:
+                        _increment_ocr_stat(stats, stats_lock, "cache_hits")
+                        return text
+
+                text = _rapidocr_ocr(
+                    image_bytes,
+                    onnx_threads=self.config.ocr_onnx_threads,
+                    max_side=self.config.ocr_max_side,
+                    use_angle_cls=self.config.ocr_use_angle_cls,
+                )
+                _increment_ocr_stat(stats, stats_lock, "inferences")
+                if cache_path is not None:
+                    _write_cache_text(cache_path, text)
+                return text
             except ImportError:
                 if engine == "rapidocr":
                     raise ExtractionError("缺少 rapidocr-onnxruntime，请先安装项目依赖") from None
 
         if engine in ("auto", "tesseract") and shutil.which("tesseract"):
+            _increment_ocr_stat(stats, stats_lock, "inferences")
             return _tesseract_ocr(image_bytes, image_name)
 
         if engine in ("auto", "ai"):
             media_type = mimetypes.guess_type(image_name)[0] or "image/png"
+            _increment_ocr_stat(stats, stats_lock, "inferences")
             return self.ai.ocr_image(image_bytes, media_type)
 
         raise ExtractionError(
             "未找到可用 OCR 引擎。请安装 Tesseract，或配置 FUCKCLASSROOM_AI_API_KEY 使用 AI 视觉 OCR。"
         )
+
+    def _rapidocr_cache_path(self, image_bytes: bytes) -> Path | None:
+        if not self.config.ocr_cache_enabled:
+            return None
+        digest = hashlib.sha256(image_bytes).hexdigest()
+        try:
+            rapidocr_version = package_version("rapidocr-onnxruntime")
+        except PackageNotFoundError:
+            rapidocr_version = "unknown"
+        normalized_version = re.sub(r"[^A-Za-z0-9._-]+", "_", rapidocr_version)
+        namespace = (
+            f"rapidocr-{normalized_version}-side{self.config.ocr_max_side}-"
+            f"cls{int(self.config.ocr_use_angle_cls)}"
+        )
+        return self.config.cache_dir / "ocr" / namespace / digest[:2] / f"{digest}.txt"
 
     def _can_ocr(self, warnings: list[str]) -> bool:
         engine = self.config.ocr_engine
@@ -521,8 +592,6 @@ def _referenced_ppt_images(
                 seen.add(normalized)
                 referenced.append(normalized)
 
-    # Some generated/minimal PPTX files do not include relationship files. Preserve the
-    # old behavior as a compatibility fallback rather than silently skipping all images.
     return referenced if referenced else all_media_names
 
 
@@ -604,7 +673,8 @@ def _image_fingerprint(
             edges = gray.filter(ImageFilter.FIND_EDGES)
             edge_mean = float(ImageStat.Stat(edges).mean[0])
             resized = gray.resize((9, 8))
-            pixels = list(resized.getdata())
+            get_flattened_data = getattr(resized, "get_flattened_data", None)
+            pixels = list(get_flattened_data() if callable(get_flattened_data) else resized.getdata())
             phash = 0
             bit = 0
             for row in range(8):
@@ -736,15 +806,33 @@ def _run_ocr_jobs(
 _RAPID_OCR_LOCAL = threading.local()
 
 
-def _rapidocr_ocr(image_bytes: bytes) -> str:
+def _rapidocr_ocr(
+    image_bytes: bytes,
+    *,
+    onnx_threads: int = 1,
+    max_side: int = 1600,
+    use_angle_cls: bool = False,
+) -> str:
+    threads = max(1, int(onnx_threads))
+    side = max(512, int(max_side))
+    engine_key = (threads, side)
     engine = getattr(_RAPID_OCR_LOCAL, "engine", None)
-    if engine is None:
+    current_key = getattr(_RAPID_OCR_LOCAL, "engine_key", None)
+    if engine is None or current_key != engine_key:
         from rapidocr_onnxruntime import RapidOCR
 
-        engine = RapidOCR()
+        engine = RapidOCR(
+            max_side_len=side,
+            det_limit_side_len=side,
+            det_limit_type="max",
+            intra_op_num_threads=threads,
+            inter_op_num_threads=1,
+            print_verbose=False,
+        )
         _RAPID_OCR_LOCAL.engine = engine
+        _RAPID_OCR_LOCAL.engine_key = engine_key
 
-    result, _ = engine(image_bytes)
+    result, _ = engine(image_bytes, use_cls=bool(use_angle_cls))
     if not result:
         return ""
     lines: list[str] = []
@@ -756,6 +844,27 @@ def _rapidocr_ocr(image_bytes: bytes) -> str:
         if text and confidence >= 0.35:
             lines.append(text)
     return "\n".join(lines)
+
+
+def _write_cache_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{threading.get_ident()}.tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(path)
+
+
+def _increment_ocr_stat(
+    stats: dict[str, int] | None,
+    lock: threading.Lock | None,
+    key: str,
+) -> None:
+    if stats is None:
+        return
+    if lock is None:
+        stats[key] = stats.get(key, 0) + 1
+        return
+    with lock:
+        stats[key] = stats.get(key, 0) + 1
 
 
 def _tesseract_ocr(image_bytes: bytes, image_name: str) -> str:
