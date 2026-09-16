@@ -8,7 +8,7 @@
 
 {% block content %}
   <div class="page-head">
-    <div><h1>文字提取与总结</h1><p class="page-description">课件 OCR、语音转写、合并文本和 AI 总结。</p></div>
+    <div><h1>文字提取与总结</h1><p class="page-description">课件 OCR、语音转写、合并文本和 AI 总结；本地转写同时导出到文件管理。</p></div>
     <div class="head-actions"><a class="btn" href="/courses/{{ course_id }}"><svg class="icon"><use href="/static/icons.svg#arrow-left"></use></svg>返回课程</a></div>
   </div>
 
@@ -25,6 +25,7 @@
   <div class="output-actions">
     <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/extract" data-inline-task data-task-status="#lesson-task-status" data-task-group="lesson-processing" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#scan-text"></use></svg>重新提取</button></form>
     <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/summarize" data-inline-task data-task-status="#lesson-task-status" data-task-group="lesson-processing" data-task-starting="正在启动 AI 总结" data-task-fallback="AI 总结失败" data-task-success="AI 总结已完成"><button class="btn primary" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#sparkles"></use></svg>生成 AI 总结</button></form>
+    <a class="btn" href="/downloads"><svg class="icon"><use href="/static/icons.svg#folder"></use></svg>查看本地转写文件</a>
   </div>
 
   {% if not outputs %}
