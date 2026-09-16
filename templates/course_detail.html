@@ -5,6 +5,7 @@
 {% block title %}{{ detail.course.title if detail else "课程资源" }} · 学业助手{% endblock %}
 {% block breadcrumb_parent %}<a href="/courses">我的课程</a>{% endblock %}
 {% block page_title %}{{ detail.course.title if detail else "课程资源" }}{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/course_media.css?v=20260916-1">{% endblock %}
 
 {% block content %}
   <div class="page-head">
@@ -47,14 +48,24 @@
             <div class="resource-line">
               {% for resource in lesson.resources %}
                 {% set download_key = lesson.id ~ ":" ~ resource.kind %}
-                {% if resource.kind == "ppt" or resource.kind == "transcript" %}
+                {% if resource.kind == "ppt" %}
                   {% if resource.is_downloadable %}
-                    <a class="resource-chip{% if download_key in downloaded_exports %} ready{% endif %}" href="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/download/{{ resource.kind }}" title="{{ resource.title }}">
-                      <svg class="icon small"><use href="/static/icons.svg#{% if resource.kind == 'ppt' %}presentation{% else %}captions{% endif %}"></use></svg>{{ "PPT" if resource.kind == "ppt" else "转写" }}
+                    <button class="resource-chip media-trigger{% if download_key in downloaded_exports %} ready{% endif %}" type="button" data-ppt-open data-ppt-url="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/download/ppt" data-media-title="{{ lesson.title }} · PPT" title="内置阅读 {{ resource.title }}">
+                      <svg class="icon small"><use href="/static/icons.svg#presentation"></use></svg>PPT
+                    </button>
+                  {% else %}<span class="resource-chip">{{ resource.title }}</span>{% endif %}
+                {% elif resource.kind == "transcript" %}
+                  {% if resource.is_downloadable %}
+                    <a class="resource-chip{% if download_key in downloaded_exports %} ready{% endif %}" href="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/download/transcript" title="{{ resource.title }}">
+                      <svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>转写
                     </a>
                   {% else %}<span class="resource-chip">{{ resource.title }}</span>{% endif %}
+                {% elif resource.kind == "video" and resource.is_downloadable %}
+                  <button class="resource-chip ready media-trigger" type="button" data-video-open data-video-url="{{ resource.url }}" data-media-title="{{ lesson.title }} · 课堂录像" title="内置播放 {{ resource.title }}">
+                    <svg class="icon small"><use href="/static/icons.svg#play"></use></svg>{{ resource.title }}
+                  </button>
                 {% elif resource.is_downloadable %}
-                  <a class="resource-chip ready" href="{{ resource.url }}" target="_blank" rel="noreferrer"><svg class="icon small"><use href="/static/icons.svg#play"></use></svg>{{ resource.title }}</a>
+                  <a class="resource-chip ready" href="{{ resource.url }}" target="_blank" rel="noreferrer"><svg class="icon small"><use href="/static/icons.svg#external-link"></use></svg>{{ resource.title }}</a>
                 {% else %}<span class="resource-chip">{{ resource.title }}</span>{% endif %}
               {% else %}<span class="muted">暂无资源</span>{% endfor %}
             </div>
@@ -70,4 +81,42 @@
       </div>
     </section>
   {% endif %}
+
+  <div class="course-media-modal hidden" role="dialog" aria-modal="true" aria-labelledby="course-video-title" data-video-modal>
+    <div class="course-media-panel video-viewer-panel">
+      <header class="course-media-header">
+        <h2 id="course-video-title" data-video-title>课堂录像</h2>
+        <span class="media-spacer"></span>
+        <a class="btn small" href="#" target="_blank" rel="noreferrer" data-video-external><svg class="icon small"><use href="/static/icons.svg#external-link"></use></svg><span>新窗口打开</span></a>
+        <button class="btn small icon-only" type="button" title="关闭" data-media-close>×</button>
+      </header>
+      <div class="video-viewer-body"><video controls playsinline preload="metadata"></video></div>
+    </div>
+  </div>
+
+  <div class="course-media-modal hidden" role="dialog" aria-modal="true" aria-labelledby="course-ppt-title" data-ppt-modal>
+    <div class="course-media-panel ppt-viewer-panel">
+      <header class="course-media-header">
+        <h2 id="course-ppt-title" data-ppt-title>PPT 课件</h2>
+        <span class="media-spacer"></span>
+        <a class="btn small" href="#" data-ppt-download><svg class="icon small"><use href="/static/icons.svg#download"></use></svg><span>下载原文件</span></a>
+        <button class="btn small icon-only" type="button" title="关闭" data-media-close>×</button>
+      </header>
+      <div class="ppt-toolbar">
+        <button class="btn small" type="button" data-ppt-prev disabled><svg class="icon small"><use href="/static/icons.svg#arrow-left"></use></svg><span>上一页</span></button>
+        <span class="ppt-counter" data-ppt-counter>0 / 0</span>
+        <button class="btn small" type="button" data-ppt-next disabled><span>下一页</span><svg class="icon small" style="transform: rotate(180deg)"><use href="/static/icons.svg#arrow-left"></use></svg></button>
+        <span class="media-spacer"></span>
+        <button class="btn small" type="button" data-ppt-fullscreen><svg class="icon small"><use href="/static/icons.svg#presentation"></use></svg><span>全屏阅读</span></button>
+      </div>
+      <div class="ppt-viewer-body">
+        <aside class="ppt-thumbnails" aria-label="幻灯片缩略图" data-ppt-thumbnails></aside>
+        <div class="ppt-stage-wrap">
+          <div class="ppt-stage" data-ppt-stage><div class="ppt-status" data-ppt-status>正在读取课件…</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
 {% endblock %}
+
+{% block scripts %}<script src="/static/course_media.js?v=20260916-1"></script>{% endblock %}
