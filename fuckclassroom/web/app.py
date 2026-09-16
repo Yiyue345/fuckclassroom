@@ -325,7 +325,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             term_error = f"学期列表加载失败：{exc}"
 
         try:
-            courses = classroom_client.list_courses(term=selected_term)
+            courses = classroom_client.list_courses(term=selected_term, force_refresh=True)
         except ClassroomClientError as exc:
             error = str(exc)
 

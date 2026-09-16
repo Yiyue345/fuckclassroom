@@ -111,6 +111,35 @@ class SemesterSyncTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('value="current" selected', response.text)
         self.assertEqual(list_courses.call_args.kwargs["term"], current)
+        self.assertTrue(list_courses.call_args.kwargs["force_refresh"])
+
+    def test_force_refresh_courses_bypasses_cached_course_list(self) -> None:
+        payload = {
+            "params": {
+                "result": {
+                    "data": [
+                        {
+                            "Id": "fresh-course",
+                            "Title": "最新课程",
+                            "StartAt": 1788192000,
+                            "EndAt": 1798732800,
+                        }
+                    ]
+                }
+            }
+        }
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            client = ClassroomClient(AppConfig(data_dir=Path(directory)))
+            with patch.object(client, "_get_json", return_value=payload) as remote, patch.object(
+                client,
+                "_get_json_cached",
+            ) as cached, patch.object(client.cache, "set") as cache_set:
+                courses = client.list_courses(force_refresh=True)
+
+        self.assertEqual([course.id for course in courses], ["fresh-course"])
+        remote.assert_called_once()
+        cached.assert_not_called()
+        cache_set.assert_called_once_with("courses_page_1_size_50", payload)
 
 
 if __name__ == "__main__":

@@ -132,12 +132,16 @@ class ClassroomClient:
         page_size: int = 50,
         term_id: str | None = None,
         term: Term | None = None,
+        *,
+        force_refresh: bool = False,
     ) -> list[Course]:
-        payload = self._get_json_cached(
-            f"courses_page_{page}_size_{page_size}",
-            COURSE_LIST_PATH,
-            {"nowpage": str(page), "per-page": str(page_size)},
-        )
+        cache_name = f"courses_page_{page}_size_{page_size}"
+        params = {"nowpage": str(page), "per-page": str(page_size)}
+        if force_refresh:
+            payload = self._get_json(COURSE_LIST_PATH, params)
+            self.cache.set(cache_name, payload)
+        else:
+            payload = self._get_json_cached(cache_name, COURSE_LIST_PATH, params)
         result = self._result(payload)
         rows = result.get("data", [])
         selected_term = term
