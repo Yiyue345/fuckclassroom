@@ -22,6 +22,7 @@ class LocalTranscriptionResult:
     text: str
     cached: bool
     duration_seconds: float | None = None
+    export_path: Path | None = None
 
 
 _MODEL_CACHE: dict[tuple[object, ...], object] = {}
@@ -62,9 +63,15 @@ class LocalTranscriptionService:
                 normalized = self._normalize_text(cached_text)
                 if normalized != cached_text:
                     output_path.write_text(normalized + "\n", encoding="utf-8")
+                export_path = self._export_transcript(output_path, normalized)
                 _clear_detail(progress)
                 _report(progress, 100, "已复用本地语音转写")
-                return LocalTranscriptionResult(output_path, normalized, True)
+                return LocalTranscriptionResult(
+                    output_path,
+                    normalized,
+                    True,
+                    export_path=export_path,
+                )
 
         _report(progress, 4, "正在准备本地语音识别模型")
         model = self._get_model(progress)
@@ -120,12 +127,14 @@ class LocalTranscriptionService:
         temporary = output_path.with_name(f"{output_path.name}.tmp")
         temporary.write_text(text + "\n", encoding="utf-8")
         temporary.replace(output_path)
-        _report(progress, 100, "本地语音转写完成")
+        export_path = self._export_transcript(output_path, text)
+        _report(progress, 100, "本地语音转写完成，结果已保存到文件管理")
         return LocalTranscriptionResult(
             path=output_path,
             text=text,
             cached=False,
             duration_seconds=duration or None,
+            export_path=export_path,
         )
 
     def _normalize_text(self, text: str) -> str:
@@ -135,6 +144,20 @@ class LocalTranscriptionService:
         if language and not language.startswith("zh"):
             return text
         return _to_simplified_chinese(text)
+
+    def _export_transcript(self, output_path: Path, text: str) -> Path:
+        try:
+            relative_parent = output_path.resolve().parent.relative_to(
+                self.config.outputs_dir.resolve()
+            )
+        except ValueError:
+            relative_parent = Path()
+        export_path = self.config.downloads_dir / relative_parent / "本地转写.txt"
+        export_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = export_path.with_name(f"{export_path.name}.tmp")
+        temporary.write_text(text.rstrip() + "\n", encoding="utf-8")
+        temporary.replace(export_path)
+        return export_path
 
     def _get_model(self, progress: ProgressCallback | None = None):
         try:
