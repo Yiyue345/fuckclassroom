@@ -2,15 +2,22 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from ..core.config import AppConfig
 
 
 class LocalTranscriptionError(RuntimeError):
+    pass
+
+
+class _ChunkedDecodeError(RuntimeError):
     pass
 
 
@@ -26,6 +33,15 @@ class LocalTranscriptionResult:
     export_path: Path | None = None
 
 
+@dataclass(frozen=True)
+class _AudioChunk:
+    index: int
+    start: float
+    end: float
+    decode_start: float
+    decode_end: float
+
+
 _MODEL_CACHE: dict[tuple[object, ...], object] = {}
 _MODEL_LOCK = threading.Lock()
 _TRANSCRIPTION_CONDITION = threading.Condition()
@@ -33,6 +49,12 @@ _ACTIVE_TRANSCRIPTIONS = 0
 _OPENCC_CONVERTER = None
 _OPENCC_LOCK = threading.Lock()
 _PREPARATION_HEARTBEAT_SECONDS = 10.0
+_REMOTE_CHUNK_SECONDS = 10 * 60.0
+_REMOTE_DECODE_WORKERS = 2
+_REMOTE_CHUNK_OVERLAP_SECONDS = 1.5
+_RANGE_PROBE_TIMEOUT_SECONDS = 8.0
+_RANGE_SUPPORT_CACHE: dict[str, bool] = {}
+_RANGE_SUPPORT_LOCK = threading.Lock()
 _MODEL_ALLOW_PATTERNS = [
     "config.json",
     "preprocessor_config.json",
@@ -55,6 +77,7 @@ class LocalTranscriptionService:
         progress: ProgressCallback | None = None,
         *,
         force: bool = False,
+        duration_hint_seconds: float | None = None,
     ) -> LocalTranscriptionResult:
         if not video_url:
             raise LocalTranscriptionError("本课次没有可用的课堂录像")
@@ -79,62 +102,33 @@ class LocalTranscriptionService:
         model = self._get_model(progress)
         _clear_detail(progress)
 
+        duration_hint = max(0.0, float(duration_hint_seconds or 0.0))
         with _transcription_slot(self.config.asr_max_concurrent_tasks, progress):
-            _report(
-                progress,
-                12,
-                "正在连接课堂录像并准备音频；首次输出前需要完成远程解码、VAD 和特征准备"
-                f"（并发上限 {self.config.asr_max_concurrent_tasks}）",
-            )
-            heartbeat = _PreparationHeartbeat(progress)
-            heartbeat.start()
             try:
-                transcriber = model
-                transcribe_kwargs = {
-                    "language": self.config.asr_language or None,
-                    "beam_size": 3,
-                    "vad_filter": True,
-                    "vad_parameters": {"min_silence_duration_ms": 500},
-                    "condition_on_previous_text": True,
-                }
-                if self.config.asr_use_batched and self.config.asr_batch_size > 1:
-                    from faster_whisper import BatchedInferencePipeline
-
-                    # Pipeline instances keep a small amount of per-call state, so create one
-                    # for each concurrent task while sharing the expensive WhisperModel.
-                    transcriber = BatchedInferencePipeline(model=model)
-                    transcribe_kwargs["batch_size"] = self.config.asr_batch_size
-
-                segments, info = transcriber.transcribe(video_url, **transcribe_kwargs)
-                duration = float(getattr(info, "duration", 0.0) or 0.0)
-                lines: list[str] = []
-                first_segment = True
-                for segment in segments:
-                    if first_segment:
-                        heartbeat.stop()
-                        first_segment = False
-
-                    raw_text = str(getattr(segment, "text", "") or "").strip()
-                    text = self._normalize_text(raw_text)
-                    if not text:
-                        continue
-                    start = float(getattr(segment, "start", 0.0) or 0.0)
-                    end = float(getattr(segment, "end", start) or start)
-                    lines.append(f"[{_timestamp(start)} - {_timestamp(end)}] {text}")
-                    if duration > 0:
-                        media_percent = max(0, min(100, int((end / duration) * 100)))
-                        percent = 15 + min(80, int((end / duration) * 80))
-                        _report(
+                if self._can_pipeline_remote_audio(video_url, duration_hint, progress):
+                    try:
+                        lines, duration = self._transcribe_chunked_remote(
+                            model,
+                            video_url,
+                            duration_hint,
                             progress,
-                            percent,
-                            f"正在本地转写：{_timestamp(end)} / {_timestamp(duration)}（{media_percent}%）",
                         )
-                    else:
-                        _report(progress, 55, f"正在本地转写：已处理到 {_timestamp(end)}")
-            except Exception as exc:  # faster-whisper/PyAV can raise several backend-specific errors.
+                    except _ChunkedDecodeError as exc:
+                        _raise_if_cancelled(progress)
+                        _log(
+                            progress,
+                            f"分块音频预处理失败，自动回退整段流式解码：{exc}",
+                            "warning",
+                        )
+                        _report(progress, 12, "分块解码不可用，正在回退整段流式音频处理")
+                        lines, duration = self._transcribe_single_stream(model, video_url, progress)
+                else:
+                    lines, duration = self._transcribe_single_stream(model, video_url, progress)
+            except LocalTranscriptionError:
+                raise
+            except Exception as exc:  # faster-whisper/PyAV can raise backend-specific errors.
+                _raise_if_cancelled(progress)
                 raise LocalTranscriptionError(f"本地语音转写失败：{exc}") from exc
-            finally:
-                heartbeat.stop()
 
         if not lines:
             raise LocalTranscriptionError("录像中没有识别到可用语音")
@@ -153,6 +147,215 @@ class LocalTranscriptionService:
             duration_seconds=duration or None,
             export_path=export_path,
         )
+
+    def _can_pipeline_remote_audio(
+        self,
+        video_url: str,
+        duration_hint: float,
+        progress: ProgressCallback | None,
+    ) -> bool:
+        if duration_hint <= _REMOTE_CHUNK_SECONDS * 1.25:
+            return False
+        parsed = urlparse(video_url)
+        if parsed.scheme not in {"http", "https"}:
+            return False
+
+        _report(progress, 11, "正在检查录像服务器是否支持分段读取")
+        supported = _remote_media_supports_ranges(video_url)
+        if supported:
+            _log(progress, "录像服务器支持 HTTP Range，将启用并行分块音频预处理。", "info")
+        else:
+            _log(progress, "录像服务器未确认支持 HTTP Range，使用兼容的整段流式解码。", "debug")
+        return supported
+
+    def _transcribe_single_stream(
+        self,
+        model,
+        video_url: str,
+        progress: ProgressCallback | None,
+    ) -> tuple[list[str], float]:
+        _report(
+            progress,
+            12,
+            "正在连接课堂录像并准备音频；首次输出前需要完成远程解码、VAD 和特征准备"
+            f"（并发上限 {self.config.asr_max_concurrent_tasks}）",
+        )
+        heartbeat = _PreparationHeartbeat(progress)
+        heartbeat.start()
+        try:
+            transcriber = self._build_transcriber(model)
+            transcribe_kwargs = self._transcribe_kwargs(condition_on_previous_text=True)
+            segments, info = transcriber.transcribe(video_url, **transcribe_kwargs)
+            duration = float(getattr(info, "duration", 0.0) or 0.0)
+            tracker = _TranscriptionProgress(progress, duration)
+            lines: list[str] = []
+            first_segment = True
+            for segment in segments:
+                _raise_if_cancelled(progress)
+                if first_segment:
+                    heartbeat.stop()
+                    first_segment = False
+
+                raw_text = str(getattr(segment, "text", "") or "").strip()
+                text = self._normalize_text(raw_text)
+                if not text:
+                    continue
+                start = float(getattr(segment, "start", 0.0) or 0.0)
+                end = float(getattr(segment, "end", start) or start)
+                lines.append(f"[{_timestamp(start)} - {_timestamp(end)}] {text}")
+                tracker.report(end)
+            return lines, duration
+        finally:
+            heartbeat.stop()
+
+    def _transcribe_chunked_remote(
+        self,
+        model,
+        video_url: str,
+        duration: float,
+        progress: ProgressCallback | None,
+    ) -> tuple[list[str], float]:
+        chunks = _build_audio_chunks(duration)
+        if len(chunks) <= 1:
+            raise _ChunkedDecodeError("录像时长不足以分块")
+
+        workers = min(_REMOTE_DECODE_WORKERS, len(chunks))
+        _report(
+            progress,
+            12,
+            f"已启用分块音频流水线：每块约 {int(_REMOTE_CHUNK_SECONDS // 60)} 分钟，"
+            f"{workers} 个解码 Worker，共 {len(chunks)} 块",
+        )
+        _log(
+            progress,
+            f"ASR 分块预处理：chunks={len(chunks)}, decode_workers={workers}, "
+            f"chunk_minutes={int(_REMOTE_CHUNK_SECONDS // 60)}, overlap={_REMOTE_CHUNK_OVERLAP_SECONDS:.1f}s",
+            "debug",
+        )
+
+        transcriber = self._build_transcriber(model)
+        tracker = _TranscriptionProgress(progress, duration)
+        lines: list[str] = []
+        prompt_tail = ""
+        future_by_index: dict[int, Future] = {}
+        next_submit = 0
+        prefetch_limit = min(len(chunks), workers + 1)
+
+        executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="asr-audio-decode")
+
+        def submit_one() -> None:
+            nonlocal next_submit
+            if next_submit >= len(chunks):
+                return
+            chunk = chunks[next_submit]
+            future_by_index[chunk.index] = executor.submit(
+                _decode_audio_chunk,
+                video_url,
+                chunk.decode_start,
+                chunk.decode_end,
+                16000,
+                _cancel_check(progress),
+            )
+            next_submit += 1
+
+        for _ in range(prefetch_limit):
+            submit_one()
+
+        try:
+            for chunk in chunks:
+                _raise_if_cancelled(progress)
+                future = future_by_index.pop(chunk.index)
+                wait_started = time.monotonic()
+                while True:
+                    try:
+                        audio = future.result(timeout=5.0)
+                        break
+                    except FutureTimeoutError:
+                        _raise_if_cancelled(progress)
+                        elapsed = time.monotonic() - wait_started
+                        media_percent = int((chunk.start / duration) * 100)
+                        _report(
+                            progress,
+                            12 + min(78, int(media_percent * 0.78)),
+                            f"正在并行预取音频块 {chunk.index + 1}/{len(chunks)}："
+                            f"{_timestamp(chunk.start)} - {_timestamp(chunk.end)}；"
+                            f"已等待 {_timestamp(elapsed)}",
+                        )
+                    except Exception as exc:
+                        _raise_if_cancelled(progress)
+                        raise _ChunkedDecodeError(
+                            f"第 {chunk.index + 1}/{len(chunks)} 块解码失败：{exc}"
+                        ) from exc
+
+                submit_one()
+                _raise_if_cancelled(progress)
+                _report(
+                    progress,
+                    15 + min(78, int((chunk.start / duration) * 78)),
+                    f"音频块 {chunk.index + 1}/{len(chunks)} 已就绪，正在转写："
+                    f"{_timestamp(chunk.start)} - {_timestamp(chunk.end)}",
+                )
+
+                kwargs = self._transcribe_kwargs(condition_on_previous_text=False)
+                if prompt_tail:
+                    kwargs["initial_prompt"] = prompt_tail[-240:]
+                segments, _ = transcriber.transcribe(audio, **kwargs)
+                chunk_texts: list[str] = []
+                for segment in segments:
+                    _raise_if_cancelled(progress)
+                    raw_text = str(getattr(segment, "text", "") or "").strip()
+                    text = self._normalize_text(raw_text)
+                    if not text:
+                        continue
+                    local_start = float(getattr(segment, "start", 0.0) or 0.0)
+                    local_end = float(getattr(segment, "end", local_start) or local_start)
+                    global_start = chunk.decode_start + local_start
+                    global_end = chunk.decode_start + local_end
+                    midpoint = (global_start + global_end) / 2
+                    is_last = chunk.index == len(chunks) - 1
+                    if midpoint < chunk.start or (not is_last and midpoint >= chunk.end):
+                        continue
+                    global_start = max(chunk.start, global_start)
+                    global_end = min(duration, max(global_start, global_end))
+                    lines.append(
+                        f"[{_timestamp(global_start)} - {_timestamp(global_end)}] {text}"
+                    )
+                    chunk_texts.append(text)
+                    tracker.report(global_end)
+
+                if chunk_texts:
+                    prompt_tail = " ".join(chunk_texts)[-400:]
+                _log(
+                    progress,
+                    f"音频块 {chunk.index + 1}/{len(chunks)} 完成："
+                    f"{_timestamp(chunk.start)} - {_timestamp(chunk.end)}",
+                    "debug",
+                )
+        finally:
+            for future in future_by_index.values():
+                future.cancel()
+            executor.shutdown(wait=True, cancel_futures=True)
+
+        return lines, duration
+
+    def _build_transcriber(self, model):
+        if self.config.asr_use_batched and self.config.asr_batch_size > 1:
+            from faster_whisper import BatchedInferencePipeline
+
+            return BatchedInferencePipeline(model=model)
+        return model
+
+    def _transcribe_kwargs(self, *, condition_on_previous_text: bool) -> dict[str, object]:
+        kwargs: dict[str, object] = {
+            "language": self.config.asr_language or None,
+            "beam_size": 3,
+            "vad_filter": True,
+            "vad_parameters": {"min_silence_duration_ms": 500},
+            "condition_on_previous_text": condition_on_previous_text,
+        }
+        if self.config.asr_use_batched and self.config.asr_batch_size > 1:
+            kwargs["batch_size"] = self.config.asr_batch_size
+        return kwargs
 
     def _normalize_text(self, text: str) -> str:
         if not text or not self.config.asr_simplified_chinese:
@@ -360,6 +563,41 @@ class LocalTranscriptionService:
             raise LocalTranscriptionError(f"语音模型下载完成但本地快照不可用：{exc}") from exc
 
 
+class _TranscriptionProgress:
+    """Keep the UI fresh without writing one task log entry for every Whisper segment."""
+
+    def __init__(self, progress: ProgressCallback | None, duration: float) -> None:
+        self.progress = progress
+        self.duration = max(0.0, duration)
+        self.last_media_percent = -1
+        self.last_report_at = 0.0
+
+    def report(self, media_end: float) -> None:
+        if self.progress is None:
+            return
+        if self.duration <= 0:
+            now = time.monotonic()
+            if now - self.last_report_at >= 1.0:
+                _report(self.progress, 55, f"正在本地转写：已处理到 {_timestamp(media_end)}")
+                self.last_report_at = now
+            return
+
+        media_percent = max(0, min(100, int((media_end / self.duration) * 100)))
+        now = time.monotonic()
+        percent_jump = media_percent - self.last_media_percent
+        if self.last_media_percent >= 0 and percent_jump < 5:
+            if media_percent <= self.last_media_percent or now - self.last_report_at < 1.0:
+                return
+        task_percent = 15 + min(80, int((media_end / self.duration) * 80))
+        _report(
+            self.progress,
+            task_percent,
+            f"正在本地转写：{_timestamp(media_end)} / {_timestamp(self.duration)}（{media_percent}%）",
+        )
+        self.last_media_percent = media_percent
+        self.last_report_at = now
+
+
 class _PreparationHeartbeat:
     """Keep long media preparation visibly alive until faster-whisper yields its first segment."""
 
@@ -397,9 +635,151 @@ class _PreparationHeartbeat:
                     "完成后会开始显示媒体转写百分比",
                 )
             except Exception:
-                # The main worker owns task failure/cancellation. A UI heartbeat must never
-                # terminate the transcription thread or produce an unhandled thread exception.
                 return
+
+
+def _build_audio_chunks(duration: float) -> list[_AudioChunk]:
+    chunks: list[_AudioChunk] = []
+    start = 0.0
+    index = 0
+    while start < duration:
+        end = min(duration, start + _REMOTE_CHUNK_SECONDS)
+        decode_start = max(0.0, start - (_REMOTE_CHUNK_OVERLAP_SECONDS if index else 0.0))
+        decode_end = min(
+            duration,
+            end + (_REMOTE_CHUNK_OVERLAP_SECONDS if end < duration else 0.0),
+        )
+        chunks.append(_AudioChunk(index, start, end, decode_start, decode_end))
+        index += 1
+        start = end
+    return chunks
+
+
+def _remote_media_supports_ranges(url: str) -> bool:
+    parsed = urlparse(url)
+    cache_key = f"{parsed.scheme}://{parsed.netloc}"
+    with _RANGE_SUPPORT_LOCK:
+        cached = _RANGE_SUPPORT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    supported = False
+    request = Request(
+        url,
+        headers={
+            "Range": "bytes=0-0",
+            "Accept": "*/*",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            ),
+        },
+    )
+    try:
+        with urlopen(request, timeout=_RANGE_PROBE_TIMEOUT_SECONDS) as response:
+            status = int(getattr(response, "status", 0) or 0)
+            content_range = str(response.headers.get("Content-Range", "") or "")
+            accept_ranges = str(response.headers.get("Accept-Ranges", "") or "").lower()
+            supported = status == 206 or content_range.lower().startswith("bytes ") or "bytes" in accept_ranges
+    except Exception:
+        supported = False
+
+    with _RANGE_SUPPORT_LOCK:
+        _RANGE_SUPPORT_CACHE[cache_key] = supported
+    return supported
+
+
+def _decode_audio_chunk(
+    video_url: str,
+    start: float,
+    end: float,
+    sampling_rate: int,
+    cancel_check: Callable[[], None] | None = None,
+):
+    """Decode a seekable remote media slice into the float32 waveform Whisper expects."""
+    try:
+        import av
+        import numpy as np
+    except ImportError as exc:
+        raise _ChunkedDecodeError("缺少 PyAV / NumPy 音频解码依赖") from exc
+
+    if end <= start:
+        return np.zeros((0,), dtype=np.float32)
+
+    arrays: list[object] = []
+    first_frame_start: float | None = None
+    resampler = av.audio.resampler.AudioResampler(
+        format="s16",
+        layout="mono",
+        rate=sampling_rate,
+    )
+
+    try:
+        with av.open(video_url, mode="r", metadata_errors="ignore") as container:
+            if not container.streams.audio:
+                raise _ChunkedDecodeError("录像中没有音频轨")
+            stream = container.streams.audio[0]
+            if start > 0:
+                if stream.time_base:
+                    seek_offset = int(start / float(stream.time_base))
+                    container.seek(seek_offset, stream=stream, backward=True, any_frame=False)
+                else:
+                    container.seek(int(start * 1_000_000), backward=True, any_frame=False)
+
+            frame_counter = 0
+            for frame in container.decode(stream):
+                frame_counter += 1
+                if cancel_check is not None and frame_counter % 32 == 0:
+                    cancel_check()
+
+                frame_start = _audio_frame_time(frame, stream)
+                frame_duration = float(getattr(frame, "samples", 0) or 0) / float(
+                    getattr(frame, "sample_rate", 0) or sampling_rate
+                )
+                frame_end = frame_start + frame_duration
+                if frame_end <= start:
+                    continue
+                if frame_start >= end:
+                    break
+                if first_frame_start is None:
+                    first_frame_start = frame_start
+                for converted in resampler.resample(frame):
+                    arrays.append(converted.to_ndarray().reshape(-1))
+
+            for converted in resampler.resample(None):
+                arrays.append(converted.to_ndarray().reshape(-1))
+    finally:
+        del resampler
+
+    if not arrays:
+        raise _ChunkedDecodeError(
+            f"{_timestamp(start)} - {_timestamp(end)} 没有解码到音频"
+        )
+
+    pcm = np.concatenate(arrays)
+    if pcm.dtype != np.int16:
+        pcm = pcm.astype(np.int16, copy=False)
+    audio = pcm.astype(np.float32) / 32768.0
+    first_time = start if first_frame_start is None else first_frame_start
+    trim_left = max(0, int(round((start - first_time) * sampling_rate)))
+    target_samples = max(1, int(round((end - start) * sampling_rate)))
+    audio = audio[trim_left : trim_left + target_samples]
+    if audio.size == 0:
+        raise _ChunkedDecodeError(
+            f"{_timestamp(start)} - {_timestamp(end)} 音频切片为空"
+        )
+    return audio
+
+
+def _audio_frame_time(frame, stream) -> float:
+    frame_time = getattr(frame, "time", None)
+    if frame_time is not None:
+        return max(0.0, float(frame_time))
+    pts = getattr(frame, "pts", None)
+    time_base = getattr(stream, "time_base", None)
+    if pts is not None and time_base is not None:
+        return max(0.0, float(pts * time_base))
+    return 0.0
 
 
 @contextmanager
@@ -408,6 +788,7 @@ def _transcription_slot(limit: int, progress: ProgressCallback | None = None):
     limit = max(1, int(limit))
     with _TRANSCRIPTION_CONDITION:
         while _ACTIVE_TRANSCRIPTIONS >= limit:
+            _raise_if_cancelled(progress)
             _report(
                 progress,
                 10,
@@ -481,3 +862,24 @@ def _clear_detail(progress: ProgressCallback | None) -> None:
     clear_detail = getattr(progress, "clear_detail", None)
     if callable(clear_detail):
         clear_detail()
+
+
+def _log(progress: ProgressCallback | None, message: str, level: str = "info") -> None:
+    if progress is None:
+        return
+    logger = getattr(progress, "log", None)
+    if callable(logger):
+        logger(message, level)
+
+
+def _cancel_check(progress: ProgressCallback | None) -> Callable[[], None] | None:
+    if progress is None:
+        return None
+    check = getattr(progress, "raise_if_cancelled", None)
+    return check if callable(check) else None
+
+
+def _raise_if_cancelled(progress: ProgressCallback | None) -> None:
+    check = _cancel_check(progress)
+    if check is not None:
+        check()
