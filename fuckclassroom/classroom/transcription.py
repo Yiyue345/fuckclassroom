@@ -26,6 +26,13 @@ class LocalTranscriptionResult:
 _MODEL_CACHE: dict[tuple[str, str, str, str], object] = {}
 _MODEL_LOCK = threading.Lock()
 _TRANSCRIPTION_LOCK = threading.Lock()
+_MODEL_ALLOW_PATTERNS = [
+    "config.json",
+    "preprocessor_config.json",
+    "model.bin",
+    "tokenizer.json",
+    "vocabulary.*",
+]
 
 
 class LocalTranscriptionService:
@@ -48,11 +55,13 @@ class LocalTranscriptionService:
         if output_path.exists() and not force:
             cached_text = output_path.read_text(encoding="utf-8").strip()
             if cached_text:
+                _clear_detail(progress)
                 _report(progress, 100, "已复用本地语音转写")
                 return LocalTranscriptionResult(output_path, cached_text, True)
 
-        _report(progress, 4, "正在加载本地语音识别模型；首次使用可能需要下载模型")
-        model = self._get_model()
+        _report(progress, 4, "正在准备本地语音识别模型")
+        model = self._get_model(progress)
+        _clear_detail(progress)
 
         # Running multiple Whisper jobs in parallel can easily exhaust RAM/VRAM on a laptop.
         # Serialize ASR while letting the rest of the application's background tasks remain concurrent.
@@ -101,7 +110,7 @@ class LocalTranscriptionService:
             duration_seconds=duration or None,
         )
 
-    def _get_model(self):
+    def _get_model(self, progress: ProgressCallback | None = None):
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:
@@ -121,16 +130,164 @@ class LocalTranscriptionService:
                 return model
             try:
                 self.config.asr_models_dir.mkdir(parents=True, exist_ok=True)
+                model_path = self._ensure_model_files(progress)
+                _report(progress, 8, "正在加载本地语音识别模型")
                 model = WhisperModel(
-                    self.config.asr_model,
+                    model_path,
                     device=self.config.asr_device,
                     compute_type=self.config.asr_compute_type,
-                    download_root=str(self.config.asr_models_dir),
+                    local_files_only=True,
                 )
+            except LocalTranscriptionError:
+                raise
             except Exception as exc:
                 raise LocalTranscriptionError(f"语音识别模型加载失败：{exc}") from exc
             _MODEL_CACHE[key] = model
             return model
+
+    def _ensure_model_files(self, progress: ProgressCallback | None = None) -> str:
+        configured = self.config.asr_model
+        local_candidate = Path(configured).expanduser()
+        if local_candidate.is_dir():
+            return str(local_candidate)
+
+        try:
+            from faster_whisper.utils import _MODELS as model_repositories
+            from huggingface_hub import hf_hub_download, snapshot_download
+            from tqdm.auto import tqdm
+        except ImportError as exc:
+            raise LocalTranscriptionError(
+                "缺少模型下载依赖，请重新安装 requirements.txt"
+            ) from exc
+
+        repo_id = configured if "/" in configured else model_repositories.get(configured)
+        if not repo_id:
+            raise LocalTranscriptionError(f"不支持的 faster-whisper 模型：{configured}")
+
+        cache_dir = str(self.config.asr_models_dir)
+        _report_detail(progress, 0, f"正在检查语音模型 {configured} 的本地缓存")
+        try:
+            files = snapshot_download(
+                repo_id,
+                cache_dir=cache_dir,
+                allow_patterns=_MODEL_ALLOW_PATTERNS,
+                dry_run=True,
+            )
+        except TypeError as exc:
+            raise LocalTranscriptionError(
+                "huggingface-hub 版本过旧，无法显示模型下载进度；请重新安装 requirements.txt"
+            ) from exc
+        except Exception as exc:
+            raise LocalTranscriptionError(f"读取语音模型信息失败：{exc}") from exc
+
+        pending = [item for item in files if getattr(item, "will_download", False)]
+        model_total = sum(int(getattr(item, "file_size", 0) or 0) for item in files)
+        download_total = sum(int(getattr(item, "file_size", 0) or 0) for item in pending)
+        revision = next((str(getattr(item, "commit_hash", "") or "") for item in files), "") or None
+
+        if not pending:
+            if model_total:
+                _report_detail(
+                    progress,
+                    100,
+                    f"语音模型已缓存（{_format_bytes(model_total)}）",
+                )
+            try:
+                return str(
+                    snapshot_download(
+                        repo_id,
+                        cache_dir=cache_dir,
+                        allow_patterns=_MODEL_ALLOW_PATTERNS,
+                        revision=revision,
+                        local_files_only=True,
+                    )
+                )
+            except Exception as exc:
+                raise LocalTranscriptionError(f"读取本地语音模型失败：{exc}") from exc
+
+        size_label = _format_bytes(download_total) if download_total else f"{len(pending)} 个文件"
+        _report_detail(progress, 0, f"首次使用：需要下载语音模型 {configured}，共 {size_label}")
+
+        completed_bytes = 0
+        completed_files = 0
+        total_files = len(pending)
+
+        for item in pending:
+            filename = str(getattr(item, "filename", "") or "")
+            expected_size = int(getattr(item, "file_size", 0) or 0)
+            if not filename:
+                continue
+
+            base_bytes = completed_bytes
+            file_index = completed_files
+
+            class DownloadProgress(tqdm):
+                def display(self, *args, **kwargs):  # noqa: ANN002, ANN003 - tqdm API compatibility.
+                    return None
+
+                def update(self, n=1):
+                    result = super().update(n)
+                    current = max(0, int(getattr(self, "n", 0) or 0))
+                    if expected_size:
+                        current = min(current, expected_size)
+                    if download_total:
+                        overall = min(download_total, base_bytes + current)
+                        percent = int((overall / download_total) * 100)
+                        message = (
+                            f"正在下载语音模型 {configured}："
+                            f"{_format_bytes(overall)} / {_format_bytes(download_total)}（{percent}%）"
+                        )
+                    else:
+                        local_total = max(1, int(getattr(self, "total", 0) or 1))
+                        fraction = min(1.0, current / local_total)
+                        percent = int(((file_index + fraction) / max(1, total_files)) * 100)
+                        message = f"正在下载语音模型 {configured}：{percent}%"
+                    _report_detail(progress, percent, message)
+                    return result
+
+            try:
+                hf_hub_download(
+                    repo_id,
+                    filename=filename,
+                    cache_dir=cache_dir,
+                    revision=revision,
+                    tqdm_class=DownloadProgress,
+                )
+            except Exception as exc:
+                raise LocalTranscriptionError(f"语音模型下载失败（{filename}）：{exc}") from exc
+
+            completed_files += 1
+            if expected_size:
+                completed_bytes += expected_size
+            if download_total:
+                percent = int((min(download_total, completed_bytes) / download_total) * 100)
+                _report_detail(
+                    progress,
+                    percent,
+                    f"正在下载语音模型 {configured}："
+                    f"{_format_bytes(min(download_total, completed_bytes))} / {_format_bytes(download_total)}（{percent}%）",
+                )
+            else:
+                percent = int((completed_files / max(1, total_files)) * 100)
+                _report_detail(progress, percent, f"正在下载语音模型 {configured}：{percent}%")
+
+        _report_detail(
+            progress,
+            100,
+            f"语音模型 {configured} 下载完成（{_format_bytes(model_total or download_total)}）",
+        )
+        try:
+            return str(
+                snapshot_download(
+                    repo_id,
+                    cache_dir=cache_dir,
+                    allow_patterns=_MODEL_ALLOW_PATTERNS,
+                    revision=revision,
+                    local_files_only=True,
+                )
+            )
+        except Exception as exc:
+            raise LocalTranscriptionError(f"语音模型下载完成但本地快照不可用：{exc}") from exc
 
 
 def _timestamp(seconds: float) -> str:
@@ -140,6 +297,38 @@ def _timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def _format_bytes(value: int) -> str:
+    size = max(0, int(value))
+    units = ("B", "KB", "MB", "GB")
+    amount = float(size)
+    for unit in units:
+        if amount < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(amount)} {unit}"
+            return f"{amount:.1f} {unit}"
+        amount /= 1024
+    return f"{size} B"
+
+
 def _report(progress: ProgressCallback | None, percent: int, message: str) -> None:
     if progress:
         progress(max(0, min(100, int(percent))), message)
+
+
+def _report_detail(progress: ProgressCallback | None, percent: int, message: str) -> None:
+    if progress is None:
+        return
+    detail = getattr(progress, "detail", None)
+    if callable(detail):
+        detail(max(0, min(100, int(percent))), message)
+    else:
+        # Keep CLI/custom callbacks informative even if they do not support a secondary bar.
+        progress(4, message)
+
+
+def _clear_detail(progress: ProgressCallback | None) -> None:
+    if progress is None:
+        return
+    clear_detail = getattr(progress, "clear_detail", None)
+    if callable(clear_detail):
+        clear_detail()
