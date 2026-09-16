@@ -49,7 +49,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.92fr);
   gap: 14px;
-  align-items: stretch;
+  align-items: start;
 }
 
 .course-media-card {
@@ -111,11 +111,11 @@
   display: grid;
   place-items: center;
   width: 100%;
-  aspect-ratio: 16 / 9;
   overflow: hidden;
 }
 
 .inline-video-stage {
+  aspect-ratio: 16 / 9;
   background:
     radial-gradient(circle at 50% 35%, rgba(76, 98, 126, 0.22), transparent 46%),
     #080b10;
@@ -175,7 +175,7 @@
 }
 
 .inline-ppt-stage {
-  min-height: 0;
+  min-height: 280px;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--surface-subtle) 92%, var(--primary) 8%), var(--surface-subtle));
 }
@@ -184,10 +184,9 @@
   display: none;
   place-items: center;
   width: 100%;
-  height: 100%;
   min-width: 0;
   min-height: 0;
-  padding: 10px;
+  padding: 0;
 }
 
 .ppt-slide-page.active {
@@ -197,9 +196,9 @@
 .ppt-slide-svg {
   display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
   max-width: 100%;
-  max-height: 100%;
+  max-height: none;
   background: #fff;
   box-shadow: 0 8px 26px rgba(10, 20, 36, 0.14);
 }
@@ -225,7 +224,7 @@
 }
 
 .ppt-status {
-  min-height: 150px;
+  min-height: 280px;
   color: var(--text-soft);
 }
 
@@ -294,12 +293,16 @@
 }
 
 .course-ppt-card:fullscreen .ppt-slide-page {
+  width: 100%;
+  height: 100%;
   padding: 0;
 }
 
 .course-ppt-card:fullscreen .ppt-slide-svg {
-  width: 100%;
+  width: auto;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
   box-shadow: 0 14px 46px rgba(10, 20, 36, 0.2);
 }
@@ -388,8 +391,7 @@ button.resource-chip.media-trigger:hover {
     width: 100%;
   }
 
-  .inline-video-stage,
-  .inline-ppt-stage {
+  .inline-video-stage {
     max-height: 66vh;
   }
 }
@@ -423,8 +425,7 @@ button.resource-chip.media-trigger:hover {
     justify-content: center;
   }
 
-  .inline-video-stage,
-  .inline-ppt-stage {
+  .inline-video-stage {
     aspect-ratio: 16 / 10;
   }
 
