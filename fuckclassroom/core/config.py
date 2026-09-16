@@ -83,6 +83,30 @@ class AppConfig:
         return self._env_int("FUCKCLASSROOM_OCR_WORKERS", self._settings().ocr_workers, 1, 16)
 
     @property
+    def ocr_onnx_threads(self) -> int:
+        return self._env_int(
+            "FUCKCLASSROOM_OCR_ONNX_THREADS", self._settings().ocr_onnx_threads, 1, 16
+        )
+
+    @property
+    def ocr_max_side(self) -> int:
+        return self._env_int(
+            "FUCKCLASSROOM_OCR_MAX_SIDE", self._settings().ocr_max_side, 512, 4096
+        )
+
+    @property
+    def ocr_use_angle_cls(self) -> bool:
+        return self._env_bool(
+            "FUCKCLASSROOM_OCR_USE_ANGLE_CLS", self._settings().ocr_use_angle_cls
+        )
+
+    @property
+    def ocr_cache_enabled(self) -> bool:
+        return self._env_bool(
+            "FUCKCLASSROOM_OCR_CACHE_ENABLED", self._settings().ocr_cache_enabled
+        )
+
+    @property
     def asr_model(self) -> str:
         return os.getenv("FUCKCLASSROOM_ASR_MODEL", self._settings().asr_model).strip() or "small"
 
