@@ -1,27 +1,429 @@
 (() => {
-  const D = document, XML = s => new DOMParser().parseFromString(s, 'application/xml');
-  const all = (n, x) => [...n.getElementsByTagName('*')].filter(e => e.localName === x);
-  const one = (n, x) => all(n, x)[0], num = (v, d = 0) => Number.isFinite(+v) ? +v : d;
-  const norm = p => { const a=[]; for(const x of String(p||'').replace(/^\/+/, '').split('/')) { if(!x||x==='.') continue; x==='..'?a.pop():a.push(x); } return a.join('/'); };
-  const resolve = (base, target) => { if(target?.startsWith('/')) return norm(target); const a=norm(base).split('/'); a.pop(); return norm([...a,...String(target||'').split('/')].join('/')); };
-  const relPath = p => { const a=norm(p).split('/'), n=a.pop(); return [...a,'_rels',`${n}.rels`].join('/'); };
+  const D = document;
+  const XML = (source) => new DOMParser().parseFromString(source, "application/xml");
+  const all = (node, localName) => [...node.getElementsByTagName("*")].filter((item) => item.localName === localName);
+  const one = (node, localName) => all(node, localName)[0];
+  const num = (value, fallback = 0) => (Number.isFinite(+value) ? +value : fallback);
+
+  const norm = (path) => {
+    const output = [];
+    for (const part of String(path || "").replace(/^\/+/, "").split("/")) {
+      if (!part || part === ".") continue;
+      if (part === "..") output.pop();
+      else output.push(part);
+    }
+    return output.join("/");
+  };
+
+  const resolve = (base, target) => {
+    if (target?.startsWith("/")) return norm(target);
+    const parts = norm(base).split("/");
+    parts.pop();
+    return norm([...parts, ...String(target || "").split("/")].join("/"));
+  };
+
+  const relPath = (path) => {
+    const parts = norm(path).split("/");
+    const name = parts.pop();
+    return [...parts, "_rels", `${name}.rels`].join("/");
+  };
+
   class Zip {
-    constructor(buf){ this.b=buf; this.v=new DataView(buf); this.e=new Map(); let p=this.v.byteLength-22,m=Math.max(0,p-0xffff),z=-1; for(;p>=m;p--) if(this.v.getUint32(p,true)===0x06054b50){z=p;break;} if(z<0) throw Error('不是有效的 PPTX 文件'); let n=this.v.getUint16(z+10,true),o=this.v.getUint32(z+16,true); for(let i=0;i<n;i++){ if(this.v.getUint32(o,true)!==0x02014b50) throw Error('PPTX ZIP 目录损坏'); let method=this.v.getUint16(o+10,true),size=this.v.getUint32(o+20,true),nl=this.v.getUint16(o+28,true),el=this.v.getUint16(o+30,true),cl=this.v.getUint16(o+32,true),lo=this.v.getUint32(o+42,true),name=norm(new TextDecoder().decode(new Uint8Array(buf,o+46,nl))); this.e.set(name,{method,size,lo}); o+=46+nl+el+cl; } }
-    has(p){ return this.e.has(norm(p)); }
-    async bytes(p){ const x=this.e.get(norm(p)); if(!x) throw Error(`PPTX 缺少 ${p}`); let nl=this.v.getUint16(x.lo+26,true),el=this.v.getUint16(x.lo+28,true),off=x.lo+30+nl+el,data=new Uint8Array(this.b,off,x.size); if(x.method===0) return data.slice(); if(x.method!==8||!window.DecompressionStream) throw Error('浏览器不支持当前 PPTX 压缩格式'); const s=new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')); return new Uint8Array(await new Response(s).arrayBuffer()); }
-    async text(p){ return new TextDecoder().decode(await this.bytes(p)); }
+    constructor(buffer) {
+      this.buffer = buffer;
+      this.view = new DataView(buffer);
+      this.entries = new Map();
+      let position = this.view.byteLength - 22;
+      const minimum = Math.max(0, position - 0xffff);
+      let endDirectory = -1;
+      for (; position >= minimum; position -= 1) {
+        if (this.view.getUint32(position, true) === 0x06054b50) {
+          endDirectory = position;
+          break;
+        }
+      }
+      if (endDirectory < 0) throw new Error("不是有效的 PPTX 文件");
+
+      const count = this.view.getUint16(endDirectory + 10, true);
+      let offset = this.view.getUint32(endDirectory + 16, true);
+      for (let index = 0; index < count; index += 1) {
+        if (this.view.getUint32(offset, true) !== 0x02014b50) throw new Error("PPTX ZIP 目录损坏");
+        const method = this.view.getUint16(offset + 10, true);
+        const compressedSize = this.view.getUint32(offset + 20, true);
+        const nameLength = this.view.getUint16(offset + 28, true);
+        const extraLength = this.view.getUint16(offset + 30, true);
+        const commentLength = this.view.getUint16(offset + 32, true);
+        const localOffset = this.view.getUint32(offset + 42, true);
+        const name = norm(new TextDecoder().decode(new Uint8Array(buffer, offset + 46, nameLength)));
+        this.entries.set(name, { method, compressedSize, localOffset });
+        offset += 46 + nameLength + extraLength + commentLength;
+      }
+    }
+
+    has(path) {
+      return this.entries.has(norm(path));
+    }
+
+    async bytes(path) {
+      const entry = this.entries.get(norm(path));
+      if (!entry) throw new Error(`PPTX 缺少 ${path}`);
+      const nameLength = this.view.getUint16(entry.localOffset + 26, true);
+      const extraLength = this.view.getUint16(entry.localOffset + 28, true);
+      const dataOffset = entry.localOffset + 30 + nameLength + extraLength;
+      const data = new Uint8Array(this.buffer, dataOffset, entry.compressedSize);
+      if (entry.method === 0) return data.slice();
+      if (entry.method !== 8 || !window.DecompressionStream) {
+        throw new Error("当前浏览器不支持 PPTX 解压，请下载原文件查看");
+      }
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+
+    async text(path) {
+      return new TextDecoder().decode(await this.bytes(path));
+    }
   }
-  async function rels(zip, src){ const p=relPath(src), m=new Map(); if(!zip.has(p)) return m; for(const r of all(XML(await zip.text(p)),'Relationship')) if((r.getAttribute('TargetMode')||'').toLowerCase()!=='external') m.set(r.getAttribute('Id'),resolve(src,r.getAttribute('Target'))); return m; }
-  const rid = n => n?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id')||n?.getAttribute('r:id');
-  const embed = n => n?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','embed')||n?.getAttribute('r:embed');
-  function box(n){ const x=one(n,'xfrm'),o=x&&one(x,'off'),e=x&&one(x,'ext'); if(!o||!e) return null; const w=num(e.getAttribute('cx')),h=num(e.getAttribute('cy')); return w&&h?{x:num(o.getAttribute('x')),y:num(o.getAttribute('y')),w,h}:null; }
-  function color(n){ const c=one(n,'srgbClr')?.getAttribute('val'); return c&&/^[0-9a-f]{6}$/i.test(c)?`#${c}`:null; }
-  function mime(p){ const x=(p.split('.').pop()||'').toLowerCase(); return ({png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',svg:'image/svg+xml'})[x]||'application/octet-stream'; }
-  function dataUrl(bytes,type){ let s=''; for(let i=0;i<bytes.length;i+=32768) s+=String.fromCharCode(...bytes.subarray(i,i+32768)); return `data:${type};base64,${btoa(s)}`; }
-  function drawText(svg,sp,b){ const tx=one(sp,'txBody'); if(!tx) return; const fo=D.createElementNS('http://www.w3.org/2000/svg','foreignObject'); Object.entries({x:b.x,y:b.y,width:b.w,height:b.h}).forEach(([k,v])=>fo.setAttribute(k,v)); const wrap=D.createElement('div'); wrap.setAttribute('xmlns','http://www.w3.org/1999/xhtml'); wrap.className='ppt-text-box'; for(const p of all(tx,'p')){ const pe=D.createElement('p'); const al=one(p,'pPr')?.getAttribute('algn'); pe.style.textAlign=al==='ctr'?'center':al==='r'?'right':'left'; const runs=all(p,'r'); if(runs.length){ for(const r of runs){ const s=D.createElement('span'),rp=one(r,'rPr'); s.textContent=all(r,'t').map(t=>t.textContent||'').join(''); s.style.fontSize=`${Math.max(900,num(rp?.getAttribute('sz'),1800))*127}px`; if(rp?.getAttribute('b')==='1')s.style.fontWeight='700'; if(rp?.getAttribute('i')==='1')s.style.fontStyle='italic'; const c=rp&&color(rp); if(c)s.style.color=c; pe.append(s); } } else pe.textContent=all(p,'t').map(t=>t.textContent||'').join(''); if(pe.textContent)wrap.append(pe); } if(wrap.childNodes.length){fo.append(wrap);svg.append(fo);} }
-  async function slide(zip,path,w,h){ const doc=XML(await zip.text(path)), rm=await rels(zip,path), svg=D.createElementNS('http://www.w3.org/2000/svg','svg'); svg.classList.add('ppt-slide-svg'); svg.setAttribute('viewBox',`0 0 ${w} ${h}`); const bg=D.createElementNS('http://www.w3.org/2000/svg','rect'); Object.entries({x:0,y:0,width:w,height:h,fill:'#fff'}).forEach(([k,v])=>bg.setAttribute(k,v)); svg.append(bg); const tree=one(doc,'spTree')||doc.documentElement; for(const n of [...tree.children]){ const b=box(n); if(!b) continue; if(n.localName==='sp'){ const c=color(one(n,'spPr')||n); if(c){const r=D.createElementNS('http://www.w3.org/2000/svg','rect'); Object.entries({x:b.x,y:b.y,width:b.w,height:b.h,fill:c}).forEach(([k,v])=>r.setAttribute(k,v)); svg.append(r);} drawText(svg,n,b); } else if(n.localName==='pic'){ const p=rm.get(embed(one(n,'blip'))); if(p&&zip.has(p)){ const im=D.createElementNS('http://www.w3.org/2000/svg','image'); Object.entries({x:b.x,y:b.y,width:b.w,height:b.h,href:dataUrl(await zip.bytes(p),mime(p))}).forEach(([k,v])=>im.setAttribute(k,v)); svg.append(im); } } } return svg; }
-  async function parsePpt(buf){ const zip=new Zip(buf), p='ppt/presentation.xml', doc=XML(await zip.text(p)), rm=await rels(zip,p), sz=one(doc,'sldSz'),w=num(sz?.getAttribute('cx'),12192000),h=num(sz?.getAttribute('cy'),6858000); let paths=all(doc,'sldId').map(n=>rm.get(rid(n))).filter(Boolean); if(!paths.length) paths=[...zip.e.keys()].filter(x=>/^ppt\/slides\/slide\d+\.xml$/.test(x)).sort((a,b)=>num(a.match(/slide(\d+)/)?.[1])-num(b.match(/slide(\d+)/)?.[1])); if(!paths.length)throw Error('课件中没有幻灯片'); const out=[]; for(const x of paths) out.push(await slide(zip,x,w,h)); return out; }
-  const open=m=>{m.classList.remove('hidden');D.body.classList.add('media-dialog-open')}, close=m=>{m.classList.add('hidden');if(!D.querySelector('.course-media-modal:not(.hidden)'))D.body.classList.remove('media-dialog-open')};
-  const vm=D.querySelector('[data-video-modal]'); if(vm){const v=vm.querySelector('video'),t=vm.querySelector('[data-video-title]'),a=vm.querySelector('[data-video-external]'),shut=()=>{v.pause();v.removeAttribute('src');v.load();close(vm)}; D.querySelectorAll('[data-video-open]').forEach(b=>b.onclick=()=>{t.textContent=b.dataset.mediaTitle||'课堂录像';a.href=b.dataset.videoUrl;v.src=b.dataset.videoUrl;open(vm);v.play().catch(()=>{})}); vm.querySelectorAll('[data-media-close]').forEach(b=>b.onclick=shut);vm.onclick=e=>{if(e.target===vm)shut()};}
-  const pm=D.querySelector('[data-ppt-modal]'); if(pm){ const title=pm.querySelector('[data-ppt-title]'),download=pm.querySelector('[data-ppt-download]'),stage=pm.querySelector('[data-ppt-stage]'),thumbs=pm.querySelector('[data-ppt-thumbnails]'),status=pm.querySelector('[data-ppt-status]'),count=pm.querySelector('[data-ppt-counter]'),prev=pm.querySelector('[data-ppt-prev]'),next=pm.querySelector('[data-ppt-next]'); let pages=[],cur=0,token=0; const show=i=>{if(!pages.length)return;cur=Math.max(0,Math.min(i,pages.length-1));pages.forEach((p,j)=>p.classList.toggle('active',j===cur));[...thumbs.children].forEach((b,j)=>b.classList.toggle('active',j===cur));count.textContent=`${cur+1} / ${pages.length}`;prev.disabled=cur===0;next.disabled=cur===pages.length-1;thumbs.children[cur]?.scrollIntoView({block:'nearest'});}; const reset=()=>{pages=[];cur=0;stage.replaceChildren(status);thumbs.replaceChildren();status.textContent='正在读取课件…';status.className='ppt-status';count.textContent='0 / 0';}; const shut=()=>{token++;close(pm);reset()}; D.querySelectorAll('[data-ppt-open]').forEach(b=>b.onclick=async()=>{const my=++token,url=b.dataset.pptUrl;reset();title.textContent=b.dataset.mediaTitle||'PPT 课件';download.href=url;open(pm);try{const r=await fetch(url,{credentials:'same-origin'});if(!r.ok)throw Error(`HTTP ${r.status}`);const slides=await parsePpt(await r.arrayBuffer());if(my!==token)return;status.classList.add('hidden');pages=slides.map((svg,i)=>{const p=D.createElement('div');p.className='ppt-slide-page';p.append(svg);stage.append(p);const bt=D.createElement('button');bt.type='button';bt.className='ppt-thumbnail';bt.append(svg.cloneNode(true));const n=D.createElement('span');n.textContent=i+1;bt.append(n);bt.onclick=()=>show(i);thumbs.append(bt);return p});show(0)}catch(e){if(my!==token)return;status.textContent=`课件读取失败：${e.message||e}`;status.classList.add('error')}}); pm.querySelectorAll('[data-media-close]').forEach(b=>b.onclick=shut);pm.onclick=e=>{if(e.target===pm)shut()};prev.onclick=()=>show(cur-1);next.onclick=()=>show(cur+1);pm.querySelector('[data-ppt-fullscreen]').onclick=async()=>{const p=pm.querySelector('.ppt-viewer-panel');try{document.fullscreenElement?await document.exitFullscreen():await p.requestFullscreen()}catch(_){}}; D.addEventListener('keydown',e=>{if(!pm.classList.contains('hidden')){if(e.key==='ArrowLeft')show(cur-1);if(e.key==='ArrowRight')show(cur+1);if(e.key==='Escape'&&!document.fullscreenElement)shut();}}); }
+
+  async function relationships(zip, source) {
+    const path = relPath(source);
+    const map = new Map();
+    if (!zip.has(path)) return map;
+    for (const relationship of all(XML(await zip.text(path)), "Relationship")) {
+      if ((relationship.getAttribute("TargetMode") || "").toLowerCase() === "external") continue;
+      map.set(relationship.getAttribute("Id"), resolve(source, relationship.getAttribute("Target")));
+    }
+    return map;
+  }
+
+  const relationshipId = (node) => node?.getAttributeNS(
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "id",
+  ) || node?.getAttribute("r:id");
+
+  const embedId = (node) => node?.getAttributeNS(
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "embed",
+  ) || node?.getAttribute("r:embed");
+
+  function shapeBox(node) {
+    const transform = one(node, "xfrm");
+    const offset = transform && one(transform, "off");
+    const extent = transform && one(transform, "ext");
+    if (!offset || !extent) return null;
+    const width = num(extent.getAttribute("cx"));
+    const height = num(extent.getAttribute("cy"));
+    return width && height ? {
+      x: num(offset.getAttribute("x")),
+      y: num(offset.getAttribute("y")),
+      width,
+      height,
+    } : null;
+  }
+
+  function shapeColor(node) {
+    const value = one(node, "srgbClr")?.getAttribute("val");
+    return value && /^[0-9a-f]{6}$/i.test(value) ? `#${value}` : null;
+  }
+
+  function imageMime(path) {
+    const extension = (path.split(".").pop() || "").toLowerCase();
+    return ({
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp",
+      svg: "image/svg+xml",
+    })[extension] || "application/octet-stream";
+  }
+
+  function dataUrl(bytes, type) {
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 32768) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + 32768));
+    }
+    return `data:${type};base64,${btoa(binary)}`;
+  }
+
+  function drawText(svg, shape, box) {
+    const textBody = one(shape, "txBody");
+    if (!textBody) return;
+    const foreignObject = D.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+    foreignObject.setAttribute("x", box.x);
+    foreignObject.setAttribute("y", box.y);
+    foreignObject.setAttribute("width", box.width);
+    foreignObject.setAttribute("height", box.height);
+
+    const wrapper = D.createElement("div");
+    wrapper.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+    wrapper.className = "ppt-text-box";
+    for (const paragraph of all(textBody, "p")) {
+      const paragraphElement = D.createElement("p");
+      const alignment = one(paragraph, "pPr")?.getAttribute("algn");
+      paragraphElement.style.textAlign = alignment === "ctr" ? "center" : alignment === "r" ? "right" : "left";
+      const runs = all(paragraph, "r");
+      if (runs.length) {
+        for (const run of runs) {
+          const span = D.createElement("span");
+          const runProperties = one(run, "rPr");
+          span.textContent = all(run, "t").map((text) => text.textContent || "").join("");
+          span.style.fontSize = `${Math.max(900, num(runProperties?.getAttribute("sz"), 1800)) * 127}px`;
+          if (runProperties?.getAttribute("b") === "1") span.style.fontWeight = "700";
+          if (runProperties?.getAttribute("i") === "1") span.style.fontStyle = "italic";
+          const color = runProperties && shapeColor(runProperties);
+          if (color) span.style.color = color;
+          paragraphElement.append(span);
+        }
+      } else {
+        paragraphElement.textContent = all(paragraph, "t").map((text) => text.textContent || "").join("");
+      }
+      if (paragraphElement.textContent) wrapper.append(paragraphElement);
+    }
+    if (wrapper.childNodes.length) {
+      foreignObject.append(wrapper);
+      svg.append(foreignObject);
+    }
+  }
+
+  async function renderSlide(zip, path, width, height) {
+    const document = XML(await zip.text(path));
+    const relationshipMap = await relationships(zip, path);
+    const svg = D.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("ppt-slide-svg");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+    const background = D.createElementNS("http://www.w3.org/2000/svg", "rect");
+    background.setAttribute("x", 0);
+    background.setAttribute("y", 0);
+    background.setAttribute("width", width);
+    background.setAttribute("height", height);
+    background.setAttribute("fill", "#fff");
+    svg.append(background);
+
+    const tree = one(document, "spTree") || document.documentElement;
+    for (const node of [...tree.children]) {
+      const box = shapeBox(node);
+      if (!box) continue;
+      if (node.localName === "sp") {
+        const color = shapeColor(one(node, "spPr") || node);
+        if (color) {
+          const rectangle = D.createElementNS("http://www.w3.org/2000/svg", "rect");
+          rectangle.setAttribute("x", box.x);
+          rectangle.setAttribute("y", box.y);
+          rectangle.setAttribute("width", box.width);
+          rectangle.setAttribute("height", box.height);
+          rectangle.setAttribute("fill", color);
+          svg.append(rectangle);
+        }
+        drawText(svg, node, box);
+      } else if (node.localName === "pic") {
+        const mediaPath = relationshipMap.get(embedId(one(node, "blip")));
+        if (mediaPath && zip.has(mediaPath)) {
+          const image = D.createElementNS("http://www.w3.org/2000/svg", "image");
+          image.setAttribute("x", box.x);
+          image.setAttribute("y", box.y);
+          image.setAttribute("width", box.width);
+          image.setAttribute("height", box.height);
+          image.setAttribute("href", dataUrl(await zip.bytes(mediaPath), imageMime(mediaPath)));
+          svg.append(image);
+        }
+      }
+    }
+    return svg;
+  }
+
+  async function parsePpt(buffer) {
+    const zip = new Zip(buffer);
+    const presentationPath = "ppt/presentation.xml";
+    const document = XML(await zip.text(presentationPath));
+    const relationshipMap = await relationships(zip, presentationPath);
+    const size = one(document, "sldSz");
+    const width = num(size?.getAttribute("cx"), 12192000);
+    const height = num(size?.getAttribute("cy"), 6858000);
+    let paths = all(document, "sldId").map((node) => relationshipMap.get(relationshipId(node))).filter(Boolean);
+    if (!paths.length) {
+      paths = [...zip.entries.keys()]
+        .filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path))
+        .sort((left, right) => num(left.match(/slide(\d+)/)?.[1]) - num(right.match(/slide(\d+)/)?.[1]));
+    }
+    if (!paths.length) throw new Error("课件中没有幻灯片");
+    const slides = [];
+    for (const path of paths) slides.push(await renderSlide(zip, path, width, height));
+    return slides;
+  }
+
+  const workspace = D.querySelector("[data-course-media-workspace]");
+  if (!workspace) return;
+
+  const rows = [...D.querySelectorAll("[data-lesson-row]")];
+  const currentLesson = workspace.querySelector("[data-current-lesson]");
+  const video = workspace.querySelector("[data-course-video]");
+  const videoEmpty = workspace.querySelector("[data-video-empty]");
+  const videoExternal = workspace.querySelector("[data-video-external]");
+  const pptCard = workspace.querySelector("[data-ppt-card]");
+  const pptStage = workspace.querySelector("[data-ppt-stage]");
+  const pptStatus = workspace.querySelector("[data-ppt-status]");
+  const pptDownload = workspace.querySelector("[data-ppt-download]");
+  const pptFullscreen = workspace.querySelector("[data-ppt-fullscreen]");
+  const pptCounter = workspace.querySelector("[data-ppt-counter]");
+  const pptPrev = workspace.querySelector("[data-ppt-prev]");
+  const pptNext = workspace.querySelector("[data-ppt-next]");
+  const pptCache = new Map();
+
+  let selectedRow = null;
+  let pptPages = [];
+  let pptIndex = 0;
+  let pptLoadToken = 0;
+
+  function setLinkState(link, href) {
+    const enabled = Boolean(href);
+    link.href = enabled ? href : "#";
+    link.classList.toggle("disabled", !enabled);
+    link.setAttribute("aria-disabled", String(!enabled));
+    if (enabled) link.removeAttribute("tabindex");
+    else link.setAttribute("tabindex", "-1");
+  }
+
+  function updatePptControls() {
+    const hasSlides = pptPages.length > 0;
+    pptCounter.textContent = hasSlides ? `${pptIndex + 1} / ${pptPages.length}` : "0 / 0";
+    pptPrev.disabled = !hasSlides || pptIndex === 0;
+    pptNext.disabled = !hasSlides || pptIndex === pptPages.length - 1;
+  }
+
+  function showPptPage(index) {
+    if (!pptPages.length) return;
+    pptIndex = Math.max(0, Math.min(index, pptPages.length - 1));
+    pptPages.forEach((page, pageIndex) => page.classList.toggle("active", pageIndex === pptIndex));
+    updatePptControls();
+  }
+
+  function resetPpt(message, state = "empty") {
+    pptPages = [];
+    pptIndex = 0;
+    pptStage.replaceChildren(pptStatus);
+    pptStatus.textContent = message;
+    pptStatus.className = `ppt-status ${state}`;
+    updatePptControls();
+  }
+
+  async function loadPpt(row) {
+    const url = row.dataset.pptUrl || "";
+    const token = ++pptLoadToken;
+    setLinkState(pptDownload, url);
+    pptFullscreen.disabled = !url;
+    if (!url) {
+      resetPpt("本课次暂无 PPT 课件");
+      return;
+    }
+
+    resetPpt("正在读取课件…", "loading");
+    try {
+      let slides = pptCache.get(url);
+      if (!slides) {
+        const response = await fetch(url, { credentials: "same-origin" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        slides = await parsePpt(await response.arrayBuffer());
+        pptCache.set(url, slides);
+      }
+      if (token !== pptLoadToken) return;
+
+      pptStatus.classList.add("hidden");
+      pptPages = slides.map((slide) => {
+        const page = D.createElement("div");
+        page.className = "ppt-slide-page";
+        page.append(slide.cloneNode(true));
+        pptStage.append(page);
+        return page;
+      });
+      showPptPage(0);
+    } catch (error) {
+      if (token !== pptLoadToken) return;
+      resetPpt(`课件读取失败：${error.message || error}。可使用“下载原文件”查看。`, "error");
+    }
+  }
+
+  function loadVideo(row, autoplay = false) {
+    const url = row.dataset.videoUrl || "";
+    video.pause();
+    if (!url) {
+      video.removeAttribute("src");
+      video.load();
+      video.classList.add("hidden");
+      videoEmpty.classList.remove("hidden");
+      videoEmpty.textContent = "本课次暂无课堂录像";
+      setLinkState(videoExternal, "");
+      return;
+    }
+
+    setLinkState(videoExternal, url);
+    videoEmpty.classList.add("hidden");
+    video.classList.remove("hidden");
+    if (video.src !== url) {
+      video.src = url;
+      video.load();
+    }
+    if (autoplay) video.play().catch(() => {});
+  }
+
+  function selectLesson(row, options = {}) {
+    if (!row) return;
+    selectedRow = row;
+    rows.forEach((candidate) => {
+      const active = candidate === row;
+      candidate.classList.toggle("selected", active);
+      candidate.setAttribute("aria-current", active ? "true" : "false");
+    });
+    currentLesson.textContent = row.dataset.lessonTitle || "当前课次";
+    loadVideo(row, options.autoplay === true);
+    loadPpt(row);
+
+    if (options.focus === "video") {
+      workspace.querySelector("[data-video-card]")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } else if (options.focus === "ppt") {
+      pptCard?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
+
+  for (const row of rows) {
+    row.addEventListener("click", (event) => {
+      const resourceButton = event.target.closest("[data-select-resource]");
+      if (resourceButton) {
+        event.preventDefault();
+        const kind = resourceButton.dataset.selectResource;
+        selectLesson(row, { autoplay: kind === "video", focus: kind });
+        return;
+      }
+
+      const playButton = event.target.closest("[data-lesson-play]");
+      if (playButton) {
+        event.preventDefault();
+        selectLesson(row, { autoplay: true, focus: "video" });
+        return;
+      }
+
+      if (event.target.closest("a, form, button, input, select, textarea")) return;
+      selectLesson(row);
+    });
+  }
+
+  pptPrev.addEventListener("click", () => showPptPage(pptIndex - 1));
+  pptNext.addEventListener("click", () => showPptPage(pptIndex + 1));
+  pptFullscreen.addEventListener("click", async () => {
+    try {
+      if (D.fullscreenElement) await D.exitFullscreen();
+      else await pptCard.requestFullscreen();
+    } catch (_) {
+      // Fullscreen can be unavailable in embedded or restricted browser contexts.
+    }
+  });
+
+  D.addEventListener("keydown", (event) => {
+    if (D.fullscreenElement !== pptCard) return;
+    if (event.key === "ArrowLeft") showPptPage(pptIndex - 1);
+    if (event.key === "ArrowRight") showPptPage(pptIndex + 1);
+  });
+
+  const initialRow = rows.find((row) => row.dataset.videoUrl || row.dataset.pptUrl) || rows[0];
+  if (initialRow) selectLesson(initialRow);
 })();
