@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Callable
 
 from .ai import AIClient, AIClientError
-from .client import ClassroomClient, ClassroomClientError, CourseDetail, ExportedFile, Lesson
+from .client import ClassroomClient, ClassroomClientError, CourseDetail, Lesson, LessonResource
+from .transcription import LocalTranscriptionError, LocalTranscriptionService
 from ..core.config import AppConfig
 
 
@@ -40,6 +41,7 @@ class LessonExtractionService:
         self.config = config or AppConfig()
         self.classroom = ClassroomClient(self.config)
         self.ai = AIClient(self.config)
+        self.transcription = LocalTranscriptionService(self.config)
 
     def extract_lesson(
         self,
@@ -57,43 +59,105 @@ class LessonExtractionService:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         warnings: list[str] = []
-
-        _report(progress, 15, "正在检查平台转写")
-        transcript_file, transcript_from_cache = self._download_export(course_id, lesson_id, "transcript", work_dir)
-        if transcript_from_cache:
-            _report(progress, 20, "已复用本地平台转写")
-        else:
-            _report(progress, 20, "平台转写已下载")
-        _report(progress, 28, "正在提取平台转写文本")
-        transcript_text = extract_docx_text(transcript_file)
         transcript_path = output_dir / "transcript.md"
-        transcript_path.write_text(_section("平台转写", transcript_text), encoding="utf-8")
+        transcript_text = ""
 
-        _report(progress, 40, "正在检查课件")
-        ppt_file, ppt_from_cache = self._download_export(course_id, lesson_id, "ppt", work_dir)
-        if ppt_from_cache:
-            _report(progress, 45, "已复用本地课件")
+        platform_transcript = _find_resource(lesson, "transcript")
+        if platform_transcript is not None:
+            _report(progress, 12, "正在检查平台转写")
+            try:
+                transcript_file, transcript_from_cache = self._download_export(
+                    course_id, lesson_id, "transcript", work_dir
+                )
+                if transcript_from_cache:
+                    _report(progress, 16, "已复用本地平台转写")
+                else:
+                    _report(progress, 16, "平台转写已下载")
+                transcript_text = extract_docx_text(transcript_file)
+                if transcript_text.strip():
+                    transcript_path.write_text(
+                        _section("平台转写", transcript_text), encoding="utf-8"
+                    )
+                else:
+                    warnings.append("平台转写为空，已尝试改用本地语音转写。")
+            except (
+                ClassroomClientError,
+                OSError,
+                zipfile.BadZipFile,
+                ET.ParseError,
+            ) as exc:
+                warnings.append(f"平台转写不可用，已尝试改用本地语音转写：{exc}")
         else:
-            _report(progress, 45, "课件已下载")
-        ocr_callback = self._ocr_image if run_ocr and self._can_ocr(warnings) else None
+            warnings.append("平台未提供可用转写，已尝试改用本地语音转写。")
 
-        def ppt_progress(done: int, total: int, image_name: str) -> None:
-            if total <= 0:
-                _report(progress, 55, "正在读取课件文本")
-                return
-            percent = 50 + int((done / total) * 35)
-            _report(progress, percent, f"正在 OCR 课件图片 {done}/{total}：{image_name}")
+        if not transcript_text.strip():
+            video_resource = _find_resource(lesson, "video")
+            if video_resource is not None and video_resource.url:
+                def asr_progress(value: int, message: str) -> None:
+                    _report(progress, 18 + int(value * 0.34), message)
 
-        _report(progress, 50, "正在提取课件文字")
-        ppt_text, ocr_warnings = extract_pptx_text(
-            ppt_file,
-            ocr_callback,
-            self.config.ocr_max_images,
-            progress=ppt_progress,
-        )
-        warnings.extend(ocr_warnings)
+                try:
+                    transcript_path = self._transcribe_lesson(
+                        detail,
+                        lesson,
+                        progress=asr_progress,
+                    )
+                    transcript_text = transcript_path.read_text(encoding="utf-8")
+                except LocalTranscriptionError as exc:
+                    warnings.append(str(exc))
+                    transcript_path.write_text(
+                        _section("语音转写", "（本地语音转写失败）"), encoding="utf-8"
+                    )
+            else:
+                warnings.append("本课次没有可用录像，无法执行本地语音转写。")
+                transcript_path.write_text(
+                    _section("语音转写", "（本课次暂无可用转写或录像）"), encoding="utf-8"
+                )
+
         ppt_text_path = output_dir / "ppt_ocr.md"
-        warning_text = "\n".join(f"- {item}" for item in warnings)
+        ppt_text = ""
+        ppt_warnings: list[str] = []
+        ppt_resource = _find_resource(lesson, "ppt")
+
+        if ppt_resource is not None:
+            _report(progress, 55, "正在检查课件")
+            try:
+                ppt_file, ppt_from_cache = self._download_export(
+                    course_id, lesson_id, "ppt", work_dir
+                )
+                if ppt_from_cache:
+                    _report(progress, 58, "已复用本地课件")
+                else:
+                    _report(progress, 58, "课件已下载")
+                ocr_callback = self._ocr_image if run_ocr and self._can_ocr(ppt_warnings) else None
+
+                def ppt_progress(done: int, total: int, image_name: str) -> None:
+                    if total <= 0:
+                        _report(progress, 64, "正在读取课件文本")
+                        return
+                    percent = 60 + int((done / total) * 25)
+                    _report(progress, percent, f"正在 OCR 课件图片 {done}/{total}：{image_name}")
+
+                _report(progress, 60, "正在提取课件文字")
+                ppt_text, ocr_warnings = extract_pptx_text(
+                    ppt_file,
+                    ocr_callback,
+                    self.config.ocr_max_images,
+                    progress=ppt_progress,
+                )
+                ppt_warnings.extend(ocr_warnings)
+            except (
+                ClassroomClientError,
+                OSError,
+                zipfile.BadZipFile,
+                ET.ParseError,
+            ) as exc:
+                ppt_warnings.append(f"课件提取失败：{exc}")
+        else:
+            ppt_warnings.append("本课次没有可用 PPT，已跳过课件文字提取。")
+
+        warnings.extend(ppt_warnings)
+        warning_text = "\n".join(f"- {item}" for item in ppt_warnings)
         ppt_body = ppt_text
         if warning_text:
             ppt_body = f"{ppt_body}\n\n## 提醒\n{warning_text}".strip()
@@ -107,6 +171,10 @@ class LessonExtractionService:
                 ppt_text_path.read_text(encoding="utf-8"),
             ]
         )
+        if warnings:
+            combined_text += "\n\n## 提取提醒\n" + "\n".join(
+                f"- {item}" for item in warnings
+            )
         combined_path = output_dir / "combined.md"
         combined_path.write_text(combined_text, encoding="utf-8")
         _report(progress, 100, "文字提取完成")
@@ -121,6 +189,46 @@ class LessonExtractionService:
             summary_path=output_dir / "summary.md" if (output_dir / "summary.md").exists() else None,
             warnings=warnings,
         )
+
+    def transcribe_lesson(
+        self,
+        course_id: str,
+        lesson_id: str,
+        progress: ProgressCallback | None = None,
+        *,
+        force: bool = False,
+    ) -> Path:
+        _report(progress, 5, "正在读取课次信息")
+        detail = self.classroom.get_course_detail(course_id)
+        lesson = _find_lesson(detail, lesson_id)
+        return self._transcribe_lesson(detail, lesson, progress=progress, force=force)
+
+    def _transcribe_lesson(
+        self,
+        detail: CourseDetail,
+        lesson: Lesson,
+        progress: ProgressCallback | None = None,
+        *,
+        force: bool = False,
+    ) -> Path:
+        video_resource = _find_resource(lesson, "video")
+        if video_resource is None or not video_resource.url:
+            raise LocalTranscriptionError("本课次没有可用的课堂录像")
+
+        output_dir = self._lesson_dir(self.config.outputs_dir, detail, lesson)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = output_dir / "local_transcript.txt"
+        result = self.transcription.transcribe_url(
+            video_resource.url,
+            cache_path,
+            progress=progress,
+            force=force,
+        )
+        transcript_path = output_dir / "transcript.md"
+        transcript_path.write_text(
+            _section("本地语音转写", result.text), encoding="utf-8"
+        )
+        return transcript_path
 
     def summarize_lesson(
         self,
@@ -256,7 +364,7 @@ def extract_pptx_text(
                 progress(index, len(limited_image_names), Path(name).name)
             try:
                 text = ocr_image(archive.read(name), Path(name).name).strip()
-            except (AIClientError, ExtractionError, subprocess.SubprocessError) as exc:
+            except Exception as exc:  # One bad image should not fail the whole lesson extraction.
                 warnings.append(f"{Path(name).name} OCR 失败：{exc}")
                 continue
             if text:
@@ -325,6 +433,17 @@ def _find_lesson(detail: CourseDetail, lesson_id: str) -> Lesson:
     if lesson is None:
         raise ExtractionError("未找到指定课次")
     return lesson
+
+
+def _find_resource(lesson: Lesson, kind: str) -> LessonResource | None:
+    return next(
+        (
+            resource
+            for resource in lesson.resources
+            if resource.kind == kind and resource.is_downloadable
+        ),
+        None,
+    )
 
 
 def _safe_path(value: str) -> str:
