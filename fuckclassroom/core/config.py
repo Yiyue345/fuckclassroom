@@ -80,20 +80,54 @@ class AppConfig:
 
     @property
     def asr_model(self) -> str:
-        return os.getenv("FUCKCLASSROOM_ASR_MODEL", "small").strip() or "small"
+        return os.getenv("FUCKCLASSROOM_ASR_MODEL", self._settings().asr_model).strip() or "small"
 
     @property
     def asr_device(self) -> str:
-        return os.getenv("FUCKCLASSROOM_ASR_DEVICE", "cpu").strip().lower() or "cpu"
+        return os.getenv("FUCKCLASSROOM_ASR_DEVICE", self._settings().asr_device).strip().lower() or "cpu"
 
     @property
     def asr_compute_type(self) -> str:
-        default = "float16" if self.asr_device == "cuda" else "int8"
-        return os.getenv("FUCKCLASSROOM_ASR_COMPUTE_TYPE", default).strip().lower() or default
+        configured = self._settings().asr_compute_type
+        if self.asr_device == "cuda" and configured == "int8":
+            configured = "float16"
+        return os.getenv("FUCKCLASSROOM_ASR_COMPUTE_TYPE", configured).strip().lower() or configured
 
     @property
     def asr_language(self) -> str:
         return os.getenv("FUCKCLASSROOM_ASR_LANGUAGE", "zh").strip()
+
+    @property
+    def asr_cpu_threads(self) -> int:
+        return self._env_int("FUCKCLASSROOM_ASR_CPU_THREADS", self._settings().asr_cpu_threads, 1, 64)
+
+    @property
+    def asr_num_workers(self) -> int:
+        return self._env_int("FUCKCLASSROOM_ASR_NUM_WORKERS", self._settings().asr_num_workers, 1, 16)
+
+    @property
+    def asr_max_concurrent_tasks(self) -> int:
+        return self._env_int(
+            "FUCKCLASSROOM_ASR_MAX_CONCURRENT_TASKS",
+            self._settings().asr_max_concurrent_tasks,
+            1,
+            8,
+        )
+
+    @property
+    def asr_batch_size(self) -> int:
+        return self._env_int("FUCKCLASSROOM_ASR_BATCH_SIZE", self._settings().asr_batch_size, 1, 32)
+
+    @property
+    def asr_use_batched(self) -> bool:
+        return self._env_bool("FUCKCLASSROOM_ASR_USE_BATCHED", self._settings().asr_use_batched)
+
+    @property
+    def asr_simplified_chinese(self) -> bool:
+        return self._env_bool(
+            "FUCKCLASSROOM_ASR_SIMPLIFIED_CHINESE",
+            self._settings().asr_simplified_chinese,
+        )
 
     @property
     def auto_open_outputs_after_extract(self) -> bool:
@@ -124,3 +158,18 @@ class AppConfig:
 
     def _settings(self):
         return SettingsStore(self.data_dir / "settings.json").load()
+
+    @staticmethod
+    def _env_int(name: str, fallback: int, minimum: int, maximum: int) -> int:
+        try:
+            value = int(os.getenv(name, str(fallback)))
+        except ValueError:
+            value = fallback
+        return max(minimum, min(maximum, value))
+
+    @staticmethod
+    def _env_bool(name: str, fallback: bool) -> bool:
+        raw = os.getenv(name)
+        if raw is None:
+            return fallback
+        return raw.lower() in {"1", "true", "yes", "on"}
