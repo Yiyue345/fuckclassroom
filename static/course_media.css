@@ -175,7 +175,7 @@
 }
 
 .inline-ppt-stage {
-  min-height: 280px;
+  min-height: 0;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--surface-subtle) 92%, var(--primary) 8%), var(--surface-subtle));
 }
