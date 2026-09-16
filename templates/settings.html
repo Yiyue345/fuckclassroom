@@ -82,7 +82,13 @@
               <div class="field"><label for="ocr_engine">OCR 引擎</label><select class="select" id="ocr_engine" name="ocr_engine">{% for engine in ["auto", "rapidocr", "tesseract", "ai"] %}<option value="{{ engine }}" {% if settings.ocr_engine == engine %}selected{% endif %}>{{ engine }}</option>{% endfor %}</select></div>
               <div class="field"><label for="ocr_max_images">最多识别图片</label><input class="input" id="ocr_max_images" name="ocr_max_images" type="number" min="1" step="1" value="{{ settings.ocr_max_images }}"></div>
             </div>
-            <div class="field"><label for="ocr_workers">OCR 并发 Worker</label><input class="input" id="ocr_workers" name="ocr_workers" type="number" min="1" max="16" step="1" value="{{ settings.ocr_workers }}"><span class="field-hint">默认 4。RapidOCR 会为每个线程创建独立推理实例；AI OCR 并发过高可能触发接口限流。</span></div>
+            <div class="field-row">
+              <div class="field"><label for="ocr_workers">OCR 并发 Worker</label><input class="input" id="ocr_workers" name="ocr_workers" type="number" min="1" max="16" step="1" value="{{ settings.ocr_workers }}"><span class="field-hint">默认 4。每个 Worker 使用独立 RapidOCR 实例。</span></div>
+              <div class="field"><label for="ocr_onnx_threads">每 Worker ONNX 线程</label><input class="input" id="ocr_onnx_threads" name="ocr_onnx_threads" type="number" min="1" max="16" step="1" value="{{ settings.ocr_onnx_threads }}"><span class="field-hint">默认 1，避免多个 Worker 的 ONNX Runtime 互相抢 CPU。</span></div>
+            </div>
+            <div class="field"><label for="ocr_max_side">OCR 图片最大边</label><input class="input" id="ocr_max_side" name="ocr_max_side" type="number" min="512" max="4096" step="64" value="{{ settings.ocr_max_side }}"><span class="field-hint">默认 1600 px。更小更快；小字较多时可提高到 1920 或 2048。</span></div>
+            <label class="check-row"><input type="checkbox" name="ocr_cache_enabled" {% if settings.ocr_cache_enabled %}checked{% endif %}><span>启用 OCR 持久缓存（同一图片后续直接复用结果）</span></label>
+            <label class="check-row"><input type="checkbox" name="ocr_use_angle_cls" {% if settings.ocr_use_angle_cls %}checked{% endif %}><span>启用 180° 文字方向分类（普通 PPT 建议关闭以提升速度）</span></label>
 
             <div class="field"><label for="asr_model">语音识别模型</label><input class="input mono" id="asr_model" name="asr_model" value="{{ settings.asr_model }}"><span class="field-hint">默认 small；模型越大通常越准，但下载、内存和推理开销也更高。</span></div>
             <div class="field-row">
@@ -99,7 +105,7 @@
             </div>
             <label class="check-row"><input type="checkbox" name="asr_use_batched" {% if settings.asr_use_batched %}checked{% endif %}><span>启用 BatchedInferencePipeline 批量推理</span></label>
             <label class="check-row"><input type="checkbox" name="asr_simplified_chinese" {% if settings.asr_simplified_chinese %}checked{% endif %}><span>中文转写自动转换为简体（包括已缓存的旧转写）</span></label>
-            <p class="field-hint">建议先使用默认的 2 个并发任务、4 CPU 线程、2 Workers、batch 8。不要简单把所有数值都拉满，否则会因为 CPU 争抢或内存不足反而变慢。</p>
+            <p class="field-hint">OCR 建议先用 4 Worker × 每 Worker 1 ONNX 线程；ASR 建议先使用默认的 2 个并发任务、4 CPU 线程、2 Workers、batch 8。不要简单把所有数值都拉满。</p>
           </div>
         </section>
 
