@@ -41,7 +41,7 @@
     root.querySelectorAll?.('svg.ppt-slide-svg').forEach(cropImageOnlySlide);
   }
 
-  const observer = new MutationObserver((records) => {
+  const cropObserver = new MutationObserver((records) => {
     for (const record of records) {
       for (const node of record.addedNodes) {
         if (node instanceof Element) scan(node);
@@ -49,6 +49,131 @@
     }
   });
 
-  observer.observe(stage, { childList: true, subtree: true });
+  cropObserver.observe(stage, { childList: true, subtree: true });
   scan(stage);
+
+  const card = stage.closest('[data-ppt-card]');
+  const prevButton = card?.querySelector('[data-ppt-prev]');
+  const nextButton = card?.querySelector('[data-ppt-next]');
+  if (!card || !prevButton || !nextButton) return;
+
+  const originalParent = stage.parentElement;
+  const readerBody = document.createElement('div');
+  readerBody.className = 'ppt-reader-body';
+
+  const thumbnailPanel = document.createElement('aside');
+  thumbnailPanel.className = 'ppt-thumbnails-panel';
+  thumbnailPanel.setAttribute('aria-label', '幻灯片缩略图导航');
+
+  const thumbnailHeading = document.createElement('div');
+  thumbnailHeading.className = 'ppt-thumbnails-heading';
+  thumbnailHeading.textContent = '幻灯片';
+
+  const thumbnailList = document.createElement('div');
+  thumbnailList.className = 'ppt-thumbnails-list';
+
+  thumbnailPanel.append(thumbnailHeading, thumbnailList);
+  originalParent.insertBefore(readerBody, stage);
+  readerBody.append(thumbnailPanel, stage);
+
+  let thumbnailButtons = [];
+  let rebuildFrame = 0;
+
+  const pages = () => [...stage.querySelectorAll('.ppt-slide-page')];
+
+  function syncActiveThumbnail(scroll = true) {
+    const currentPages = pages();
+    const activeIndex = currentPages.findIndex((page) => page.classList.contains('active'));
+
+    thumbnailButtons.forEach((button, index) => {
+      const active = index === activeIndex;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-current', active ? 'page' : 'false');
+    });
+
+    if (scroll && activeIndex >= 0 && card.matches(':fullscreen')) {
+      thumbnailButtons[activeIndex]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  }
+
+  function navigateTo(index) {
+    const currentPages = pages();
+    const currentIndex = currentPages.findIndex((page) => page.classList.contains('active'));
+    if (currentIndex < 0 || index === currentIndex) return;
+
+    const button = index > currentIndex ? nextButton : prevButton;
+    const steps = Math.abs(index - currentIndex);
+    for (let step = 0; step < steps; step += 1) button.click();
+    syncActiveThumbnail(true);
+  }
+
+  function rebuildThumbnails() {
+    rebuildFrame = 0;
+    const currentPages = pages();
+    thumbnailList.replaceChildren();
+    thumbnailButtons = [];
+    thumbnailHeading.textContent = currentPages.length ? `幻灯片 · ${currentPages.length} 页` : '幻灯片';
+
+    currentPages.forEach((page, index) => {
+      const sourceSvg = page.querySelector('svg.ppt-slide-svg');
+      if (!sourceSvg) return;
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ppt-thumbnail-button';
+      button.setAttribute('aria-label', `跳转到第 ${index + 1} 页`);
+      button.title = `第 ${index + 1} 页`;
+
+      const preview = sourceSvg.cloneNode(true);
+      preview.removeAttribute('id');
+      button.append(preview);
+
+      const number = document.createElement('span');
+      number.className = 'ppt-thumbnail-number';
+      number.textContent = index + 1;
+      button.append(number);
+
+      button.addEventListener('click', () => navigateTo(index));
+      thumbnailList.append(button);
+      thumbnailButtons.push(button);
+    });
+
+    syncActiveThumbnail(false);
+  }
+
+  function scheduleThumbnailRebuild() {
+    if (rebuildFrame) cancelAnimationFrame(rebuildFrame);
+    rebuildFrame = requestAnimationFrame(rebuildThumbnails);
+  }
+
+  const navigationObserver = new MutationObserver((records) => {
+    let needsRebuild = false;
+    let needsSync = false;
+
+    for (const record of records) {
+      if (record.type === 'childList') needsRebuild = true;
+      if (record.type === 'attributes' && record.target instanceof Element
+          && record.target.classList.contains('ppt-slide-page')) {
+        needsSync = true;
+      }
+    }
+
+    if (needsRebuild) scheduleThumbnailRebuild();
+    else if (needsSync) syncActiveThumbnail(true);
+  });
+
+  navigationObserver.observe(stage, {
+    childList: true,
+    subtree: false,
+    attributes: true,
+    attributeFilter: ['class'],
+  });
+
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement === card) {
+      syncActiveThumbnail(true);
+    }
+  });
+
+  rebuildThumbnails();
 })();
