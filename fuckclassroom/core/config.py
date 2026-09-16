@@ -79,6 +79,10 @@ class AppConfig:
             return self._settings().ocr_max_images
 
     @property
+    def ocr_workers(self) -> int:
+        return self._env_int("FUCKCLASSROOM_OCR_WORKERS", self._settings().ocr_workers, 1, 16)
+
+    @property
     def asr_model(self) -> str:
         return os.getenv("FUCKCLASSROOM_ASR_MODEL", self._settings().asr_model).strip() or "small"
 
