@@ -89,8 +89,6 @@ class AppConfig:
     @property
     def asr_compute_type(self) -> str:
         configured = self._settings().asr_compute_type
-        if self.asr_device == "cuda" and configured == "int8":
-            configured = "float16"
         return os.getenv("FUCKCLASSROOM_ASR_COMPUTE_TYPE", configured).strip().lower() or configured
 
     @property
