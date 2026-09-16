@@ -62,6 +62,9 @@ class LocalTranscriptionTests(unittest.TestCase):
             self.assertIn("[00:00:01 - 00:00:04] 软体与资料库", result.text)
             self.assertIn("[00:00:07 - 00:00:10] 第二段", result.text)
             self.assertEqual(calls, ["https://example.test/lesson.mp4"])
+            self.assertTrue(
+                any("00:00:10 / 00:00:12（84%）" in message for _, message in progress)
+            )
             self.assertEqual(progress[-1][0], 100)
             self.assertIsNotNone(result.export_path)
             exported = config.downloads_dir / "测试课程" / "第一课" / "本地转写.txt"
