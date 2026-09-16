@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -23,9 +24,12 @@ class LocalTranscriptionResult:
     duration_seconds: float | None = None
 
 
-_MODEL_CACHE: dict[tuple[str, str, str, str], object] = {}
+_MODEL_CACHE: dict[tuple[object, ...], object] = {}
 _MODEL_LOCK = threading.Lock()
-_TRANSCRIPTION_LOCK = threading.Lock()
+_TRANSCRIPTION_CONDITION = threading.Condition()
+_ACTIVE_TRANSCRIPTIONS = 0
+_OPENCC_CONVERTER = None
+_OPENCC_LOCK = threading.Lock()
 _MODEL_ALLOW_PATTERNS = [
     "config.json",
     "preprocessor_config.json",
@@ -55,32 +59,46 @@ class LocalTranscriptionService:
         if output_path.exists() and not force:
             cached_text = output_path.read_text(encoding="utf-8").strip()
             if cached_text:
+                normalized = self._normalize_text(cached_text)
+                if normalized != cached_text:
+                    output_path.write_text(normalized + "\n", encoding="utf-8")
                 _clear_detail(progress)
                 _report(progress, 100, "已复用本地语音转写")
-                return LocalTranscriptionResult(output_path, cached_text, True)
+                return LocalTranscriptionResult(output_path, normalized, True)
 
         _report(progress, 4, "正在准备本地语音识别模型")
         model = self._get_model(progress)
         _clear_detail(progress)
 
-        # Running multiple Whisper jobs in parallel can easily exhaust RAM/VRAM on a laptop.
-        # Serialize ASR while letting the rest of the application's background tasks remain concurrent.
-        with _TRANSCRIPTION_LOCK:
-            _report(progress, 12, "正在连接课堂录像并流式读取音频")
+        with _transcription_slot(self.config.asr_max_concurrent_tasks, progress):
+            _report(
+                progress,
+                12,
+                f"正在连接课堂录像并流式读取音频（并发上限 {self.config.asr_max_concurrent_tasks}）",
+            )
             try:
-                segments, info = model.transcribe(
-                    video_url,
-                    language=self.config.asr_language or None,
-                    beam_size=3,
-                    vad_filter=True,
-                    vad_parameters={"min_silence_duration_ms": 500},
-                    condition_on_previous_text=True,
-                )
+                transcriber = model
+                transcribe_kwargs = {
+                    "language": self.config.asr_language or None,
+                    "beam_size": 3,
+                    "vad_filter": True,
+                    "vad_parameters": {"min_silence_duration_ms": 500},
+                    "condition_on_previous_text": True,
+                }
+                if self.config.asr_use_batched and self.config.asr_batch_size > 1:
+                    from faster_whisper import BatchedInferencePipeline
 
+                    # Pipeline instances keep a small amount of per-call state, so create one
+                    # for each concurrent task while sharing the expensive WhisperModel.
+                    transcriber = BatchedInferencePipeline(model=model)
+                    transcribe_kwargs["batch_size"] = self.config.asr_batch_size
+
+                segments, info = transcriber.transcribe(video_url, **transcribe_kwargs)
                 duration = float(getattr(info, "duration", 0.0) or 0.0)
                 lines: list[str] = []
                 for segment in segments:
-                    text = str(getattr(segment, "text", "") or "").strip()
+                    raw_text = str(getattr(segment, "text", "") or "").strip()
+                    text = self._normalize_text(raw_text)
                     if not text:
                         continue
                     start = float(getattr(segment, "start", 0.0) or 0.0)
@@ -110,6 +128,14 @@ class LocalTranscriptionService:
             duration_seconds=duration or None,
         )
 
+    def _normalize_text(self, text: str) -> str:
+        if not text or not self.config.asr_simplified_chinese:
+            return text
+        language = (self.config.asr_language or "").lower()
+        if language and not language.startswith("zh"):
+            return text
+        return _to_simplified_chinese(text)
+
     def _get_model(self, progress: ProgressCallback | None = None):
         try:
             from faster_whisper import WhisperModel
@@ -122,6 +148,8 @@ class LocalTranscriptionService:
             self.config.asr_model,
             self.config.asr_device,
             self.config.asr_compute_type,
+            self.config.asr_cpu_threads,
+            self.config.asr_num_workers,
             str(self.config.asr_models_dir),
         )
         with _MODEL_LOCK:
@@ -136,6 +164,8 @@ class LocalTranscriptionService:
                     model_path,
                     device=self.config.asr_device,
                     compute_type=self.config.asr_compute_type,
+                    cpu_threads=self.config.asr_cpu_threads,
+                    num_workers=self.config.asr_num_workers,
                     local_files_only=True,
                 )
             except LocalTranscriptionError:
@@ -290,6 +320,44 @@ class LocalTranscriptionService:
             raise LocalTranscriptionError(f"语音模型下载完成但本地快照不可用：{exc}") from exc
 
 
+@contextmanager
+def _transcription_slot(limit: int, progress: ProgressCallback | None = None):
+    global _ACTIVE_TRANSCRIPTIONS
+    limit = max(1, int(limit))
+    with _TRANSCRIPTION_CONDITION:
+        while _ACTIVE_TRANSCRIPTIONS >= limit:
+            _report(
+                progress,
+                10,
+                f"正在等待本地转写槽位：{_ACTIVE_TRANSCRIPTIONS}/{limit} 个任务运行中",
+            )
+            _TRANSCRIPTION_CONDITION.wait(timeout=1.0)
+        _ACTIVE_TRANSCRIPTIONS += 1
+        active = _ACTIVE_TRANSCRIPTIONS
+    _report(progress, 11, f"已进入本地转写队列：{active}/{limit} 个任务运行中")
+    try:
+        yield
+    finally:
+        with _TRANSCRIPTION_CONDITION:
+            _ACTIVE_TRANSCRIPTIONS = max(0, _ACTIVE_TRANSCRIPTIONS - 1)
+            _TRANSCRIPTION_CONDITION.notify_all()
+
+
+def _to_simplified_chinese(text: str) -> str:
+    global _OPENCC_CONVERTER
+    with _OPENCC_LOCK:
+        if _OPENCC_CONVERTER is None:
+            try:
+                from opencc import OpenCC
+            except ImportError as exc:
+                raise LocalTranscriptionError(
+                    "缺少 OpenCC 简繁转换依赖，请重新安装 requirements.txt"
+                ) from exc
+            _OPENCC_CONVERTER = OpenCC("t2s")
+        converter = _OPENCC_CONVERTER
+    return converter.convert(text)
+
+
 def _timestamp(seconds: float) -> str:
     total = max(0, int(seconds))
     hours, remainder = divmod(total, 3600)
@@ -322,7 +390,6 @@ def _report_detail(progress: ProgressCallback | None, percent: int, message: str
     if callable(detail):
         detail(max(0, min(100, int(percent))), message)
     else:
-        # Keep CLI/custom callbacks informative even if they do not support a secondary bar.
         progress(4, message)
 
 
