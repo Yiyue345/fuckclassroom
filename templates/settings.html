@@ -82,6 +82,7 @@
               <div class="field"><label for="ocr_engine">OCR 引擎</label><select class="select" id="ocr_engine" name="ocr_engine">{% for engine in ["auto", "rapidocr", "tesseract", "ai"] %}<option value="{{ engine }}" {% if settings.ocr_engine == engine %}selected{% endif %}>{{ engine }}</option>{% endfor %}</select></div>
               <div class="field"><label for="ocr_max_images">最多识别图片</label><input class="input" id="ocr_max_images" name="ocr_max_images" type="number" min="1" step="1" value="{{ settings.ocr_max_images }}"></div>
             </div>
+            <div class="field"><label for="ocr_workers">OCR 并发 Worker</label><input class="input" id="ocr_workers" name="ocr_workers" type="number" min="1" max="16" step="1" value="{{ settings.ocr_workers }}"><span class="field-hint">默认 4。RapidOCR 会为每个线程创建独立推理实例；AI OCR 并发过高可能触发接口限流。</span></div>
 
             <div class="field"><label for="asr_model">语音识别模型</label><input class="input mono" id="asr_model" name="asr_model" value="{{ settings.asr_model }}"><span class="field-hint">默认 small；模型越大通常越准，但下载、内存和推理开销也更高。</span></div>
             <div class="field-row">
