@@ -17,6 +17,15 @@ class AppSettings:
     ocr_model: str = "gpt-4o-mini"
     ocr_engine: str = "auto"
     ocr_max_images: int = 120
+    asr_model: str = "small"
+    asr_device: str = "cpu"
+    asr_compute_type: str = "int8"
+    asr_cpu_threads: int = 4
+    asr_num_workers: int = 2
+    asr_max_concurrent_tasks: int = 2
+    asr_batch_size: int = 8
+    asr_use_batched: bool = True
+    asr_simplified_chinese: bool = True
     auto_open_outputs_after_extract: bool = False
     default_term_id: str = ""
     hy2_enabled: bool = False
@@ -34,6 +43,19 @@ class AppSettings:
             ocr_model=str(data.get("ocr_model") or data.get("ai_model") or cls.ocr_model),
             ocr_engine=_valid_ocr_engine(data.get("ocr_engine")),
             ocr_max_images=_positive_int(data.get("ocr_max_images"), cls.ocr_max_images),
+            asr_model=str(data.get("asr_model") or cls.asr_model).strip() or cls.asr_model,
+            asr_device=_valid_asr_device(data.get("asr_device")),
+            asr_compute_type=str(data.get("asr_compute_type") or cls.asr_compute_type).strip().lower(),
+            asr_cpu_threads=_bounded_int(data.get("asr_cpu_threads"), cls.asr_cpu_threads, 1, 64),
+            asr_num_workers=_bounded_int(data.get("asr_num_workers"), cls.asr_num_workers, 1, 16),
+            asr_max_concurrent_tasks=_bounded_int(
+                data.get("asr_max_concurrent_tasks"), cls.asr_max_concurrent_tasks, 1, 8
+            ),
+            asr_batch_size=_bounded_int(data.get("asr_batch_size"), cls.asr_batch_size, 1, 32),
+            asr_use_batched=_to_bool_default(data.get("asr_use_batched"), cls.asr_use_batched),
+            asr_simplified_chinese=_to_bool_default(
+                data.get("asr_simplified_chinese"), cls.asr_simplified_chinese
+            ),
             auto_open_outputs_after_extract=_to_bool(data.get("auto_open_outputs_after_extract")),
             default_term_id=str(data.get("default_term_id") or ""),
             hy2_enabled=_to_bool(data.get("hy2_enabled")),
@@ -102,6 +124,17 @@ class SettingsStore:
                 "ocr_model": form.get("ocr_model", current.ocr_model),
                 "ocr_engine": form.get("ocr_engine", current.ocr_engine),
                 "ocr_max_images": form.get("ocr_max_images", current.ocr_max_images),
+                "asr_model": form.get("asr_model", current.asr_model),
+                "asr_device": form.get("asr_device", current.asr_device),
+                "asr_compute_type": form.get("asr_compute_type", current.asr_compute_type),
+                "asr_cpu_threads": form.get("asr_cpu_threads", current.asr_cpu_threads),
+                "asr_num_workers": form.get("asr_num_workers", current.asr_num_workers),
+                "asr_max_concurrent_tasks": form.get(
+                    "asr_max_concurrent_tasks", current.asr_max_concurrent_tasks
+                ),
+                "asr_batch_size": form.get("asr_batch_size", current.asr_batch_size),
+                "asr_use_batched": form.get("asr_use_batched"),
+                "asr_simplified_chinese": form.get("asr_simplified_chinese"),
                 "auto_open_outputs_after_extract": form.get("auto_open_outputs_after_extract"),
                 "default_term_id": form.get("default_term_id", current.default_term_id),
                 "hy2_enabled": form.get("hy2_enabled"),
@@ -147,6 +180,11 @@ def _valid_ocr_engine(value: Any) -> str:
     return engine if engine in {"auto", "rapidocr", "tesseract", "ai"} else "auto"
 
 
+def _valid_asr_device(value: Any) -> str:
+    device = str(value or "cpu").strip().lower()
+    return device if device in {"cpu", "cuda", "auto"} else "cpu"
+
+
 def _positive_int(value: Any, fallback: int) -> int:
     try:
         return max(1, int(value))
@@ -165,3 +203,9 @@ def _to_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").lower() in {"1", "true", "yes", "on"}
+
+
+def _to_bool_default(value: Any, fallback: bool) -> bool:
+    if value is None:
+        return fallback
+    return _to_bool(value)
