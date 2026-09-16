@@ -18,6 +18,29 @@ class TaskState:
     error: str | None
     created_at: str
     updated_at: str
+    detail_progress: int | None = None
+    detail_message: str | None = None
+
+
+class TaskProgressReporter:
+    """Callable task reporter with an optional secondary/detail progress channel."""
+
+    def __init__(self, manager: "TaskManager", task_id: str) -> None:
+        self._manager = manager
+        self._task_id = task_id
+
+    def __call__(self, progress: int, message: str) -> None:
+        self._manager._update(self._task_id, progress=progress, message=message)
+
+    def detail(self, progress: int, message: str) -> None:
+        self._manager._update(
+            self._task_id,
+            detail_progress=max(0, min(100, int(progress))),
+            detail_message=message,
+        )
+
+    def clear_detail(self) -> None:
+        self._manager._update(self._task_id, clear_detail=True)
 
 
 class TaskManager:
@@ -68,11 +91,10 @@ class TaskManager:
         task_id: str,
         worker: Callable[[Callable[[int, str], None]], str | None],
     ) -> None:
-        def update(progress: int, message: str) -> None:
-            self._update(task_id, progress=progress, message=message)
+        reporter = TaskProgressReporter(self, task_id)
 
         try:
-            result_url = worker(update)
+            result_url = worker(reporter)
         except Exception as exc:  # noqa: BLE001 - task pages should show any worker failure.
             self._update(
                 task_id,
@@ -80,6 +102,7 @@ class TaskManager:
                 progress=100,
                 message="任务失败",
                 error=str(exc),
+                clear_detail=True,
             )
             return
         self._update(
@@ -88,6 +111,7 @@ class TaskManager:
             progress=100,
             message="任务完成",
             result_url=result_url,
+            clear_detail=True,
         )
 
     def _update(
@@ -99,6 +123,9 @@ class TaskManager:
         message: str | None = None,
         result_url: str | None = None,
         error: str | None = None,
+        detail_progress: int | None = None,
+        detail_message: str | None = None,
+        clear_detail: bool = False,
     ) -> None:
         with self._lock:
             state = self._tasks.get(task_id)
@@ -114,6 +141,14 @@ class TaskManager:
                 state.result_url = result_url
             if error is not None:
                 state.error = error
+            if clear_detail:
+                state.detail_progress = None
+                state.detail_message = None
+            else:
+                if detail_progress is not None:
+                    state.detail_progress = max(0, min(100, int(detail_progress)))
+                if detail_message is not None:
+                    state.detail_message = detail_message
             state.updated_at = _now()
 
 
