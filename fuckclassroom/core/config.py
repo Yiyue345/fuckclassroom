@@ -47,6 +47,10 @@ class AppConfig:
         return self.data_dir / "cache"
 
     @property
+    def asr_models_dir(self) -> Path:
+        return self.data_dir / "models" / "faster-whisper"
+
+    @property
     def ai_base_url(self) -> str:
         return os.getenv("FUCKCLASSROOM_AI_BASE_URL", self._settings().ai_base_url).rstrip("/")
 
@@ -73,6 +77,23 @@ class AppConfig:
             return max(1, int(raw))
         except ValueError:
             return self._settings().ocr_max_images
+
+    @property
+    def asr_model(self) -> str:
+        return os.getenv("FUCKCLASSROOM_ASR_MODEL", "small").strip() or "small"
+
+    @property
+    def asr_device(self) -> str:
+        return os.getenv("FUCKCLASSROOM_ASR_DEVICE", "cpu").strip().lower() or "cpu"
+
+    @property
+    def asr_compute_type(self) -> str:
+        default = "float16" if self.asr_device == "cuda" else "int8"
+        return os.getenv("FUCKCLASSROOM_ASR_COMPUTE_TYPE", default).strip().lower() or default
+
+    @property
+    def asr_language(self) -> str:
+        return os.getenv("FUCKCLASSROOM_ASR_LANGUAGE", "zh").strip()
 
     @property
     def auto_open_outputs_after_extract(self) -> bool:
