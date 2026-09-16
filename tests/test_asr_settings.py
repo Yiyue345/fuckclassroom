@@ -16,6 +16,10 @@ class AsrSettingsTests(unittest.TestCase):
             settings = store.update_from_form(
                 {
                     "ocr_workers": "5",
+                    "ocr_onnx_threads": "2",
+                    "ocr_max_side": "1920",
+                    "ocr_use_angle_cls": "",
+                    "ocr_cache_enabled": "on",
                     "asr_model": "small",
                     "asr_device": "cpu",
                     "asr_compute_type": "int8",
@@ -29,6 +33,10 @@ class AsrSettingsTests(unittest.TestCase):
             )
 
             self.assertEqual(settings.ocr_workers, 5)
+            self.assertEqual(settings.ocr_onnx_threads, 2)
+            self.assertEqual(settings.ocr_max_side, 1920)
+            self.assertFalse(settings.ocr_use_angle_cls)
+            self.assertTrue(settings.ocr_cache_enabled)
             self.assertEqual(settings.asr_cpu_threads, 6)
             self.assertEqual(settings.asr_num_workers, 3)
             self.assertEqual(settings.asr_max_concurrent_tasks, 3)
@@ -38,20 +46,28 @@ class AsrSettingsTests(unittest.TestCase):
 
             config = AppConfig(data_dir=data_dir)
             self.assertEqual(config.ocr_workers, 5)
+            self.assertEqual(config.ocr_onnx_threads, 2)
+            self.assertEqual(config.ocr_max_side, 1920)
+            self.assertFalse(config.ocr_use_angle_cls)
+            self.assertTrue(config.ocr_cache_enabled)
             self.assertEqual(config.asr_cpu_threads, 6)
             self.assertEqual(config.asr_num_workers, 3)
             self.assertEqual(config.asr_max_concurrent_tasks, 3)
             self.assertEqual(config.asr_batch_size, 12)
 
-    def test_asr_checkboxes_can_be_disabled(self) -> None:
+    def test_asr_and_ocr_checkboxes_can_be_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = SettingsStore(Path(directory) / "settings.json")
             settings = store.update_from_form(
                 {
+                    "ocr_use_angle_cls": "",
+                    "ocr_cache_enabled": "",
                     "asr_use_batched": "",
                     "asr_simplified_chinese": "",
                 }
             )
+            self.assertFalse(settings.ocr_use_angle_cls)
+            self.assertFalse(settings.ocr_cache_enabled)
             self.assertFalse(settings.asr_use_batched)
             self.assertFalse(settings.asr_simplified_chinese)
 
