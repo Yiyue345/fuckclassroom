@@ -3,40 +3,142 @@
 
 {% block title %}{{ task.title }} · 学业助手{% endblock %}
 {% block page_title %}任务进度{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/task_status.css?v=20260916-1">{% endblock %}
 
 {% block content %}
-  <div class="page-head"><div><h1>{{ task.title }}</h1><p class="page-description">任务会在后台继续运行，本页自动更新进度。</p></div><div class="head-actions"><a class="btn" href="{% if active_system == 'selection' %}/selection/info{% else %}/tasks{% endif %}"><svg class="icon"><use href="/static/icons.svg#arrow-left"></use></svg>返回</a></div></div>
+  <div class="page-head">
+    <div><h1>{{ task.title }}</h1><p class="page-description">任务会在后台继续运行；可在安全取消点停止，并实时查看执行日志。</p></div>
+    <div class="head-actions task-progress-actions">
+      <button class="btn danger{% if task.status != 'running' %} hidden{% endif %}" type="button" id="cancel-task" {% if task.cancel_requested %}disabled{% endif %}><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{% if task.cancel_requested %}正在取消…{% else %}取消任务{% endif %}</span></button>
+      <a class="btn" href="{% if active_system == 'selection' %}/selection/info{% else %}/tasks{% endif %}"><svg class="icon"><use href="/static/icons.svg#arrow-left"></use></svg>返回</a>
+    </div>
+  </div>
 
   <section class="surface task-progress-card">
-    <div class="task-top"><div><div class="task-title" id="message">{{ task.message }}</div><div class="task-meta">创建于 {{ task.created_at }}</div></div><span class="status blue" id="status-badge"><span id="status">{{ task.status }}</span></span></div>
+    <div class="task-top">
+      <div><div class="task-title" id="message">{{ task.message }}</div><div class="task-meta">创建于 {{ task.created_at }} · 最后更新 {{ task.updated_at }}</div></div>
+      <span class="status {% if task.status == 'succeeded' %}green{% elif task.status == 'failed' %}red{% elif task.status == 'cancelled' %}gray{% else %}blue{% endif %}" id="status-badge"><span id="status">{% if task.status == 'succeeded' %}已完成{% elif task.status == 'failed' %}失败{% elif task.status == 'cancelled' %}已取消{% elif task.cancel_requested %}取消中{% else %}进行中{% endif %}</span></span>
+    </div>
     <div class="progress" style="margin-top:20px"><span id="bar" style="width: {{ task.progress }}%"></span></div>
     <div class="task-progress-meta"><span>处理进度</span><strong id="progress">{{ task.progress }}%</strong></div>
-    <p id="error" class="notice error hidden"></p>
-    <div id="actions" class="actions hidden" style="margin-top:18px"><a class="btn primary" id="result-link" href="#">查看结果</a></div>
+
+    <div class="task-detail-progress{% if task.detail_progress is none %} hidden{% endif %}" id="detail-progress">
+      <div class="task-detail-progress-meta"><span id="detail-message">{{ task.detail_message or "" }}</span><strong id="detail-percent">{{ task.detail_progress if task.detail_progress is not none else 0 }}%</strong></div>
+      <div class="progress"><span id="detail-bar" style="width: {{ task.detail_progress if task.detail_progress is not none else 0 }}%"></span></div>
+    </div>
+
+    <p id="error" class="notice error{% if not task.error %} hidden{% endif %}">{{ task.error or "" }}</p>
+    <div id="actions" class="actions{% if not task.result_url %} hidden{% endif %}" style="margin-top:18px"><a class="btn primary" id="result-link" href="{{ task.result_url or '#' }}">查看结果</a></div>
+  </section>
+
+  <section class="surface task-log-card">
+    <header class="task-log-header">
+      <div><h2>执行日志</h2><p>记录任务阶段、警告和异常堆栈，便于定位问题。</p></div>
+      <button class="btn small" type="button" id="copy-logs">复制日志</button>
+    </header>
+    <div class="task-log" id="task-log" aria-live="polite"><div class="task-log-empty">正在读取日志…</div></div>
   </section>
 {% endblock %}
 
 {% block scripts %}
   <script>
-    const taskId = "{{ task.id }}";
+    const taskId = {{ task.id|tojson }};
     const autoOpen = {{ "true" if auto_open_outputs else "false" }};
     let opened = false;
+    let currentLogs = [];
+    let logSignature = "";
 
-    async function refreshTask() {
-      const response = await fetch(`/api/tasks/${taskId}`);
-      if (!response.ok) return;
-      const task = await response.json();
-      document.getElementById("bar").style.width = `${task.progress}%`;
-      document.getElementById("progress").textContent = `${task.progress}%`;
-      document.getElementById("status").textContent = task.status === "succeeded" ? "已完成" : task.status === "failed" ? "失败" : "进行中";
+    function statusLabel(task) {
+      if (task.status === "succeeded") return "已完成";
+      if (task.status === "failed") return "失败";
+      if (task.status === "cancelled") return "已取消";
+      if (task.cancel_requested) return "取消中";
+      return "进行中";
+    }
+
+    function badgeClass(task) {
+      if (task.status === "succeeded") return "green";
+      if (task.status === "failed") return "red";
+      if (task.status === "cancelled") return "gray";
+      return "blue";
+    }
+
+    function renderLogs(logs) {
+      currentLogs = Array.isArray(logs) ? logs : [];
+      const last = currentLogs[currentLogs.length - 1] || {};
+      const signature = `${currentLogs.length}:${last.timestamp || ""}:${last.level || ""}:${last.message || ""}`;
+      if (signature === logSignature) return;
+      logSignature = signature;
+
+      const container = document.getElementById("task-log");
+      const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 70;
+      const fragment = document.createDocumentFragment();
+      if (!currentLogs.length) {
+        const empty = document.createElement("div");
+        empty.className = "task-log-empty";
+        empty.textContent = "暂无日志";
+        fragment.append(empty);
+      } else {
+        currentLogs.forEach((entry) => {
+          const row = document.createElement("div");
+          row.className = "task-log-line";
+          row.dataset.level = entry.level || "info";
+
+          const time = document.createElement("span");
+          time.className = "task-log-time";
+          time.textContent = String(entry.timestamp || "").split(" ").pop() || "--:--:--";
+
+          const level = document.createElement("span");
+          level.className = "task-log-level";
+          level.textContent = entry.level || "info";
+
+          const message = document.createElement("pre");
+          message.className = "task-log-message";
+          message.textContent = entry.message || "";
+
+          row.append(time, level, message);
+          fragment.append(row);
+        });
+      }
+      container.replaceChildren(fragment);
+      if (nearBottom || currentLogs.length <= 2) container.scrollTop = container.scrollHeight;
+    }
+
+    function renderTask(task) {
+      const percent = Math.max(0, Math.min(100, Number(task.progress) || 0));
+      document.getElementById("bar").style.width = `${percent}%`;
+      document.getElementById("progress").textContent = `${percent}%`;
+      document.getElementById("status").textContent = statusLabel(task);
       document.getElementById("message").textContent = task.message || "";
-      const badge = document.getElementById("status-badge");
-      badge.className = `status ${task.status === "succeeded" ? "green" : task.status === "failed" ? "red" : "blue"}`;
+      document.getElementById("status-badge").className = `status ${badgeClass(task)}`;
+
+      const detail = document.getElementById("detail-progress");
+      if (task.detail_progress === null || task.detail_progress === undefined || !task.detail_message) {
+        detail.classList.add("hidden");
+      } else {
+        const detailPercent = Math.max(0, Math.min(100, Number(task.detail_progress) || 0));
+        detail.classList.remove("hidden");
+        document.getElementById("detail-message").textContent = task.detail_message;
+        document.getElementById("detail-percent").textContent = `${detailPercent}%`;
+        document.getElementById("detail-bar").style.width = `${detailPercent}%`;
+      }
 
       const error = document.getElementById("error");
       if (task.error) {
         error.textContent = task.error;
         error.classList.remove("hidden");
+      } else {
+        error.classList.add("hidden");
+      }
+
+      const cancel = document.getElementById("cancel-task");
+      const cancelLabel = cancel.querySelector("span");
+      if (task.status === "running") {
+        cancel.classList.remove("hidden");
+        cancel.disabled = Boolean(task.cancel_requested);
+        cancelLabel.textContent = task.cancel_requested ? "正在取消…" : "取消任务";
+      } else {
+        cancel.classList.add("hidden");
       }
 
       if (task.result_url) {
@@ -50,8 +152,53 @@
         }
       }
 
-      if (task.status === "running") window.setTimeout(refreshTask, 1000);
+      renderLogs(task.logs);
     }
+
+    async function refreshTask() {
+      try {
+        const response = await fetch(`/api/tasks/${taskId}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const task = await response.json();
+        renderTask(task);
+        if (task.status === "running") window.setTimeout(refreshTask, 750);
+      } catch (_) {
+        window.setTimeout(refreshTask, 1500);
+      }
+    }
+
+    document.getElementById("cancel-task").addEventListener("click", async () => {
+      if (!window.confirm("确认取消这个任务？已经完成的步骤不会回滚。")) return;
+      const button = document.getElementById("cancel-task");
+      button.disabled = true;
+      button.querySelector("span").textContent = "正在取消…";
+      try {
+        const response = await fetch(`/api/tasks/${taskId}/cancel`, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) throw new Error(`取消请求失败（${response.status}）`);
+        renderTask(await response.json());
+        window.setTimeout(refreshTask, 250);
+      } catch (error) {
+        button.disabled = false;
+        button.querySelector("span").textContent = "取消任务";
+        window.alert(error && error.message ? error.message : "取消请求失败");
+      }
+    });
+
+    document.getElementById("copy-logs").addEventListener("click", async () => {
+      const text = currentLogs.map((entry) => `[${entry.timestamp || ""}] [${String(entry.level || "info").toUpperCase()}] ${entry.message || ""}`).join("\n");
+      try {
+        await navigator.clipboard.writeText(text || "暂无日志");
+        const button = document.getElementById("copy-logs");
+        const previous = button.textContent;
+        button.textContent = "已复制";
+        window.setTimeout(() => { button.textContent = previous; }, 1200);
+      } catch (_) {
+        window.alert("浏览器未允许复制，请手动选择日志文本。");
+      }
+    });
 
     refreshTask();
   </script>
