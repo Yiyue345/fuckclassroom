@@ -5,8 +5,10 @@ import mimetypes
 import shutil
 import subprocess
 import tempfile
+import threading
 import xml.etree.ElementTree as ET
 import zipfile
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -22,6 +24,7 @@ class ExtractionError(RuntimeError):
 
 
 ProgressCallback = Callable[[int, str], None]
+CancelCheck = Callable[[], None]
 
 
 @dataclass(frozen=True)
@@ -79,16 +82,22 @@ class LessonExtractionService:
                         _section("平台转写", transcript_text), encoding="utf-8"
                     )
                 else:
-                    warnings.append("平台转写为空，已尝试改用本地语音转写。")
+                    warning = "平台转写为空，已尝试改用本地语音转写。"
+                    warnings.append(warning)
+                    _task_log(progress, warning, "warning")
             except (
                 ClassroomClientError,
                 OSError,
                 zipfile.BadZipFile,
                 ET.ParseError,
             ) as exc:
-                warnings.append(f"平台转写不可用，已尝试改用本地语音转写：{exc}")
+                warning = f"平台转写不可用，已尝试改用本地语音转写：{exc}"
+                warnings.append(warning)
+                _task_log(progress, warning, "warning")
         else:
-            warnings.append("平台未提供可用转写，已尝试改用本地语音转写。")
+            warning = "平台未提供可用转写，已尝试改用本地语音转写。"
+            warnings.append(warning)
+            _task_log(progress, warning, "warning")
 
         if not transcript_text.strip():
             video_resource = _find_resource(lesson, "video")
@@ -104,12 +113,16 @@ class LessonExtractionService:
                     )
                     transcript_text = transcript_path.read_text(encoding="utf-8")
                 except LocalTranscriptionError as exc:
-                    warnings.append(str(exc))
+                    warning = str(exc)
+                    warnings.append(warning)
+                    _task_log(progress, warning, "warning")
                     transcript_path.write_text(
                         _section("语音转写", "（本地语音转写失败）"), encoding="utf-8"
                     )
             else:
-                warnings.append("本课次没有可用录像，无法执行本地语音转写。")
+                warning = "本课次没有可用录像，无法执行本地语音转写。"
+                warnings.append(warning)
+                _task_log(progress, warning, "warning")
                 transcript_path.write_text(
                     _section("语音转写", "（本课次暂无可用转写或录像）"), encoding="utf-8"
                 )
@@ -138,23 +151,41 @@ class LessonExtractionService:
                     percent = 60 + int((done / total) * 25)
                     _report(progress, percent, f"正在 OCR 课件图片 {done}/{total}：{image_name}")
 
-                _report(progress, 60, "正在提取课件文字")
+                _report(
+                    progress,
+                    60,
+                    f"正在提取课件文字（OCR Worker {self.config.ocr_workers}）",
+                )
+                _task_log(
+                    progress,
+                    f"PPT OCR 配置：engine={self.config.ocr_engine}, workers={self.config.ocr_workers}, max_images={self.config.ocr_max_images}",
+                    "debug",
+                )
+                cancel_check = getattr(progress, "raise_if_cancelled", None)
                 ppt_text, ocr_warnings = extract_pptx_text(
                     ppt_file,
                     ocr_callback,
                     self.config.ocr_max_images,
                     progress=ppt_progress,
+                    ocr_workers=self.config.ocr_workers,
+                    cancel_check=cancel_check if callable(cancel_check) else None,
                 )
                 ppt_warnings.extend(ocr_warnings)
+                for warning in ocr_warnings:
+                    _task_log(progress, warning, "warning")
             except (
                 ClassroomClientError,
                 OSError,
                 zipfile.BadZipFile,
                 ET.ParseError,
             ) as exc:
-                ppt_warnings.append(f"课件提取失败：{exc}")
+                warning = f"课件提取失败：{exc}"
+                ppt_warnings.append(warning)
+                _task_log(progress, warning, "warning")
         else:
-            ppt_warnings.append("本课次没有可用 PPT，已跳过课件文字提取。")
+            warning = "本课次没有可用 PPT，已跳过课件文字提取。"
+            ppt_warnings.append(warning)
+            _task_log(progress, warning, "warning")
 
         warnings.extend(ppt_warnings)
         warning_text = "\n".join(f"- {item}" for item in ppt_warnings)
@@ -335,14 +366,21 @@ def extract_pptx_text(
     ocr_image: Callable[[bytes, str], str] | None,
     max_images: int = 120,
     progress: Callable[[int, int, str], None] | None = None,
+    *,
+    ocr_workers: int = 1,
+    cancel_check: CancelCheck | None = None,
 ) -> tuple[str, list[str]]:
     lines: list[str] = []
     warnings: list[str] = []
+    image_jobs: list[tuple[int, str, bytes]] = []
+
+    _check_cancel(cancel_check)
     with zipfile.ZipFile(path) as archive:
         slide_names = sorted(
             name for name in archive.namelist() if name.startswith("ppt/slides/slide") and name.endswith(".xml")
         )
         for index, name in enumerate(slide_names, start=1):
+            _check_cancel(cancel_check)
             root = ET.fromstring(archive.read(name))
             slide_text = "\n".join(_xml_texts(root)).strip()
             if slide_text:
@@ -359,33 +397,109 @@ def extract_pptx_text(
         if len(image_names) > max_images:
             warnings.append(f"课件中共有 {len(image_names)} 张图片，本次只 OCR 前 {max_images} 张。")
 
+        # Read image bytes serially from ZipFile, then close the archive before running OCR
+        # in parallel. ZipFile itself is not used concurrently by worker threads.
         for index, name in enumerate(limited_image_names, start=1):
-            if progress:
-                progress(index, len(limited_image_names), Path(name).name)
-            try:
-                text = ocr_image(archive.read(name), Path(name).name).strip()
-            except Exception as exc:  # One bad image should not fail the whole lesson extraction.
-                warnings.append(f"{Path(name).name} OCR 失败：{exc}")
-                continue
+            _check_cancel(cancel_check)
+            image_jobs.append((index, name, archive.read(name)))
+
+    if ocr_image is not None and image_jobs:
+        results, ocr_warnings = _run_ocr_jobs(
+            image_jobs,
+            ocr_image,
+            max_workers=max(1, min(int(ocr_workers), len(image_jobs))),
+            progress=progress,
+            cancel_check=cancel_check,
+        )
+        warnings.extend(ocr_warnings)
+        for index, image_name, text in sorted(results, key=lambda item: item[0]):
             if text:
-                lines.append(f"## 图片 {index}: {Path(name).name}\n{text}")
+                lines.append(f"## 图片 {index}: {Path(image_name).name}\n{text}")
 
     if not lines and not warnings:
         warnings.append("课件中没有检测到可提取的文本或图片")
     return "\n\n".join(lines).strip(), warnings
 
 
-_RAPID_OCR_ENGINE = None
+def _run_ocr_jobs(
+    jobs: list[tuple[int, str, bytes]],
+    ocr_image: Callable[[bytes, str], str],
+    *,
+    max_workers: int,
+    progress: Callable[[int, int, str], None] | None,
+    cancel_check: CancelCheck | None,
+) -> tuple[list[tuple[int, str, str]], list[str]]:
+    total = len(jobs)
+    completed = 0
+    results: list[tuple[int, str, str]] = []
+    warning_items: list[tuple[int, str]] = []
+    executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ppt-ocr")
+    pending: dict[Future[str], tuple[int, str, bytes]] = {}
+    iterator = iter(jobs)
+    aborted = False
+
+    def submit_next() -> bool:
+        try:
+            item = next(iterator)
+        except StopIteration:
+            return False
+        index, name, image_bytes = item
+        future = executor.submit(ocr_image, image_bytes, Path(name).name)
+        pending[future] = (index, name, image_bytes)
+        return True
+
+    for _ in range(max_workers):
+        if not submit_next():
+            break
+
+    try:
+        while pending:
+            _check_cancel(cancel_check)
+            done, _ = wait(tuple(pending), timeout=0.2, return_when=FIRST_COMPLETED)
+            if not done:
+                continue
+            for future in done:
+                index, name, _ = pending.pop(future)
+                display_name = Path(name).name
+                try:
+                    text = future.result().strip()
+                except Exception as exc:  # One bad image should not fail the whole lesson extraction.
+                    text = ""
+                    warning = f"{display_name} OCR 失败：{exc}"
+                    warning_items.append((index, warning))
+                    display_name = f"{display_name}（失败）"
+                else:
+                    results.append((index, name, text))
+
+                completed += 1
+                if progress:
+                    progress(completed, total, display_name)
+                _check_cancel(cancel_check)
+                submit_next()
+    except BaseException:
+        aborted = True
+        for future in pending:
+            future.cancel()
+        raise
+    finally:
+        executor.shutdown(wait=not aborted, cancel_futures=True)
+
+    warnings = [message for _, message in sorted(warning_items, key=lambda item: item[0])]
+    return results, warnings
+
+
+_RAPID_OCR_LOCAL = threading.local()
 
 
 def _rapidocr_ocr(image_bytes: bytes) -> str:
-    global _RAPID_OCR_ENGINE
-    if _RAPID_OCR_ENGINE is None:
+    engine = getattr(_RAPID_OCR_LOCAL, "engine", None)
+    if engine is None:
         from rapidocr_onnxruntime import RapidOCR
 
-        _RAPID_OCR_ENGINE = RapidOCR()
+        engine = RapidOCR()
+        _RAPID_OCR_LOCAL.engine = engine
 
-    result, _ = _RAPID_OCR_ENGINE(image_bytes)
+    result, _ = engine(image_bytes)
     if not result:
         return ""
     lines: list[str] = []
@@ -462,3 +576,16 @@ def _section(title: str, body: str) -> str:
 def _report(progress: ProgressCallback | None, percent: int, message: str) -> None:
     if progress:
         progress(percent, message)
+
+
+def _task_log(progress: ProgressCallback | None, message: str, level: str = "info") -> None:
+    if progress is None:
+        return
+    logger = getattr(progress, "log", None)
+    if callable(logger):
+        logger(message, level)
+
+
+def _check_cancel(cancel_check: CancelCheck | None) -> None:
+    if cancel_check:
+        cancel_check()
