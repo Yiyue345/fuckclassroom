@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,9 +19,20 @@ from fuckclassroom.core.config import AppConfig
 
 
 class LocalTranscriptionTests(unittest.TestCase):
-    def test_transcribe_url_streams_segments_and_reuses_cache(self) -> None:
+    def test_transcribe_url_streams_segments_simplifies_and_reuses_cache(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            config = AppConfig(data_dir=Path(directory))
+            data_dir = Path(directory)
+            (data_dir / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "asr_use_batched": False,
+                        "asr_simplified_chinese": True,
+                        "asr_max_concurrent_tasks": 2,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = AppConfig(data_dir=data_dir)
             service = LocalTranscriptionService(config)
             calls: list[str] = []
 
@@ -29,14 +41,14 @@ class LocalTranscriptionTests(unittest.TestCase):
                     calls.append(url)
                     segments = iter(
                         [
-                            SimpleNamespace(start=1.2, end=4.7, text=" 第一段 "),
+                            SimpleNamespace(start=1.2, end=4.7, text=" 軟體與資料庫 "),
                             SimpleNamespace(start=7.0, end=10.1, text="第二段"),
                         ]
                     )
                     return segments, SimpleNamespace(duration=12.0)
 
             service._get_model = lambda progress=None: FakeModel()  # type: ignore[method-assign]
-            target = Path(directory) / "local_transcript.txt"
+            target = config.outputs_dir / "测试课程" / "第一课" / "local_transcript.txt"
             progress: list[tuple[int, str]] = []
 
             result = service.transcribe_url(
@@ -46,15 +58,20 @@ class LocalTranscriptionTests(unittest.TestCase):
             )
 
             self.assertFalse(result.cached)
-            self.assertIn("[00:00:01 - 00:00:04] 第一段", result.text)
+            self.assertIn("[00:00:01 - 00:00:04] 软件与数据库", result.text)
             self.assertIn("[00:00:07 - 00:00:10] 第二段", result.text)
             self.assertEqual(calls, ["https://example.test/lesson.mp4"])
             self.assertEqual(progress[-1][0], 100)
+            self.assertIsNotNone(result.export_path)
+            exported = config.downloads_dir / "测试课程" / "第一课" / "本地转写.txt"
+            self.assertTrue(exported.exists())
+            self.assertIn("软件与数据库", exported.read_text(encoding="utf-8"))
 
             service._get_model = lambda progress=None: self.fail("cached transcription should not reload the model")  # type: ignore[method-assign]
             cached = service.transcribe_url("https://example.test/lesson.mp4", target)
             self.assertTrue(cached.cached)
             self.assertEqual(cached.text, result.text)
+            self.assertEqual(cached.export_path, exported)
 
     def test_extraction_falls_back_when_platform_transcript_is_empty(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
