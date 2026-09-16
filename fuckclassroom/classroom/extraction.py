@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import html
+import io
+import math
 import mimetypes
+import posixpath
 import re
 import shutil
 import subprocess
@@ -40,6 +44,18 @@ class ExtractionResult:
     warnings: list[str]
 
 
+@dataclass
+class _PptImageCandidate:
+    order: int
+    name: str
+    data: bytes
+    digest: str
+    perceptual_hash: int | None
+    width: int
+    height: int
+    information_score: float
+
+
 class LessonExtractionService:
     def __init__(self, config: AppConfig | None = None) -> None:
         self.config = config or AppConfig()
@@ -69,9 +85,6 @@ class LessonExtractionService:
         platform_transcript = _find_resource(lesson, "transcript")
         need_platform_fallback = not bool(video_resource and video_resource.url)
 
-        # The platform transcript endpoint is not a trustworthy source of classroom speech.
-        # When a recording exists, local ASR is the source of truth. Platform text is only a
-        # fallback for lessons without a recording or when local ASR cannot complete.
         if video_resource is not None and video_resource.url:
             _report(progress, 10, "检测到课堂录像，优先使用本地语音转写")
             _task_log(
@@ -167,11 +180,11 @@ class LessonExtractionService:
                 _report(
                     progress,
                     60,
-                    f"正在提取课件文字（OCR Worker {self.config.ocr_workers}）",
+                    f"正在分析课件图片并准备 OCR（Worker {self.config.ocr_workers}）",
                 )
                 _task_log(
                     progress,
-                    f"PPT OCR 配置：engine={self.config.ocr_engine}, workers={self.config.ocr_workers}, max_images={self.config.ocr_max_images}",
+                    f"PPT OCR 配置：engine={self.config.ocr_engine}, workers={self.config.ocr_workers}, max_images={self.config.ocr_max_images}, dedup=true",
                     "debug",
                 )
                 cancel_check = getattr(progress, "raise_if_cancelled", None)
@@ -182,6 +195,7 @@ class LessonExtractionService:
                     progress=ppt_progress,
                     ocr_workers=self.config.ocr_workers,
                     cancel_check=cancel_check if callable(cancel_check) else None,
+                    event_log=lambda message, level="info": _task_log(progress, message, level),
                 )
                 ppt_warnings.extend(ocr_warnings)
                 for warning in ocr_warnings:
@@ -267,6 +281,7 @@ class LessonExtractionService:
             cache_path,
             progress=progress,
             force=force,
+            duration_hint_seconds=lesson.duration_seconds,
         )
         transcript_path = output_dir / "transcript.md"
         transcript_path.write_text(
@@ -384,9 +399,6 @@ def _platform_transcript_is_usable(
     if not candidate:
         return False, "内容为空"
 
-    # Platform exports sometimes contain only course metadata such as:
-    # “课程名 授课老师：某某 2026-03-03第1-2节”. Remove those fields before
-    # estimating whether there is any actual classroom speech left.
     body = candidate
     if course_title.strip():
         body = body.replace(course_title.strip(), " ")
@@ -402,9 +414,6 @@ def _platform_transcript_is_usable(
     duration_minutes = duration_seconds / 60 if duration_seconds else 0.0
     minimum_chars = 120
     if duration_minutes:
-        # A deliberately loose floor: only ~8 useful characters per minute. This is far
-        # below normal lecture speech, so it rejects metadata-only/obviously truncated
-        # exports without demanding a near-complete transcript.
         minimum_chars = max(120, min(1000, int(duration_minutes * 8)))
 
     if len(meaningful) < minimum_chars:
@@ -424,6 +433,7 @@ def extract_pptx_text(
     *,
     ocr_workers: int = 1,
     cancel_check: CancelCheck | None = None,
+    event_log: Callable[[str, str], None] | None = None,
 ) -> tuple[str, list[str]]:
     lines: list[str] = []
     warnings: list[str] = []
@@ -432,7 +442,12 @@ def extract_pptx_text(
     _check_cancel(cancel_check)
     with zipfile.ZipFile(path) as archive:
         slide_names = sorted(
-            name for name in archive.namelist() if name.startswith("ppt/slides/slide") and name.endswith(".xml")
+            (
+                name
+                for name in archive.namelist()
+                if name.startswith("ppt/slides/slide") and name.endswith(".xml")
+            ),
+            key=_slide_sort_key,
         )
         for index, name in enumerate(slide_names, start=1):
             _check_cancel(cancel_check)
@@ -441,22 +456,25 @@ def extract_pptx_text(
             if slide_text:
                 lines.append(f"## 第 {index} 页 XML 文本\n{slide_text}")
 
-        image_names = sorted(
-            name for name in archive.namelist() if name.startswith("ppt/media/") and _is_image_name(name)
+        all_media_names = sorted(
+            name
+            for name in archive.namelist()
+            if name.startswith("ppt/media/") and _is_image_name(name)
         )
+        image_names = _referenced_ppt_images(archive, slide_names, all_media_names)
         if image_names and ocr_image is None:
-            warnings.append(f"课件中检测到 {len(image_names)} 张图片，未执行 OCR。")
+            warnings.append(f"课件中检测到 {len(image_names)} 张被幻灯片引用的图片，未执行 OCR。")
             return "\n\n".join(lines).strip(), warnings
 
-        limited_image_names = image_names[:max_images]
-        if len(image_names) > max_images:
-            warnings.append(f"课件中共有 {len(image_names)} 张图片，本次只 OCR 前 {max_images} 张。")
-
-        # Read image bytes serially from ZipFile, then close the archive before running OCR
-        # in parallel. ZipFile itself is not used concurrently by worker threads.
-        for index, name in enumerate(limited_image_names, start=1):
-            _check_cancel(cancel_check)
-            image_jobs.append((index, name, archive.read(name)))
+        if ocr_image is not None and image_names:
+            image_jobs = _prepare_ocr_image_jobs(
+                archive,
+                image_names,
+                max_images=max_images,
+                cancel_check=cancel_check,
+                event_log=event_log,
+                total_media_count=len(all_media_names),
+            )
 
     if ocr_image is not None and image_jobs:
         results, ocr_warnings = _run_ocr_jobs(
@@ -474,6 +492,178 @@ def extract_pptx_text(
     if not lines and not warnings:
         warnings.append("课件中没有检测到可提取的文本或图片")
     return "\n\n".join(lines).strip(), warnings
+
+
+def _referenced_ppt_images(
+    archive: zipfile.ZipFile,
+    slide_names: list[str],
+    all_media_names: list[str],
+) -> list[str]:
+    available = set(all_media_names)
+    referenced: list[str] = []
+    seen: set[str] = set()
+
+    for slide_name in slide_names:
+        rel_name = f"ppt/slides/_rels/{Path(slide_name).name}.rels"
+        if rel_name not in archive.namelist():
+            continue
+        try:
+            root = ET.fromstring(archive.read(rel_name))
+        except ET.ParseError:
+            continue
+        for relationship in root.iter():
+            rel_type = str(relationship.attrib.get("Type") or "")
+            target = str(relationship.attrib.get("Target") or "")
+            if not rel_type.endswith("/image") or not target:
+                continue
+            normalized = posixpath.normpath(posixpath.join("ppt/slides", target))
+            if normalized in available and normalized not in seen:
+                seen.add(normalized)
+                referenced.append(normalized)
+
+    # Some generated/minimal PPTX files do not include relationship files. Preserve the
+    # old behavior as a compatibility fallback rather than silently skipping all images.
+    return referenced if referenced else all_media_names
+
+
+def _prepare_ocr_image_jobs(
+    archive: zipfile.ZipFile,
+    image_names: list[str],
+    *,
+    max_images: int,
+    cancel_check: CancelCheck | None,
+    event_log: Callable[[str, str], None] | None,
+    total_media_count: int,
+) -> list[tuple[int, str, bytes]]:
+    exact_seen: dict[str, _PptImageCandidate] = {}
+    candidates: list[_PptImageCandidate] = []
+    exact_duplicates = 0
+
+    for order, name in enumerate(image_names):
+        _check_cancel(cancel_check)
+        data = archive.read(name)
+        digest = hashlib.sha256(data).hexdigest()
+        if digest in exact_seen:
+            exact_duplicates += 1
+            continue
+        fingerprint = _image_fingerprint(order, name, data, digest)
+        exact_seen[digest] = fingerprint
+        candidates.append(fingerprint)
+
+    groups: list[_PptImageCandidate] = []
+    similar_duplicates = 0
+    for candidate in candidates:
+        _check_cancel(cancel_check)
+        match_index = _find_similar_image_group(groups, candidate)
+        if match_index is None:
+            groups.append(candidate)
+            continue
+        similar_duplicates += 1
+        current = groups[match_index]
+        if candidate.information_score > current.information_score:
+            candidate.order = current.order
+            groups[match_index] = candidate
+
+    groups.sort(key=lambda item: item.order)
+    before_limit = len(groups)
+    limited = groups[: max(1, int(max_images))]
+    if event_log is not None:
+        event_log(
+            "PPT 图片分析："
+            f"媒体 {total_media_count} 张，幻灯片引用 {len(image_names)} 张，"
+            f"完全重复移除 {exact_duplicates} 张，高度相似移除 {similar_duplicates} 张，"
+            f"去重后 {before_limit} 张，最终 OCR {len(limited)} 张",
+            "info",
+        )
+        if before_limit > len(limited):
+            event_log(
+                f"去重后仍超过 OCR 上限 {max_images}，已按幻灯片首次引用顺序保留前 {len(limited)} 张。",
+                "warning",
+            )
+
+    return [
+        (index, candidate.name, candidate.data)
+        for index, candidate in enumerate(limited, start=1)
+    ]
+
+
+def _image_fingerprint(
+    order: int,
+    name: str,
+    data: bytes,
+    digest: str,
+) -> _PptImageCandidate:
+    try:
+        from PIL import Image, ImageFilter, ImageStat
+
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+            width, height = image.size
+            gray = image.convert("L")
+            entropy = float(gray.entropy())
+            edges = gray.filter(ImageFilter.FIND_EDGES)
+            edge_mean = float(ImageStat.Stat(edges).mean[0])
+            resized = gray.resize((9, 8))
+            pixels = list(resized.getdata())
+            phash = 0
+            bit = 0
+            for row in range(8):
+                offset = row * 9
+                for column in range(8):
+                    if pixels[offset + column] > pixels[offset + column + 1]:
+                        phash |= 1 << bit
+                    bit += 1
+            information_score = (
+                math.log1p(max(1, width * height)) * 2.2
+                + entropy * 4.0
+                + edge_mean / 12.0
+                + math.log1p(max(1, len(data)))
+            )
+            return _PptImageCandidate(
+                order,
+                name,
+                data,
+                digest,
+                phash,
+                width,
+                height,
+                information_score,
+            )
+    except Exception:
+        return _PptImageCandidate(
+            order,
+            name,
+            data,
+            digest,
+            None,
+            0,
+            0,
+            math.log1p(max(1, len(data))),
+        )
+
+
+def _find_similar_image_group(
+    groups: list[_PptImageCandidate],
+    candidate: _PptImageCandidate,
+) -> int | None:
+    if candidate.perceptual_hash is None or not candidate.width or not candidate.height:
+        return None
+    candidate_ratio = candidate.width / candidate.height
+    for index, current in enumerate(groups):
+        if current.perceptual_hash is None or not current.width or not current.height:
+            continue
+        current_ratio = current.width / current.height
+        if abs(math.log(candidate_ratio / current_ratio)) > 0.035:
+            continue
+        distance = (candidate.perceptual_hash ^ current.perceptual_hash).bit_count()
+        if distance <= 3:
+            return index
+    return None
+
+
+def _slide_sort_key(name: str) -> tuple[int, str]:
+    match = re.search(r"slide(\d+)\.xml$", name)
+    return (int(match.group(1)) if match else 10**9, name)
 
 
 def _run_ocr_jobs(
@@ -518,7 +708,7 @@ def _run_ocr_jobs(
                 display_name = Path(name).name
                 try:
                     text = future.result().strip()
-                except Exception as exc:  # One bad image should not fail the whole lesson extraction.
+                except Exception as exc:
                     text = ""
                     warning = f"{display_name} OCR 失败：{exc}"
                     warning_items.append((index, warning))
