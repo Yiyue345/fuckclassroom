@@ -15,6 +15,9 @@ from .client import (
     LessonResource,
     Term,
 )
+from .ocr_integrity import install_ocr_failure_guard
+
+install_ocr_failure_guard()
 
 __all__ = [
     "ClassroomClient",
