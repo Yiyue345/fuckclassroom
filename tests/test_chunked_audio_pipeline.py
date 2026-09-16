@@ -71,7 +71,18 @@ class ChunkedAudioPipelineTests(unittest.TestCase):
 
     def test_non_seekable_server_keeps_compatible_whole_stream_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            config = AppConfig(data_dir=Path(directory))
+            data_dir = Path(directory)
+            (data_dir / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "asr_use_batched": False,
+                        "asr_simplified_chinese": False,
+                        "asr_max_concurrent_tasks": 1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = AppConfig(data_dir=data_dir)
             service = LocalTranscriptionService(config)
             observed: list[object] = []
 
