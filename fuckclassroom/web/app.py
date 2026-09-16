@@ -16,7 +16,11 @@ from fastapi.templating import Jinja2Templates
 from ..auth import LoginSessionService
 from ..auth.cas import LoginVerificationBroker, LoginVerificationError
 from ..auth.credentials import CredentialStoreError, SelectionCredentialStore
-from ..classroom import ClassroomClient, ClassroomClientError
+from ..classroom import (
+    ClassroomClient,
+    ClassroomClientError,
+    SemesterSyncService,
+)
 from ..classroom.downloads import DownloadLibrary
 from ..classroom.extraction import ExtractionError, LessonExtractionService
 from ..core.cache import JsonCache
@@ -107,6 +111,10 @@ def _run_for_result(operation: Callable[[], object], result_url: str) -> str:
 def create_app(config: AppConfig | None = None) -> FastAPI:
     app_config = config or AppConfig()
     classroom_client = ClassroomClient(app_config)
+    semester_sync = SemesterSyncService(
+        classroom_client,
+        app_config.cache_dir / "classroom" / "semesters.json",
+    )
     hy2_proxy = Hy2ProxyManager(app_config)
     credential_store = SelectionCredentialStore(_unified_credential_path(app_config))
     verification_broker = LoginVerificationBroker()
@@ -143,6 +151,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        async def sync_semesters() -> None:
+            try:
+                snapshot = await asyncio.to_thread(semester_sync.sync, force=True)
+            except Exception as exc:  # noqa: BLE001 - semester sync must not stop startup.
+                logger.warning("启动时学期同步失败：%s", exc)
+                return
+            if snapshot.error:
+                logger.warning("启动时学期同步失败，已使用缓存：%s", snapshot.error)
+            else:
+                logger.info("启动时已同步 %s 个学期", len(snapshot.terms))
+
         async def verify_saved_sessions() -> None:
             results = await asyncio.gather(
                 asyncio.to_thread(verify_classroom_session),
@@ -170,22 +189,25 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     logger.warning("启动时选课信息刷新失败：%s", exc)
 
         startup_check = asyncio.create_task(verify_saved_sessions())
+        semester_check = asyncio.create_task(sync_semesters())
         auto_selection.start()
         try:
             yield
         finally:
-            if not startup_check.done():
-                startup_check.cancel()
-            try:
-                await startup_check
-            except asyncio.CancelledError:
-                pass
+            for task in (startup_check, semester_check):
+                if not task.done():
+                    task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             auto_selection.stop()
             hy2_proxy.stop()
 
     app = FastAPI(title="Fuck Classroom", lifespan=lifespan)
     app.state.get_classroom_session_status = auth_service.get_session_status
     app.state.get_selection_session_status = course_selection.get_session_status
+    app.state.semester_sync = semester_sync
     app.mount("/static", StaticFiles(directory=str(PROJECT_ROOT / "static")), name="static")
     def task_started_response(request: Request, task, result_url: str | None = None) -> Response:
         if "application/json" in request.headers.get("accept", ""):
@@ -289,11 +311,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         term_error = None
         courses = []
         terms = []
-        selected_term_id = term_id if term_id is not None else app_config.default_term_id
+        selected_term_id = term_id if term_id is not None else ""
         selected_term = None
         try:
-            terms = classroom_client.list_terms()
+            snapshot = semester_sync.sync(force=True)
+            terms = list(snapshot.terms)
+            if term_id is None:
+                selected_term_id = snapshot.current_term_id or app_config.default_term_id
             selected_term = next((item for item in terms if item.id == selected_term_id), None)
+            if snapshot.error:
+                term_error = f"学期同步失败，已使用缓存：{snapshot.error}"
         except ClassroomClientError as exc:
             term_error = f"学期列表加载失败：{exc}"
 
@@ -320,7 +347,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         error = None
         terms = []
         try:
-            terms = classroom_client.list_terms()
+            snapshot = semester_sync.sync()
+            terms = list(snapshot.terms)
+            if snapshot.error:
+                error = f"学期同步失败，已使用缓存：{snapshot.error}"
         except ClassroomClientError as exc:
             error = str(exc)
         return templates.TemplateResponse(

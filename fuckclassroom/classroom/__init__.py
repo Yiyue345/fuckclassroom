@@ -16,6 +16,7 @@ from .client import (
     Term,
 )
 from .ocr_integrity import install_ocr_failure_guard
+from .semester_sync import SemesterSnapshot, SemesterSyncService
 
 install_ocr_failure_guard()
 
@@ -29,4 +30,6 @@ __all__ = [
     "LessonExportTarget",
     "LessonResource",
     "Term",
+    "SemesterSnapshot",
+    "SemesterSyncService",
 ]

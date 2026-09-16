@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from fuckclassroom.auth import LoginSessionService, SessionStatus
+from fuckclassroom.classroom.semester_sync import SemesterSnapshot, SemesterSyncService
 from fuckclassroom.config import AppConfig
 from fuckclassroom.course_selection import CourseSelectionAssistant, WebVpnSessionStatus
 from fuckclassroom.course_selection.automation import AutoSelectionService
@@ -32,6 +34,11 @@ class StartupSessionRecoveryTests(unittest.TestCase):
                     "refresh_selection_info_for_web",
                     return_value="/selection/info",
                 ) as selection_refresh,
+                patch.object(
+                    SemesterSyncService,
+                    "sync",
+                    return_value=SemesterSnapshot((), "", datetime.now(timezone.utc)),
+                ) as semester_sync,
                 patch.object(AutoSelectionService, "start"),
                 patch.object(AutoSelectionService, "stop"),
             ):
@@ -46,6 +53,7 @@ class StartupSessionRecoveryTests(unittest.TestCase):
         classroom_verify.assert_called_once_with(auto_relogin=True)
         selection_verify.assert_called_once_with(timeout_ms=60_000, auto_relogin=True)
         selection_refresh.assert_called_once_with(timeout_ms=60_000)
+        semester_sync.assert_called_once_with(force=True)
 
 
 if __name__ == "__main__":

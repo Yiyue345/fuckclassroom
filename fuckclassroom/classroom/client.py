@@ -112,6 +112,14 @@ class ClassroomClient:
 
     def list_terms(self) -> list[Term]:
         payload = self._get_json_cached("terms", TERM_LIST_PATH)
+        return self._terms_from_payload(payload)
+
+    def refresh_terms(self) -> list[Term]:
+        payload = self._get_json(TERM_LIST_PATH)
+        self.cache.set("terms", payload)
+        return self._terms_from_payload(payload)
+
+    def _terms_from_payload(self, payload: dict[str, Any]) -> list[Term]:
         params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
         rows = params.get("list", [])
         if not isinstance(rows, list):
