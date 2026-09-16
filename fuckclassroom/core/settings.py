@@ -133,8 +133,8 @@ class SettingsStore:
                     "asr_max_concurrent_tasks", current.asr_max_concurrent_tasks
                 ),
                 "asr_batch_size": form.get("asr_batch_size", current.asr_batch_size),
-                "asr_use_batched": form.get("asr_use_batched"),
-                "asr_simplified_chinese": form.get("asr_simplified_chinese"),
+                "asr_use_batched": form.get("asr_use_batched", ""),
+                "asr_simplified_chinese": form.get("asr_simplified_chinese", ""),
                 "auto_open_outputs_after_extract": form.get("auto_open_outputs_after_extract"),
                 "default_term_id": form.get("default_term_id", current.default_term_id),
                 "hy2_enabled": form.get("hy2_enabled"),
