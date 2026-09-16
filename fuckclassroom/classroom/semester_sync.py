@@ -16,37 +16,54 @@ class Semester:
 
 
 class SemesterSyncService:
-    """Manage semester synchronization with local cache fallback.
-
-    The network layer is injected so the service can be used by both web
-    routes and background startup tasks without coupling to ClassroomClient.
-    """
+    """Synchronize semester data with non-blocking cache fallback."""
 
     def __init__(self, cache_path: Path, expire_seconds: int = 24 * 3600) -> None:
         self.cache_path = cache_path
         self.expire_seconds = expire_seconds
 
-    def sync(
-        self,
-        fetcher: Callable[[], Iterable[Semester]],
-    ) -> list[Semester]:
+    def sync(self, fetcher: Callable[[], Iterable[Semester]]) -> list[Semester]:
         try:
             semesters = list(fetcher())
             self._save(semesters)
             return semesters
         except Exception:
-            return self.load_cache()
+            return self.load_cache(ignore_expire=True)
 
-    def load_cache(self) -> list[Semester]:
+    def load_cache(self, ignore_expire: bool = False) -> list[Semester]:
         if not self.cache_path.exists():
             return []
         try:
             payload = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if time.time() - float(payload.get("updated_at", 0)) > self.expire_seconds:
+            updated_at = float(payload.get("updated_at", 0))
+            if not ignore_expire and time.time() - updated_at > self.expire_seconds:
                 return []
             return [Semester(**item) for item in payload.get("items", [])]
         except (OSError, ValueError, TypeError):
             return []
+
+    def current_semester(self, semesters: list[Semester] | None = None) -> Semester | None:
+        items = semesters if semesters is not None else self.load_cache()
+        if not items:
+            return None
+
+        now = time.strftime("%Y-%m-%d")
+        matched = [
+            item
+            for item in items
+            if item.start_time <= now <= item.end_time
+            and item.start_time
+            and item.end_time
+        ]
+        if matched:
+            return matched[-1]
+        return items[-1]
+
+    def refresh_current_semester(
+        self,
+        fetcher: Callable[[], Iterable[Semester]],
+    ) -> Semester | None:
+        return self.current_semester(self.sync(fetcher))
 
     def _save(self, semesters: list[Semester]) -> None:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
