@@ -141,6 +141,15 @@ class AppConfig:
         )
 
     @property
+    def audio_prefetch_queue_size(self) -> int:
+        return self._env_int(
+            "FUCKCLASSROOM_AUDIO_PREFETCH_QUEUE_SIZE",
+            self._settings().audio_prefetch_queue_size,
+            1,
+            8,
+        )
+
+    @property
     def asr_batch_size(self) -> int:
         return self._env_int("FUCKCLASSROOM_ASR_BATCH_SIZE", self._settings().asr_batch_size, 1, 32)
 

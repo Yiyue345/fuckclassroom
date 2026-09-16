@@ -23,6 +23,7 @@ class ChunkedAudioPipelineTests(unittest.TestCase):
                         "asr_use_batched": False,
                         "asr_simplified_chinese": False,
                         "asr_max_concurrent_tasks": 1,
+                        "audio_prefetch_queue_size": 3,
                     }
                 ),
                 encoding="utf-8",
@@ -68,6 +69,7 @@ class ChunkedAudioPipelineTests(unittest.TestCase):
             self.assertIn("[00:00:02 - 00:00:04] 分块课堂内容", result.text)
             self.assertIn("[00:10:00 - 00:10:02] 分块课堂内容", result.text)
             self.assertTrue(any("分块音频流水线" in message for _, message in progress))
+            self.assertTrue(any("预取队列" in message for _, message in progress))
 
     def test_non_seekable_server_keeps_compatible_whole_stream_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

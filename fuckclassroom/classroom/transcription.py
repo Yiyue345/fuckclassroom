@@ -239,7 +239,8 @@ class LocalTranscriptionService:
         prompt_tail = ""
         future_by_index: dict[int, Future] = {}
         next_submit = 0
-        prefetch_limit = min(len(chunks), workers + 1)
+        prefetch_queue_size = self.config.audio_prefetch_queue_size
+        prefetch_limit = min(len(chunks), prefetch_queue_size + 1)
 
         executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="asr-audio-decode")
 
@@ -261,6 +262,13 @@ class LocalTranscriptionService:
         for _ in range(prefetch_limit):
             submit_one()
 
+        _log(
+            progress,
+            f"音频预取队列 {max(0, len(future_by_index) - 1)}/{prefetch_queue_size}"
+            f"（解码 Worker {workers}）",
+            "debug",
+        )
+
         try:
             for chunk in chunks:
                 _raise_if_cancelled(progress)
@@ -279,7 +287,9 @@ class LocalTranscriptionService:
                             12 + min(78, int(media_percent * 0.78)),
                             f"正在并行预取音频块 {chunk.index + 1}/{len(chunks)}："
                             f"{_timestamp(chunk.start)} - {_timestamp(chunk.end)}；"
-                            f"已等待 {_timestamp(elapsed)}",
+                            f"已等待 {_timestamp(elapsed)}；"
+                            f"预取队列 {len(future_by_index)}/{prefetch_queue_size}"
+                            f"（已就绪 {sum(item.done() for item in future_by_index.values())}）",
                         )
                     except Exception as exc:
                         _raise_if_cancelled(progress)
@@ -289,12 +299,18 @@ class LocalTranscriptionService:
 
                 submit_one()
                 _raise_if_cancelled(progress)
+                queue_ready = sum(item.done() for item in future_by_index.values())
+                queue_status = (
+                    f"预取队列 {len(future_by_index)}/{prefetch_queue_size}"
+                    f"（已就绪 {queue_ready}）"
+                )
                 _report(
                     progress,
                     15 + min(78, int((chunk.start / duration) * 78)),
                     f"音频块 {chunk.index + 1}/{len(chunks)} 已就绪，正在转写："
-                    f"{_timestamp(chunk.start)} - {_timestamp(chunk.end)}",
+                    f"{_timestamp(chunk.start)} - {_timestamp(chunk.end)}；{queue_status}",
                 )
+                _log(progress, queue_status, "debug")
 
                 kwargs = self._transcribe_kwargs(condition_on_previous_text=False)
                 if prompt_tail:

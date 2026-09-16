@@ -26,6 +26,7 @@ class AsrSettingsTests(unittest.TestCase):
                     "asr_cpu_threads": "6",
                     "asr_num_workers": "3",
                     "asr_max_concurrent_tasks": "3",
+                    "audio_prefetch_queue_size": "6",
                     "asr_batch_size": "12",
                     "asr_use_batched": "on",
                     "asr_simplified_chinese": "on",
@@ -40,6 +41,7 @@ class AsrSettingsTests(unittest.TestCase):
             self.assertEqual(settings.asr_cpu_threads, 6)
             self.assertEqual(settings.asr_num_workers, 3)
             self.assertEqual(settings.asr_max_concurrent_tasks, 3)
+            self.assertEqual(settings.audio_prefetch_queue_size, 6)
             self.assertEqual(settings.asr_batch_size, 12)
             self.assertTrue(settings.asr_use_batched)
             self.assertTrue(settings.asr_simplified_chinese)
@@ -53,7 +55,24 @@ class AsrSettingsTests(unittest.TestCase):
             self.assertEqual(config.asr_cpu_threads, 6)
             self.assertEqual(config.asr_num_workers, 3)
             self.assertEqual(config.asr_max_concurrent_tasks, 3)
+            self.assertEqual(config.audio_prefetch_queue_size, 6)
             self.assertEqual(config.asr_batch_size, 12)
+
+    def test_audio_prefetch_queue_size_defaults_and_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            config = AppConfig(data_dir=data_dir)
+            self.assertEqual(config.audio_prefetch_queue_size, 3)
+
+            store = SettingsStore(data_dir / "settings.json")
+            self.assertEqual(
+                store.update_from_form({"audio_prefetch_queue_size": "99"}).audio_prefetch_queue_size,
+                8,
+            )
+            self.assertEqual(
+                store.update_from_form({"audio_prefetch_queue_size": "0"}).audio_prefetch_queue_size,
+                1,
+            )
 
     def test_asr_and_ocr_checkboxes_can_be_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -28,6 +28,7 @@ class AppSettings:
     asr_cpu_threads: int = 4
     asr_num_workers: int = 2
     asr_max_concurrent_tasks: int = 2
+    audio_prefetch_queue_size: int = 3
     asr_batch_size: int = 8
     asr_use_batched: bool = True
     asr_simplified_chinese: bool = True
@@ -66,6 +67,12 @@ class AppSettings:
             asr_num_workers=_bounded_int(data.get("asr_num_workers"), cls.asr_num_workers, 1, 16),
             asr_max_concurrent_tasks=_bounded_int(
                 data.get("asr_max_concurrent_tasks"), cls.asr_max_concurrent_tasks, 1, 8
+            ),
+            audio_prefetch_queue_size=_bounded_int(
+                data.get("audio_prefetch_queue_size"),
+                cls.audio_prefetch_queue_size,
+                1,
+                8,
             ),
             asr_batch_size=_bounded_int(data.get("asr_batch_size"), cls.asr_batch_size, 1, 32),
             asr_use_batched=_to_bool_default(data.get("asr_use_batched"), cls.asr_use_batched),
@@ -152,6 +159,9 @@ class SettingsStore:
                 "asr_num_workers": form.get("asr_num_workers", current.asr_num_workers),
                 "asr_max_concurrent_tasks": form.get(
                     "asr_max_concurrent_tasks", current.asr_max_concurrent_tasks
+                ),
+                "audio_prefetch_queue_size": form.get(
+                    "audio_prefetch_queue_size", current.audio_prefetch_queue_size
                 ),
                 "asr_batch_size": form.get("asr_batch_size", current.asr_batch_size),
                 "asr_use_batched": form.get("asr_use_batched", ""),

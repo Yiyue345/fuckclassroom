@@ -103,6 +103,7 @@
               <div class="field"><label for="asr_max_concurrent_tasks">同时转写课次数</label><input class="input" id="asr_max_concurrent_tasks" name="asr_max_concurrent_tasks" type="number" min="1" max="8" step="1" value="{{ settings.asr_max_concurrent_tasks }}"><span class="field-hint">默认 2。若 CPU/内存占用过高请调回 1。</span></div>
               <div class="field"><label for="asr_batch_size">单课批量大小</label><input class="input" id="asr_batch_size" name="asr_batch_size" type="number" min="1" max="32" step="1" value="{{ settings.asr_batch_size }}"><span class="field-hint">默认 8；更大通常更快，但更吃内存/显存。</span></div>
             </div>
+            <div class="field"><label for="audio_prefetch_queue_size">音频预取队列</label><input class="input" id="audio_prefetch_queue_size" name="audio_prefetch_queue_size" type="number" min="1" max="8" step="1" value="{{ settings.audio_prefetch_queue_size }}"><span class="field-hint">默认 3。增加后解码 Worker 可提前准备更多音频块，也会增加内存占用。</span></div>
             <label class="check-row"><input type="checkbox" name="asr_use_batched" {% if settings.asr_use_batched %}checked{% endif %}><span>启用 BatchedInferencePipeline 批量推理</span></label>
             <label class="check-row"><input type="checkbox" name="asr_simplified_chinese" {% if settings.asr_simplified_chinese %}checked{% endif %}><span>中文转写自动转换为简体（包括已缓存的旧转写）</span></label>
             <p class="field-hint">OCR 建议先用 4 Worker × 每 Worker 1 ONNX 线程；ASR 建议先使用默认的 2 个并发任务、4 CPU 线程、2 Workers、batch 8。不要简单把所有数值都拉满。</p>
