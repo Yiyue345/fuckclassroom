@@ -114,7 +114,7 @@ class LocalTranscriptionTests(unittest.TestCase):
             self.assertEqual(kwargs["language"], "zh")
             self.assertIn("测试", result.text)
 
-    def test_extraction_falls_back_when_platform_transcript_is_empty(self) -> None:
+    def test_extraction_prefers_local_transcription_when_video_exists(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = AppConfig(data_dir=Path(directory))
             course = Course(
@@ -160,13 +160,10 @@ class LocalTranscriptionTests(unittest.TestCase):
                         raise AssertionError(course_id)
 
                 def get_lesson_export_target(self, course_id: str, lesson_id: str, kind: str):
-                    return SimpleNamespace(
-                        exists=False,
-                        path=Path(directory) / f"{kind}.bin",
-                    )
+                    raise AssertionError("有录像且本地 ASR 成功时不应读取平台转写")
 
                 def download_lesson_export(self, course_id: str, lesson_id: str, kind: str):
-                    raise ClassroomClientError("暂无课件内容")
+                    raise ClassroomClientError("有录像且本地 ASR 成功时不应下载平台转写")
 
             class FakeTranscription:
                 def transcribe_url(self, video_url: str, output_path: Path, progress=None, force=False):
@@ -188,7 +185,7 @@ class LocalTranscriptionTests(unittest.TestCase):
             self.assertIn("本地语音转写", transcript)
             self.assertIn("这是本地识别出来的课堂内容", transcript)
             self.assertIn("这是本地识别出来的课堂内容", combined)
-            self.assertTrue(any("平台转写不可用" in warning for warning in result.warnings))
+            self.assertFalse(any("平台转写" in warning for warning in result.warnings))
             self.assertTrue(any("没有可用 PPT" in warning for warning in result.warnings))
 
 
