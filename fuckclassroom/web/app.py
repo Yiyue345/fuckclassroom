@@ -448,16 +448,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def course_detail(request: Request, course_id: str) -> HTMLResponse:
         error = None
         detail = None
-        downloaded_exports: list[str] = []
         try:
             detail = classroom_client.refresh_course_detail(course_id)
-            for lesson in detail.lessons:
-                for resource in lesson.resources:
-                    if resource.kind not in {"ppt", "transcript"}:
-                        continue
-                    target = classroom_client.get_lesson_export_target(course_id, lesson.id, resource.kind)
-                    if target.exists:
-                        downloaded_exports.append(f"{lesson.id}:{resource.kind}")
         except ClassroomClientError as exc:
             error = str(exc)
         return templates.TemplateResponse(
@@ -467,7 +459,6 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 "session": auth_service.get_session_status(),
                 "detail": detail,
                 "course_id": course_id,
-                "downloaded_exports": downloaded_exports,
                 "refreshed": request.query_params.get("refreshed") == "1",
                 "refresh_error": request.query_params.get("refresh_error"),
                 "error": error,
