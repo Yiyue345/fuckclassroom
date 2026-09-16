@@ -112,6 +112,14 @@ class ClassroomClient:
 
     def list_terms(self) -> list[Term]:
         payload = self._get_json_cached("terms", TERM_LIST_PATH)
+        return self._terms_from_payload(payload)
+
+    def refresh_terms(self) -> list[Term]:
+        payload = self._get_json(TERM_LIST_PATH)
+        self.cache.set("terms", payload)
+        return self._terms_from_payload(payload)
+
+    def _terms_from_payload(self, payload: dict[str, Any]) -> list[Term]:
         params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
         rows = params.get("list", [])
         if not isinstance(rows, list):
@@ -124,12 +132,16 @@ class ClassroomClient:
         page_size: int = 50,
         term_id: str | None = None,
         term: Term | None = None,
+        *,
+        force_refresh: bool = False,
     ) -> list[Course]:
-        payload = self._get_json_cached(
-            f"courses_page_{page}_size_{page_size}",
-            COURSE_LIST_PATH,
-            {"nowpage": str(page), "per-page": str(page_size)},
-        )
+        cache_name = f"courses_page_{page}_size_{page_size}"
+        params = {"nowpage": str(page), "per-page": str(page_size)}
+        if force_refresh:
+            payload = self._get_json(COURSE_LIST_PATH, params)
+            self.cache.set(cache_name, payload)
+        else:
+            payload = self._get_json_cached(cache_name, COURSE_LIST_PATH, params)
         result = self._result(payload)
         rows = result.get("data", [])
         selected_term = term

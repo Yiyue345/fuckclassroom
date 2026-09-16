@@ -1,18 +1,27 @@
 from __future__ import annotations
 
+import hashlib
 import html
+import io
+import math
 import mimetypes
+import posixpath
+import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import xml.etree.ElementTree as ET
 import zipfile
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Callable
 
 from .ai import AIClient, AIClientError
-from .client import ClassroomClient, ClassroomClientError, CourseDetail, ExportedFile, Lesson
+from .client import ClassroomClient, ClassroomClientError, CourseDetail, Lesson, LessonResource
+from .transcription import LocalTranscriptionError, LocalTranscriptionService
 from ..core.config import AppConfig
 
 
@@ -21,6 +30,7 @@ class ExtractionError(RuntimeError):
 
 
 ProgressCallback = Callable[[int, str], None]
+CancelCheck = Callable[[], None]
 
 
 @dataclass(frozen=True)
@@ -35,11 +45,24 @@ class ExtractionResult:
     warnings: list[str]
 
 
+@dataclass
+class _PptImageCandidate:
+    order: int
+    name: str
+    data: bytes
+    digest: str
+    perceptual_hash: int | None
+    width: int
+    height: int
+    information_score: float
+
+
 class LessonExtractionService:
     def __init__(self, config: AppConfig | None = None) -> None:
         self.config = config or AppConfig()
         self.classroom = ClassroomClient(self.config)
         self.ai = AIClient(self.config)
+        self.transcription = LocalTranscriptionService(self.config)
 
     def extract_lesson(
         self,
@@ -57,43 +80,170 @@ class LessonExtractionService:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         warnings: list[str] = []
-
-        _report(progress, 15, "正在检查平台转写")
-        transcript_file, transcript_from_cache = self._download_export(course_id, lesson_id, "transcript", work_dir)
-        if transcript_from_cache:
-            _report(progress, 20, "已复用本地平台转写")
-        else:
-            _report(progress, 20, "平台转写已下载")
-        _report(progress, 28, "正在提取平台转写文本")
-        transcript_text = extract_docx_text(transcript_file)
         transcript_path = output_dir / "transcript.md"
-        transcript_path.write_text(_section("平台转写", transcript_text), encoding="utf-8")
+        transcript_text = ""
+        video_resource = _find_resource(lesson, "video")
+        platform_transcript = _find_resource(lesson, "transcript")
+        need_platform_fallback = not bool(video_resource and video_resource.url)
 
-        _report(progress, 40, "正在检查课件")
-        ppt_file, ppt_from_cache = self._download_export(course_id, lesson_id, "ppt", work_dir)
-        if ppt_from_cache:
-            _report(progress, 45, "已复用本地课件")
-        else:
-            _report(progress, 45, "课件已下载")
-        ocr_callback = self._ocr_image if run_ocr and self._can_ocr(warnings) else None
+        if video_resource is not None and video_resource.url:
+            _report(progress, 10, "检测到课堂录像，优先使用本地语音转写")
+            _task_log(
+                progress,
+                "检测到课堂录像：平台转写不作为主文本，本次优先使用本地 Whisper。",
+                "info",
+            )
+            try:
+                def asr_progress(value: int, message: str) -> None:
+                    _report(progress, 10 + int(value * 0.42), message)
 
-        def ppt_progress(done: int, total: int, image_name: str) -> None:
-            if total <= 0:
-                _report(progress, 55, "正在读取课件文本")
-                return
-            percent = 50 + int((done / total) * 35)
-            _report(progress, percent, f"正在 OCR 课件图片 {done}/{total}：{image_name}")
+                transcript_path = self._transcribe_lesson(
+                    detail,
+                    lesson,
+                    progress=asr_progress,
+                )
+                transcript_text = transcript_path.read_text(encoding="utf-8")
+            except LocalTranscriptionError as exc:
+                warning = f"本地语音转写失败，尝试平台转写兜底：{exc}"
+                warnings.append(warning)
+                _task_log(progress, warning, "warning")
+                need_platform_fallback = True
 
-        _report(progress, 50, "正在提取课件文字")
-        ppt_text, ocr_warnings = extract_pptx_text(
-            ppt_file,
-            ocr_callback,
-            self.config.ocr_max_images,
-            progress=ppt_progress,
-        )
-        warnings.extend(ocr_warnings)
+        if need_platform_fallback and platform_transcript is not None:
+            _report(progress, 12, "正在检查平台转写兜底")
+            try:
+                transcript_file, transcript_from_cache = self._download_export(
+                    course_id, lesson_id, "transcript", work_dir
+                )
+                if transcript_from_cache:
+                    _report(progress, 16, "已复用本地平台转写")
+                else:
+                    _report(progress, 16, "平台转写已下载")
+                candidate = extract_docx_text(transcript_file)
+                usable, reason = _platform_transcript_is_usable(
+                    candidate,
+                    course_title=detail.course.title,
+                    lesson=lesson,
+                )
+                if usable:
+                    transcript_text = candidate
+                    transcript_path.write_text(
+                        _section("平台转写（兜底）", transcript_text), encoding="utf-8"
+                    )
+                    _task_log(progress, f"平台转写兜底通过质量检查：{reason}", "warning")
+                else:
+                    warning = f"平台转写已拒绝，改用空转写占位：{reason}"
+                    warnings.append(warning)
+                    _task_log(progress, warning, "warning")
+            except (
+                ClassroomClientError,
+                OSError,
+                zipfile.BadZipFile,
+                ET.ParseError,
+            ) as exc:
+                warning = f"平台转写兜底不可用：{exc}"
+                warnings.append(warning)
+                _task_log(progress, warning, "warning")
+        elif need_platform_fallback and platform_transcript is None:
+            warning = "本课次没有可用录像，平台也未提供可信转写。"
+            warnings.append(warning)
+            _task_log(progress, warning, "warning")
+
+        if not transcript_text.strip():
+            transcript_path.write_text(
+                _section("语音转写", "（本课次暂无可用的可信转写）"), encoding="utf-8"
+            )
+
         ppt_text_path = output_dir / "ppt_ocr.md"
-        warning_text = "\n".join(f"- {item}" for item in warnings)
+        ppt_text = ""
+        ppt_warnings: list[str] = []
+        ppt_resource = _find_resource(lesson, "ppt")
+
+        if ppt_resource is not None:
+            _report(progress, 55, "正在检查课件")
+            try:
+                ppt_file, ppt_from_cache = self._download_export(
+                    course_id, lesson_id, "ppt", work_dir
+                )
+                if ppt_from_cache:
+                    _report(progress, 58, "已复用本地课件")
+                else:
+                    _report(progress, 58, "课件已下载")
+
+                ocr_stats = {"cache_hits": 0, "inferences": 0}
+                ocr_stats_lock = threading.Lock()
+
+                def ocr_callback(image_bytes: bytes, image_name: str) -> str:
+                    return self._ocr_image(
+                        image_bytes,
+                        image_name,
+                        stats=ocr_stats,
+                        stats_lock=ocr_stats_lock,
+                    )
+
+                can_ocr = run_ocr and self._can_ocr(ppt_warnings)
+                selected_ocr_callback = ocr_callback if can_ocr else None
+
+                def ppt_progress(done: int, total: int, image_name: str) -> None:
+                    if total <= 0:
+                        _report(progress, 64, "正在读取课件文本")
+                        return
+                    percent = 60 + int((done / total) * 25)
+                    _report(progress, percent, f"正在 OCR 课件图片 {done}/{total}：{image_name}")
+
+                _report(
+                    progress,
+                    60,
+                    f"正在分析课件图片并准备 OCR（Worker {self.config.ocr_workers}）",
+                )
+                _task_log(
+                    progress,
+                    "PPT OCR 配置："
+                    f"engine={self.config.ocr_engine}, workers={self.config.ocr_workers}, "
+                    f"onnx_threads={self.config.ocr_onnx_threads}, max_side={self.config.ocr_max_side}, "
+                    f"angle_cls={str(self.config.ocr_use_angle_cls).lower()}, "
+                    f"cache={str(self.config.ocr_cache_enabled).lower()}, "
+                    f"max_images={self.config.ocr_max_images}, dedup=true",
+                    "debug",
+                )
+                cancel_check = getattr(progress, "raise_if_cancelled", None)
+                ppt_text, ocr_warnings = extract_pptx_text(
+                    ppt_file,
+                    selected_ocr_callback,
+                    self.config.ocr_max_images,
+                    progress=ppt_progress,
+                    ocr_workers=self.config.ocr_workers,
+                    cancel_check=cancel_check if callable(cancel_check) else None,
+                    event_log=lambda message, level="info": _task_log(progress, message, level),
+                )
+                if can_ocr:
+                    with ocr_stats_lock:
+                        cache_hits = ocr_stats["cache_hits"]
+                        inferences = ocr_stats["inferences"]
+                    _task_log(
+                        progress,
+                        f"OCR 运行统计：缓存命中 {cache_hits} 张，实际推理 {inferences} 张",
+                        "info",
+                    )
+                ppt_warnings.extend(ocr_warnings)
+                for warning in ocr_warnings:
+                    _task_log(progress, warning, "warning")
+            except (
+                ClassroomClientError,
+                OSError,
+                zipfile.BadZipFile,
+                ET.ParseError,
+            ) as exc:
+                warning = f"课件提取失败：{exc}"
+                ppt_warnings.append(warning)
+                _task_log(progress, warning, "warning")
+        else:
+            warning = "本课次没有可用 PPT，已跳过课件文字提取。"
+            ppt_warnings.append(warning)
+            _task_log(progress, warning, "warning")
+
+        warnings.extend(ppt_warnings)
+        warning_text = "\n".join(f"- {item}" for item in ppt_warnings)
         ppt_body = ppt_text
         if warning_text:
             ppt_body = f"{ppt_body}\n\n## 提醒\n{warning_text}".strip()
@@ -107,6 +257,10 @@ class LessonExtractionService:
                 ppt_text_path.read_text(encoding="utf-8"),
             ]
         )
+        if warnings:
+            combined_text += "\n\n## 提取提醒\n" + "\n".join(
+                f"- {item}" for item in warnings
+            )
         combined_path = output_dir / "combined.md"
         combined_path.write_text(combined_text, encoding="utf-8")
         _report(progress, 100, "文字提取完成")
@@ -121,6 +275,47 @@ class LessonExtractionService:
             summary_path=output_dir / "summary.md" if (output_dir / "summary.md").exists() else None,
             warnings=warnings,
         )
+
+    def transcribe_lesson(
+        self,
+        course_id: str,
+        lesson_id: str,
+        progress: ProgressCallback | None = None,
+        *,
+        force: bool = False,
+    ) -> Path:
+        _report(progress, 5, "正在读取课次信息")
+        detail = self.classroom.get_course_detail(course_id)
+        lesson = _find_lesson(detail, lesson_id)
+        return self._transcribe_lesson(detail, lesson, progress=progress, force=force)
+
+    def _transcribe_lesson(
+        self,
+        detail: CourseDetail,
+        lesson: Lesson,
+        progress: ProgressCallback | None = None,
+        *,
+        force: bool = False,
+    ) -> Path:
+        video_resource = _find_resource(lesson, "video")
+        if video_resource is None or not video_resource.url:
+            raise LocalTranscriptionError("本课次没有可用的课堂录像")
+
+        output_dir = self._lesson_dir(self.config.outputs_dir, detail, lesson)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = output_dir / "local_transcript.txt"
+        result = self.transcription.transcribe_url(
+            video_resource.url,
+            cache_path,
+            progress=progress,
+            force=force,
+            duration_hint_seconds=lesson.duration_seconds,
+        )
+        transcript_path = output_dir / "transcript.md"
+        transcript_path.write_text(
+            _section("本地语音转写", result.text), encoding="utf-8"
+        )
+        return transcript_path
 
     def summarize_lesson(
         self,
@@ -163,25 +358,68 @@ class LessonExtractionService:
         exported = self.classroom.download_lesson_export(course_id, lesson_id, kind)
         return exported.saved_path, exported.from_cache
 
-    def _ocr_image(self, image_bytes: bytes, image_name: str) -> str:
+    def _ocr_image(
+        self,
+        image_bytes: bytes,
+        image_name: str,
+        *,
+        stats: dict[str, int] | None = None,
+        stats_lock: threading.Lock | None = None,
+    ) -> str:
         engine = self.config.ocr_engine
         if engine in ("auto", "rapidocr"):
             try:
-                return _rapidocr_ocr(image_bytes)
+                cache_path = self._rapidocr_cache_path(image_bytes)
+                if cache_path is not None and cache_path.exists():
+                    try:
+                        text = cache_path.read_text(encoding="utf-8")
+                    except OSError:
+                        pass
+                    else:
+                        _increment_ocr_stat(stats, stats_lock, "cache_hits")
+                        return text
+
+                text = _rapidocr_ocr(
+                    image_bytes,
+                    onnx_threads=self.config.ocr_onnx_threads,
+                    max_side=self.config.ocr_max_side,
+                    use_angle_cls=self.config.ocr_use_angle_cls,
+                )
+                _increment_ocr_stat(stats, stats_lock, "inferences")
+                if cache_path is not None:
+                    _write_cache_text(cache_path, text)
+                return text
             except ImportError:
                 if engine == "rapidocr":
                     raise ExtractionError("缺少 rapidocr-onnxruntime，请先安装项目依赖") from None
 
         if engine in ("auto", "tesseract") and shutil.which("tesseract"):
+            _increment_ocr_stat(stats, stats_lock, "inferences")
             return _tesseract_ocr(image_bytes, image_name)
 
         if engine in ("auto", "ai"):
             media_type = mimetypes.guess_type(image_name)[0] or "image/png"
+            _increment_ocr_stat(stats, stats_lock, "inferences")
             return self.ai.ocr_image(image_bytes, media_type)
 
         raise ExtractionError(
             "未找到可用 OCR 引擎。请安装 Tesseract，或配置 FUCKCLASSROOM_AI_API_KEY 使用 AI 视觉 OCR。"
         )
+
+    def _rapidocr_cache_path(self, image_bytes: bytes) -> Path | None:
+        if not self.config.ocr_cache_enabled:
+            return None
+        digest = hashlib.sha256(image_bytes).hexdigest()
+        try:
+            rapidocr_version = package_version("rapidocr-onnxruntime")
+        except PackageNotFoundError:
+            rapidocr_version = "unknown"
+        normalized_version = re.sub(r"[^A-Za-z0-9._-]+", "_", rapidocr_version)
+        namespace = (
+            f"rapidocr-{normalized_version}-side{self.config.ocr_max_side}-"
+            f"cls{int(self.config.ocr_use_angle_cls)}"
+        )
+        return self.config.cache_dir / "ocr" / namespace / digest[:2] / f"{digest}.txt"
 
     def _can_ocr(self, warnings: list[str]) -> bool:
         engine = self.config.ocr_engine
@@ -222,62 +460,379 @@ def extract_docx_text(path: Path) -> str:
     return "\n".join(line for line in texts if line.strip()).strip()
 
 
+def _platform_transcript_is_usable(
+    text: str,
+    *,
+    course_title: str,
+    lesson: Lesson,
+) -> tuple[bool, str]:
+    candidate = text.strip()
+    if not candidate:
+        return False, "内容为空"
+
+    body = candidate
+    if course_title.strip():
+        body = body.replace(course_title.strip(), " ")
+    if lesson.title.strip():
+        body = body.replace(lesson.title.strip(), " ")
+    body = re.sub(r"授课老师\s*[：:]\s*[\u4e00-\u9fffA-Za-z·.]{1,40}", " ", body)
+    body = re.sub(r"\b\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?\b", " ", body)
+    body = re.sub(r"第\s*\d+\s*[-—~～至到]\s*\d+\s*节", " ", body)
+    body = re.sub(r"(?:课程名称|课程名|教师|老师|上课时间)\s*[：:]?", " ", body)
+    meaningful = re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", body)
+
+    duration_seconds = max(0, int(getattr(lesson, "duration_seconds", 0) or 0))
+    duration_minutes = duration_seconds / 60 if duration_seconds else 0.0
+    minimum_chars = 120
+    if duration_minutes:
+        minimum_chars = max(120, min(1000, int(duration_minutes * 8)))
+
+    if len(meaningful) < minimum_chars:
+        return (
+            False,
+            f"去除课程/教师/日期/节次元信息后仅剩 {len(meaningful)} 个有效字符，"
+            f"低于本课次最低可信阈值 {minimum_chars}",
+        )
+    return True, f"有效正文约 {len(meaningful)} 个字符"
+
+
 def extract_pptx_text(
     path: Path,
     ocr_image: Callable[[bytes, str], str] | None,
     max_images: int = 120,
     progress: Callable[[int, int, str], None] | None = None,
+    *,
+    ocr_workers: int = 1,
+    cancel_check: CancelCheck | None = None,
+    event_log: Callable[[str, str], None] | None = None,
 ) -> tuple[str, list[str]]:
     lines: list[str] = []
     warnings: list[str] = []
+    image_jobs: list[tuple[int, str, bytes]] = []
+
+    _check_cancel(cancel_check)
     with zipfile.ZipFile(path) as archive:
         slide_names = sorted(
-            name for name in archive.namelist() if name.startswith("ppt/slides/slide") and name.endswith(".xml")
+            (
+                name
+                for name in archive.namelist()
+                if name.startswith("ppt/slides/slide") and name.endswith(".xml")
+            ),
+            key=_slide_sort_key,
         )
         for index, name in enumerate(slide_names, start=1):
+            _check_cancel(cancel_check)
             root = ET.fromstring(archive.read(name))
             slide_text = "\n".join(_xml_texts(root)).strip()
             if slide_text:
                 lines.append(f"## 第 {index} 页 XML 文本\n{slide_text}")
 
-        image_names = sorted(
-            name for name in archive.namelist() if name.startswith("ppt/media/") and _is_image_name(name)
+        all_media_names = sorted(
+            name
+            for name in archive.namelist()
+            if name.startswith("ppt/media/") and _is_image_name(name)
         )
+        image_names = _referenced_ppt_images(archive, slide_names, all_media_names)
         if image_names and ocr_image is None:
-            warnings.append(f"课件中检测到 {len(image_names)} 张图片，未执行 OCR。")
+            warnings.append(f"课件中检测到 {len(image_names)} 张被幻灯片引用的图片，未执行 OCR。")
             return "\n\n".join(lines).strip(), warnings
 
-        limited_image_names = image_names[:max_images]
-        if len(image_names) > max_images:
-            warnings.append(f"课件中共有 {len(image_names)} 张图片，本次只 OCR 前 {max_images} 张。")
+        if ocr_image is not None and image_names:
+            image_jobs = _prepare_ocr_image_jobs(
+                archive,
+                image_names,
+                max_images=max_images,
+                cancel_check=cancel_check,
+                event_log=event_log,
+                total_media_count=len(all_media_names),
+            )
 
-        for index, name in enumerate(limited_image_names, start=1):
-            if progress:
-                progress(index, len(limited_image_names), Path(name).name)
-            try:
-                text = ocr_image(archive.read(name), Path(name).name).strip()
-            except (AIClientError, ExtractionError, subprocess.SubprocessError) as exc:
-                warnings.append(f"{Path(name).name} OCR 失败：{exc}")
-                continue
+    if ocr_image is not None and image_jobs:
+        results, ocr_warnings = _run_ocr_jobs(
+            image_jobs,
+            ocr_image,
+            max_workers=max(1, min(int(ocr_workers), len(image_jobs))),
+            progress=progress,
+            cancel_check=cancel_check,
+        )
+        warnings.extend(ocr_warnings)
+        for index, image_name, text in sorted(results, key=lambda item: item[0]):
             if text:
-                lines.append(f"## 图片 {index}: {Path(name).name}\n{text}")
+                lines.append(f"## 图片 {index}: {Path(image_name).name}\n{text}")
 
     if not lines and not warnings:
         warnings.append("课件中没有检测到可提取的文本或图片")
     return "\n\n".join(lines).strip(), warnings
 
 
-_RAPID_OCR_ENGINE = None
+def _referenced_ppt_images(
+    archive: zipfile.ZipFile,
+    slide_names: list[str],
+    all_media_names: list[str],
+) -> list[str]:
+    available = set(all_media_names)
+    referenced: list[str] = []
+    seen: set[str] = set()
+
+    for slide_name in slide_names:
+        rel_name = f"ppt/slides/_rels/{Path(slide_name).name}.rels"
+        if rel_name not in archive.namelist():
+            continue
+        try:
+            root = ET.fromstring(archive.read(rel_name))
+        except ET.ParseError:
+            continue
+        for relationship in root.iter():
+            rel_type = str(relationship.attrib.get("Type") or "")
+            target = str(relationship.attrib.get("Target") or "")
+            if not rel_type.endswith("/image") or not target:
+                continue
+            normalized = posixpath.normpath(posixpath.join("ppt/slides", target))
+            if normalized in available and normalized not in seen:
+                seen.add(normalized)
+                referenced.append(normalized)
+
+    return referenced if referenced else all_media_names
 
 
-def _rapidocr_ocr(image_bytes: bytes) -> str:
-    global _RAPID_OCR_ENGINE
-    if _RAPID_OCR_ENGINE is None:
+def _prepare_ocr_image_jobs(
+    archive: zipfile.ZipFile,
+    image_names: list[str],
+    *,
+    max_images: int,
+    cancel_check: CancelCheck | None,
+    event_log: Callable[[str, str], None] | None,
+    total_media_count: int,
+) -> list[tuple[int, str, bytes]]:
+    exact_seen: dict[str, _PptImageCandidate] = {}
+    candidates: list[_PptImageCandidate] = []
+    exact_duplicates = 0
+
+    for order, name in enumerate(image_names):
+        _check_cancel(cancel_check)
+        data = archive.read(name)
+        digest = hashlib.sha256(data).hexdigest()
+        if digest in exact_seen:
+            exact_duplicates += 1
+            continue
+        fingerprint = _image_fingerprint(order, name, data, digest)
+        exact_seen[digest] = fingerprint
+        candidates.append(fingerprint)
+
+    groups: list[_PptImageCandidate] = []
+    similar_duplicates = 0
+    for candidate in candidates:
+        _check_cancel(cancel_check)
+        match_index = _find_similar_image_group(groups, candidate)
+        if match_index is None:
+            groups.append(candidate)
+            continue
+        similar_duplicates += 1
+        current = groups[match_index]
+        if candidate.information_score > current.information_score:
+            candidate.order = current.order
+            groups[match_index] = candidate
+
+    groups.sort(key=lambda item: item.order)
+    before_limit = len(groups)
+    limited = groups[: max(1, int(max_images))]
+    if event_log is not None:
+        event_log(
+            "PPT 图片分析："
+            f"媒体 {total_media_count} 张，幻灯片引用 {len(image_names)} 张，"
+            f"完全重复移除 {exact_duplicates} 张，高度相似移除 {similar_duplicates} 张，"
+            f"去重后 {before_limit} 张，最终 OCR {len(limited)} 张",
+            "info",
+        )
+        if before_limit > len(limited):
+            event_log(
+                f"去重后仍超过 OCR 上限 {max_images}，已按幻灯片首次引用顺序保留前 {len(limited)} 张。",
+                "warning",
+            )
+
+    return [
+        (index, candidate.name, candidate.data)
+        for index, candidate in enumerate(limited, start=1)
+    ]
+
+
+def _image_fingerprint(
+    order: int,
+    name: str,
+    data: bytes,
+    digest: str,
+) -> _PptImageCandidate:
+    try:
+        from PIL import Image, ImageFilter, ImageStat
+
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+            width, height = image.size
+            gray = image.convert("L")
+            entropy = float(gray.entropy())
+            edges = gray.filter(ImageFilter.FIND_EDGES)
+            edge_mean = float(ImageStat.Stat(edges).mean[0])
+            resized = gray.resize((9, 8))
+            get_flattened_data = getattr(resized, "get_flattened_data", None)
+            pixels = list(get_flattened_data() if callable(get_flattened_data) else resized.getdata())
+            phash = 0
+            bit = 0
+            for row in range(8):
+                offset = row * 9
+                for column in range(8):
+                    if pixels[offset + column] > pixels[offset + column + 1]:
+                        phash |= 1 << bit
+                    bit += 1
+            information_score = (
+                math.log1p(max(1, width * height)) * 2.2
+                + entropy * 4.0
+                + edge_mean / 12.0
+                + math.log1p(max(1, len(data)))
+            )
+            return _PptImageCandidate(
+                order,
+                name,
+                data,
+                digest,
+                phash,
+                width,
+                height,
+                information_score,
+            )
+    except Exception:
+        return _PptImageCandidate(
+            order,
+            name,
+            data,
+            digest,
+            None,
+            0,
+            0,
+            math.log1p(max(1, len(data))),
+        )
+
+
+def _find_similar_image_group(
+    groups: list[_PptImageCandidate],
+    candidate: _PptImageCandidate,
+) -> int | None:
+    if candidate.perceptual_hash is None or not candidate.width or not candidate.height:
+        return None
+    candidate_ratio = candidate.width / candidate.height
+    for index, current in enumerate(groups):
+        if current.perceptual_hash is None or not current.width or not current.height:
+            continue
+        current_ratio = current.width / current.height
+        if abs(math.log(candidate_ratio / current_ratio)) > 0.035:
+            continue
+        distance = (candidate.perceptual_hash ^ current.perceptual_hash).bit_count()
+        if distance <= 3:
+            return index
+    return None
+
+
+def _slide_sort_key(name: str) -> tuple[int, str]:
+    match = re.search(r"slide(\d+)\.xml$", name)
+    return (int(match.group(1)) if match else 10**9, name)
+
+
+def _run_ocr_jobs(
+    jobs: list[tuple[int, str, bytes]],
+    ocr_image: Callable[[bytes, str], str],
+    *,
+    max_workers: int,
+    progress: Callable[[int, int, str], None] | None,
+    cancel_check: CancelCheck | None,
+) -> tuple[list[tuple[int, str, str]], list[str]]:
+    total = len(jobs)
+    completed = 0
+    results: list[tuple[int, str, str]] = []
+    warning_items: list[tuple[int, str]] = []
+    executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ppt-ocr")
+    pending: dict[Future[str], tuple[int, str, bytes]] = {}
+    iterator = iter(jobs)
+    aborted = False
+
+    def submit_next() -> bool:
+        try:
+            item = next(iterator)
+        except StopIteration:
+            return False
+        index, name, image_bytes = item
+        future = executor.submit(ocr_image, image_bytes, Path(name).name)
+        pending[future] = (index, name, image_bytes)
+        return True
+
+    for _ in range(max_workers):
+        if not submit_next():
+            break
+
+    try:
+        while pending:
+            _check_cancel(cancel_check)
+            done, _ = wait(tuple(pending), timeout=0.2, return_when=FIRST_COMPLETED)
+            if not done:
+                continue
+            for future in done:
+                index, name, _ = pending.pop(future)
+                display_name = Path(name).name
+                try:
+                    text = future.result().strip()
+                except Exception as exc:
+                    text = ""
+                    warning = f"{display_name} OCR 失败：{exc}"
+                    warning_items.append((index, warning))
+                    display_name = f"{display_name}（失败）"
+                else:
+                    results.append((index, name, text))
+
+                completed += 1
+                if progress:
+                    progress(completed, total, display_name)
+                _check_cancel(cancel_check)
+                submit_next()
+    except BaseException:
+        aborted = True
+        for future in pending:
+            future.cancel()
+        raise
+    finally:
+        executor.shutdown(wait=not aborted, cancel_futures=True)
+
+    warnings = [message for _, message in sorted(warning_items, key=lambda item: item[0])]
+    return results, warnings
+
+
+_RAPID_OCR_LOCAL = threading.local()
+
+
+def _rapidocr_ocr(
+    image_bytes: bytes,
+    *,
+    onnx_threads: int = 1,
+    max_side: int = 1600,
+    use_angle_cls: bool = False,
+) -> str:
+    threads = max(1, int(onnx_threads))
+    side = max(512, int(max_side))
+    engine_key = (threads, side)
+    engine = getattr(_RAPID_OCR_LOCAL, "engine", None)
+    current_key = getattr(_RAPID_OCR_LOCAL, "engine_key", None)
+    if engine is None or current_key != engine_key:
         from rapidocr_onnxruntime import RapidOCR
 
-        _RAPID_OCR_ENGINE = RapidOCR()
+        engine = RapidOCR(
+            max_side_len=side,
+            det_limit_side_len=side,
+            det_limit_type="max",
+            intra_op_num_threads=threads,
+            inter_op_num_threads=1,
+            print_verbose=False,
+        )
+        _RAPID_OCR_LOCAL.engine = engine
+        _RAPID_OCR_LOCAL.engine_key = engine_key
 
-    result, _ = _RAPID_OCR_ENGINE(image_bytes)
+    result, _ = engine(image_bytes, use_cls=bool(use_angle_cls))
     if not result:
         return ""
     lines: list[str] = []
@@ -289,6 +844,27 @@ def _rapidocr_ocr(image_bytes: bytes) -> str:
         if text and confidence >= 0.35:
             lines.append(text)
     return "\n".join(lines)
+
+
+def _write_cache_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{threading.get_ident()}.tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(path)
+
+
+def _increment_ocr_stat(
+    stats: dict[str, int] | None,
+    lock: threading.Lock | None,
+    key: str,
+) -> None:
+    if stats is None:
+        return
+    if lock is None:
+        stats[key] = stats.get(key, 0) + 1
+        return
+    with lock:
+        stats[key] = stats.get(key, 0) + 1
 
 
 def _tesseract_ocr(image_bytes: bytes, image_name: str) -> str:
@@ -327,6 +903,17 @@ def _find_lesson(detail: CourseDetail, lesson_id: str) -> Lesson:
     return lesson
 
 
+def _find_resource(lesson: Lesson, kind: str) -> LessonResource | None:
+    return next(
+        (
+            resource
+            for resource in lesson.resources
+            if resource.kind == kind and resource.is_downloadable
+        ),
+        None,
+    )
+
+
 def _safe_path(value: str) -> str:
     cleaned = "".join(char if char not in r'\/:*?"<>|' else "_" for char in value).strip()
     return cleaned[:80] or "未命名"
@@ -343,3 +930,16 @@ def _section(title: str, body: str) -> str:
 def _report(progress: ProgressCallback | None, percent: int, message: str) -> None:
     if progress:
         progress(percent, message)
+
+
+def _task_log(progress: ProgressCallback | None, message: str, level: str = "info") -> None:
+    if progress is None:
+        return
+    logger = getattr(progress, "log", None)
+    if callable(logger):
+        logger(message, level)
+
+
+def _check_cancel(cancel_check: CancelCheck | None) -> None:
+    if cancel_check:
+        cancel_check()

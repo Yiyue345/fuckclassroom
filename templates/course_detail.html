@@ -45,7 +45,7 @@
       <div class="course-summary">
         <div>
           <h2>课程资源</h2>
-          <div class="summary-meta"><span>{{ detail.lessons|length }} 个课次</span><span>{{ counts.replay }} 个回放</span><span>{{ counts.ppt }} 份课件</span><span>{{ counts.transcript }} 份转写</span></div>
+          <div class="summary-meta"><span>{{ detail.lessons|length }} 个课次</span><span>{{ counts.replay }} 个回放</span><span>{{ counts.ppt }} 份课件</span><span>{{ counts.transcript }} 份平台转写</span></div>
         </div>
         <span class="status green"><span class="tiny-dot"></span>进入页面时已同步</span>
       </div>
@@ -104,11 +104,11 @@
       <div class="course-lessons-heading">
         <div>
           <h2>课次列表</h2>
-          <p>选择课次后，上方录像与 PPT 会同步切换；资源按钮也可以直接定位到对应区域。</p>
+          <p>选择课次后，上方录像与 PPT 会同步切换；“本地转写”会直接从课堂录像流式识别语音。</p>
         </div>
       </div>
       <div class="lesson-list course-media-lesson-list">
-        <div class="lesson-head"><span>课次</span><span>课堂</span><span>可用资源</span><span>状态</span><span></span></div>
+        <div class="lesson-head"><span>课次</span><span>课堂</span><span>转写</span><span>状态</span><span></span></div>
         {% for lesson in detail.lessons %}
           {% set media = namespace(video_url="", ppt_url="") %}
           {% for resource in lesson.resources %}
@@ -119,22 +119,11 @@
             <div class="lesson-number">{{ "%02d"|format(loop.index) }}</div>
             <div><div class="row-title">{{ lesson.title }}</div><div class="row-sub">{{ lesson.start_at or "时间未公布" }}{% if lesson.lecturer or detail.course.teacher %} · {{ lesson.lecturer or detail.course.teacher }}{% endif %}{% if lesson.duration_seconds %} · {{ lesson.duration_seconds // 60 }} 分钟{% endif %}</div></div>
             <div class="resource-line">
-              {% for resource in lesson.resources %}
-                {% set download_key = lesson.id ~ ":" ~ resource.kind %}
-                {% if resource.kind == "ppt" %}
-                  {% if resource.is_downloadable %}
-                    <button class="resource-chip media-trigger{% if download_key in downloaded_exports %} ready{% endif %}" type="button" data-select-resource="ppt" title="在上方阅读 {{ resource.title }}"><svg class="icon small"><use href="/static/icons.svg#presentation"></use></svg>PPT</button>
-                  {% else %}<span class="resource-chip">{{ resource.title }}</span>{% endif %}
-                {% elif resource.kind == "transcript" %}
-                  {% if resource.is_downloadable %}
-                    <a class="resource-chip{% if download_key in downloaded_exports %} ready{% endif %}" href="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/download/transcript" title="{{ resource.title }}"><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>转写</a>
-                  {% else %}<span class="resource-chip">{{ resource.title }}</span>{% endif %}
-                {% elif resource.kind == "video" and resource.is_downloadable %}
-                  <button class="resource-chip ready media-trigger" type="button" data-select-resource="video" title="在上方播放 {{ resource.title }}"><svg class="icon small"><use href="/static/icons.svg#play"></use></svg>{{ resource.title }}</button>
-                {% elif resource.is_downloadable %}
-                  <a class="resource-chip ready" href="{{ resource.url }}" target="_blank" rel="noreferrer"><svg class="icon small"><use href="/static/icons.svg#external-link"></use></svg>{{ resource.title }}</a>
-                {% else %}<span class="resource-chip">{{ resource.title }}</span>{% endif %}
-              {% else %}<span class="muted">暂无资源</span>{% endfor %}
+              {% if media.video_url %}
+                <form method="post" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/extract" data-inline-task data-task-status="#course-task-status" data-task-group="course-extraction" data-task-starting="正在启动本地语音转写" data-task-fallback="本地语音转写失败" data-task-success="本地转写与文字提取已完成">
+                  <button class="resource-chip ready media-trigger" type="submit" data-task-submit title="使用 faster-whisper 从课堂录像流式识别语音；不会保存整段视频"><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>本地转写</button>
+                </form>
+              {% else %}<span class="muted">暂无转写</span>{% endif %}
             </div>
             <div>
               {% if lesson.status_label %}<span class="status {% if '完成' in lesson.status_label or '结束' in lesson.status_label %}green{% else %}gray{% endif %}">{{ lesson.status_label }}</span>{% else %}<span class="status gray">状态未知</span>{% endif %}
@@ -151,4 +140,4 @@
   {% endif %}
 {% endblock %}
 
-{% block scripts %}<script src="/static/course_media.js?v=20260916-2"></script><script src="/static/course_media_fit.js?v=20260916-1"></script>{% endblock %}
+{% block scripts %}<script src="/static/course_media.js?v=20260916-2"></script><script src="/static/course_media_fit.js?v=20260916-1"></script><script src="/static/task_detail_progress.js?v=20260916-1"></script>{% endblock %}
