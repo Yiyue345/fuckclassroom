@@ -15,6 +15,7 @@ class AsrSettingsTests(unittest.TestCase):
             store = SettingsStore(data_dir / "settings.json")
             settings = store.update_from_form(
                 {
+                    "ocr_workers": "5",
                     "asr_model": "small",
                     "asr_device": "cpu",
                     "asr_compute_type": "int8",
@@ -27,6 +28,7 @@ class AsrSettingsTests(unittest.TestCase):
                 }
             )
 
+            self.assertEqual(settings.ocr_workers, 5)
             self.assertEqual(settings.asr_cpu_threads, 6)
             self.assertEqual(settings.asr_num_workers, 3)
             self.assertEqual(settings.asr_max_concurrent_tasks, 3)
@@ -35,6 +37,7 @@ class AsrSettingsTests(unittest.TestCase):
             self.assertTrue(settings.asr_simplified_chinese)
 
             config = AppConfig(data_dir=data_dir)
+            self.assertEqual(config.ocr_workers, 5)
             self.assertEqual(config.asr_cpu_threads, 6)
             self.assertEqual(config.asr_num_workers, 3)
             self.assertEqual(config.asr_max_concurrent_tasks, 3)
