@@ -7,7 +7,7 @@
 {% block page_title %}设置{% endblock %}
 
 {% block content %}
-  <div class="page-head"><div><h1>设置</h1><p class="page-description">管理外观、课程偏好、文字提取和 AI 服务配置。</p></div><div class="head-actions"><button class="btn primary" type="submit" form="settings-form">保存更改</button></div></div>
+  <div class="page-head"><div><h1>设置</h1><p class="page-description">管理外观、课程偏好、文字提取、本地语音转写和 AI 服务配置。</p></div><div class="head-actions"><button class="btn primary" type="submit" form="settings-form">保存更改</button></div></div>
 
   {% if saved %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>设置已保存。</span></div>{% endif %}
   {% if hy2_built %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>Hy2 代理组件已构建。</span></div>{% endif %}
@@ -76,11 +76,30 @@
         </section>
 
         <section class="settings-section" id="extraction">
-          <div><h2>文字提取</h2><p>调整 OCR 引擎和单次处理上限。</p></div>
-          <div class="fields"><div class="field-row">
-            <div class="field"><label for="ocr_engine">OCR 引擎</label><select class="select" id="ocr_engine" name="ocr_engine">{% for engine in ["auto", "rapidocr", "tesseract", "ai"] %}<option value="{{ engine }}" {% if settings.ocr_engine == engine %}selected{% endif %}>{{ engine }}</option>{% endfor %}</select></div>
-            <div class="field"><label for="ocr_max_images">最多识别图片</label><input class="input" id="ocr_max_images" name="ocr_max_images" type="number" min="1" step="1" value="{{ settings.ocr_max_images }}"></div>
-          </div></div>
+          <div><h2>文字提取与本地转写</h2><p>调整 PPT OCR 和 faster-whisper 的速度、并发与输出方式。</p></div>
+          <div class="fields">
+            <div class="field-row">
+              <div class="field"><label for="ocr_engine">OCR 引擎</label><select class="select" id="ocr_engine" name="ocr_engine">{% for engine in ["auto", "rapidocr", "tesseract", "ai"] %}<option value="{{ engine }}" {% if settings.ocr_engine == engine %}selected{% endif %}>{{ engine }}</option>{% endfor %}</select></div>
+              <div class="field"><label for="ocr_max_images">最多识别图片</label><input class="input" id="ocr_max_images" name="ocr_max_images" type="number" min="1" step="1" value="{{ settings.ocr_max_images }}"></div>
+            </div>
+
+            <div class="field"><label for="asr_model">语音识别模型</label><input class="input mono" id="asr_model" name="asr_model" value="{{ settings.asr_model }}"><span class="field-hint">默认 small；模型越大通常越准，但下载、内存和推理开销也更高。</span></div>
+            <div class="field-row">
+              <div class="field"><label for="asr_device">推理设备</label><select class="select" id="asr_device" name="asr_device">{% for device in ["cpu", "cuda", "auto"] %}<option value="{{ device }}" {% if settings.asr_device == device %}selected{% endif %}>{{ device }}</option>{% endfor %}</select></div>
+              <div class="field"><label for="asr_compute_type">计算精度</label><select class="select" id="asr_compute_type" name="asr_compute_type">{% for compute in ["int8", "int8_float16", "float16", "float32", "default"] %}<option value="{{ compute }}" {% if settings.asr_compute_type == compute %}selected{% endif %}>{{ compute }}</option>{% endfor %}</select></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label for="asr_cpu_threads">每个模型 CPU 线程</label><input class="input" id="asr_cpu_threads" name="asr_cpu_threads" type="number" min="1" max="64" step="1" value="{{ settings.asr_cpu_threads }}"><span class="field-hint">CPU 模式主要影响单任务速度。</span></div>
+              <div class="field"><label for="asr_num_workers">模型 Worker 数</label><input class="input" id="asr_num_workers" name="asr_num_workers" type="number" min="1" max="16" step="1" value="{{ settings.asr_num_workers }}"><span class="field-hint">多个课次同时转写时提高并行吞吐，也会增加内存占用。</span></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label for="asr_max_concurrent_tasks">同时转写课次数</label><input class="input" id="asr_max_concurrent_tasks" name="asr_max_concurrent_tasks" type="number" min="1" max="8" step="1" value="{{ settings.asr_max_concurrent_tasks }}"><span class="field-hint">默认 2。若 CPU/内存占用过高请调回 1。</span></div>
+              <div class="field"><label for="asr_batch_size">单课批量大小</label><input class="input" id="asr_batch_size" name="asr_batch_size" type="number" min="1" max="32" step="1" value="{{ settings.asr_batch_size }}"><span class="field-hint">默认 8；更大通常更快，但更吃内存/显存。</span></div>
+            </div>
+            <label class="check-row"><input type="checkbox" name="asr_use_batched" {% if settings.asr_use_batched %}checked{% endif %}><span>启用 BatchedInferencePipeline 批量推理</span></label>
+            <label class="check-row"><input type="checkbox" name="asr_simplified_chinese" {% if settings.asr_simplified_chinese %}checked{% endif %}><span>中文转写自动转换为简体（包括已缓存的旧转写）</span></label>
+            <p class="field-hint">建议先使用默认的 2 个并发任务、4 CPU 线程、2 Workers、batch 8。不要简单把所有数值都拉满，否则会因为 CPU 争抢或内存不足反而变慢。</p>
+          </div>
         </section>
 
         <section class="settings-section" id="ai">
@@ -97,7 +116,7 @@
       <form id="login-state-clear-form" method="post" action="/settings/login-state/clear" data-confirm="确认清除课程录播与本科教务的当前登录状态？已保存的自动登录凭据会保留。"></form>
 
       <section class="settings-section" id="storage">
-        <div><h2>缓存与存储</h2><p>课程名、资源链接和选课数据会在本机缓存。</p></div>
+        <div><h2>缓存与存储</h2><p>课程名、资源链接和选课数据会在本机缓存；本地转写导出文件可在“文件管理”中查看。</p></div>
         <div class="fields">
           <div class="detail-grid"><div class="detail-item"><label>缓存文件</label><strong>{{ cache_info.file_count }} 个</strong></div><div class="detail-item"><label>缓存大小</label><strong>{% if cache_info.total_bytes >= 1048576 %}{{ "%.1f"|format(cache_info.total_bytes / 1048576) }} MB{% elif cache_info.total_bytes >= 1024 %}{{ "%.1f"|format(cache_info.total_bytes / 1024) }} KB{% else %}{{ cache_info.total_bytes }} B{% endif %}</strong></div></div>
           <form method="post" action="/settings/cache/clear" data-confirm="确认清除课程与资源缓存？"><button class="btn danger" type="submit"><svg class="icon"><use href="/static/icons.svg#trash-2"></use></svg>清除缓存</button></form>
