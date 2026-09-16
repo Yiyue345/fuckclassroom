@@ -169,13 +169,26 @@ class LocalTranscriptionTests(unittest.TestCase):
                     raise ClassroomClientError("有录像且本地 ASR 成功时不应下载平台转写")
 
             class FakeTranscription:
-                def transcribe_url(self, video_url: str, output_path: Path, progress=None, force=False):
+                def transcribe_url(
+                    self,
+                    video_url: str,
+                    output_path: Path,
+                    progress=None,
+                    force=False,
+                    duration_hint_seconds=None,
+                ):
+                    self.assertEqual(duration_hint_seconds, 3600)
                     text = "[00:00:01 - 00:00:05] 这是本地识别出来的课堂内容"
                     output_path.parent.mkdir(parents=True, exist_ok=True)
                     output_path.write_text(text + "\n", encoding="utf-8")
                     if progress:
                         progress(100, "本地语音转写完成")
                     return SimpleNamespace(path=output_path, text=text, cached=False)
+
+                @staticmethod
+                def assertEqual(left, right):
+                    if left != right:
+                        raise AssertionError(f"{left!r} != {right!r}")
 
             service = LessonExtractionService(config)
             service.classroom = FakeClassroom()  # type: ignore[assignment]
