@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fuckclassroom.classroom.client import (
     ClassroomClientError,
@@ -72,6 +73,46 @@ class LocalTranscriptionTests(unittest.TestCase):
             self.assertTrue(cached.cached)
             self.assertEqual(cached.text, result.text)
             self.assertEqual(cached.export_path, exported)
+
+    def test_batched_pipeline_uses_configured_batch_size(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            (data_dir / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "asr_use_batched": True,
+                        "asr_batch_size": 6,
+                        "asr_simplified_chinese": False,
+                        "asr_max_concurrent_tasks": 2,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = AppConfig(data_dir=data_dir)
+            service = LocalTranscriptionService(config)
+            fake_model = object()
+            observed: dict[str, object] = {}
+
+            class FakePipeline:
+                def __init__(self, model):
+                    observed["model"] = model
+
+                def transcribe(self, url: str, **kwargs):
+                    observed["url"] = url
+                    observed["kwargs"] = kwargs
+                    return iter([SimpleNamespace(start=0.0, end=2.0, text="测试")]), SimpleNamespace(duration=2.0)
+
+            service._get_model = lambda progress=None: fake_model  # type: ignore[method-assign]
+            target = config.outputs_dir / "课程" / "课次" / "local_transcript.txt"
+            with patch("faster_whisper.BatchedInferencePipeline", FakePipeline):
+                result = service.transcribe_url("https://example.test/lesson.mp4", target)
+
+            self.assertEqual(observed["model"], fake_model)
+            self.assertEqual(observed["url"], "https://example.test/lesson.mp4")
+            kwargs = observed["kwargs"]
+            self.assertEqual(kwargs["batch_size"], 6)
+            self.assertEqual(kwargs["language"], "zh")
+            self.assertIn("测试", result.text)
 
     def test_extraction_falls_back_when_platform_transcript_is_empty(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
