@@ -59,14 +59,14 @@ class LocalTranscriptionTests(unittest.TestCase):
             )
 
             self.assertFalse(result.cached)
-            self.assertIn("[00:00:01 - 00:00:04] 软件与数据库", result.text)
+            self.assertIn("[00:00:01 - 00:00:04] 软体与资料库", result.text)
             self.assertIn("[00:00:07 - 00:00:10] 第二段", result.text)
             self.assertEqual(calls, ["https://example.test/lesson.mp4"])
             self.assertEqual(progress[-1][0], 100)
             self.assertIsNotNone(result.export_path)
             exported = config.downloads_dir / "测试课程" / "第一课" / "本地转写.txt"
             self.assertTrue(exported.exists())
-            self.assertIn("软件与数据库", exported.read_text(encoding="utf-8"))
+            self.assertIn("软体与资料库", exported.read_text(encoding="utf-8"))
 
             service._get_model = lambda progress=None: self.fail("cached transcription should not reload the model")  # type: ignore[method-assign]
             cached = service.transcribe_url("https://example.test/lesson.mp4", target)
