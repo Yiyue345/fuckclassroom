@@ -1,0 +1,19 @@
+[package]
+name = "fuckclassroom-wxscan"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lib]
+name = "fuckclassroom_wxscan"
+crate-type = ["cdylib"]
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+pyo3 = { version = "0.24", features = ["extension-module"] }
+wxscan = { git = "https://github.com/wilinz/wxscan-rs", rev = "707aac6bf9e5b0415494f1bd70fbc213463e3809", default-features = false, features = ["tract"] }
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
