@@ -1,0 +1,120 @@
+name: Build Hy2 prebuilt runners
+
+on:
+  push:
+    branches:
+      - main
+      - feat/course-media-viewer
+    paths:
+      - 'rust_module/hy2_proxy/**'
+      - '!rust_module/hy2_proxy/prebuilt/**'
+      - 'fuckclassroom/course_selection/hy2_prebuilt.py'
+      - '.github/workflows/hy2-prebuilt.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: rustup toolchain install 1.96.0 --profile minimal
+
+      - name: Resolve platform key
+        id: platform
+        shell: bash
+        run: |
+          key="$(python - <<'PY'
+          import platform
+          system = platform.system().lower()
+          if system == 'darwin':
+              system = 'macos'
+          machine = platform.machine().lower()
+          if machine in {'amd64', 'x86_64', 'x64'}:
+              machine = 'x86_64'
+          elif machine in {'arm64', 'aarch64'}:
+              machine = 'aarch64'
+          else:
+              raise SystemExit(f'unsupported architecture: {machine}')
+          print(f'{system}-{machine}')
+          PY
+          )"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "Hy2 platform: $key"
+
+      - name: Build release runner
+        shell: bash
+        working-directory: rust_module/hy2_proxy
+        run: cargo build --release --locked --bin hy2_serve
+
+      - name: Stage runner
+        shell: bash
+        run: |
+          mkdir -p .hy2-out
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp rust_module/hy2_proxy/target/release/hy2_serve.exe .hy2-out/hy2_serve.exe
+          else
+            cp rust_module/hy2_proxy/target/release/hy2_serve .hy2-out/hy2_serve
+          fi
+
+      - name: Upload runner
+        uses: actions/upload-artifact@v4
+        with:
+          name: hy2-${{ steps.platform.outputs.key }}
+          path: .hy2-out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Package verified runners
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download runners
+        uses: actions/download-artifact@v4
+        with:
+          pattern: hy2-*
+          path: .hy2-artifacts
+
+      - name: Generate prebuilt manifest
+        run: |
+          python fuckclassroom/course_selection/hy2_prebuilt.py package \
+            .hy2-artifacts \
+            rust_module/hy2_proxy \
+            rust_module/hy2_proxy/prebuilt
+
+      - name: Commit refreshed runners
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust_module/hy2_proxy/prebuilt
+          if git diff --cached --quiet; then
+            echo "Prebuilt Hy2 runners are already current."
+            exit 0
+          fi
+          git commit -m "build: refresh prebuilt Hy2 runners [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
