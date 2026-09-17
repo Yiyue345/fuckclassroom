@@ -5,6 +5,7 @@ import logging
 import threading
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from urllib.parse import parse_qs
 from urllib.parse import quote
 
@@ -19,7 +20,9 @@ from ..auth.credentials import CredentialStoreError, SelectionCredentialStore
 from ..classroom import (
     ClassroomClient,
     ClassroomClientError,
+    CourseDetail,
     SemesterSyncService,
+    rewrite_live_playlist,
 )
 from ..classroom.downloads import DownloadLibrary
 from ..classroom.extraction import ExtractionError, LessonExtractionService
@@ -149,6 +152,27 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def verify_classroom_session():
         return auth_service.verify_saved_session(auto_relogin=True)
 
+    def enrich_live_status(detail: CourseDetail) -> CourseDetail:
+        """Overlay the uncached live-list state onto cached course-detail rows."""
+        try:
+            live_ids = {
+                item.lesson_id
+                for item in classroom_client.list_current_live_lessons([detail.course])
+            }
+        except ClassroomClientError:
+            return detail
+        if not live_ids:
+            return detail
+        return CourseDetail(
+            course=detail.course,
+            lessons=[
+                replace(lesson, is_live=True, status_label="直播中")
+                if lesson.id in live_ids
+                else lesson
+                for lesson in detail.lessons
+            ],
+        )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         async def sync_semesters() -> None:
@@ -229,11 +253,21 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         session = auth_service.get_session_status()
         courses = []
         course_error = None
+        live_lessons = []
+        live_error = None
         if session.is_logged_in:
             try:
-                courses = classroom_client.list_courses(term_id=app_config.default_term_id or None)
+                courses = classroom_client.list_courses(
+                    page_size=100,
+                    term_id=app_config.default_term_id or None,
+                )
             except ClassroomClientError as exc:
                 course_error = str(exc)
+            if courses:
+                try:
+                    live_lessons = classroom_client.list_current_live_lessons(courses)
+                except ClassroomClientError as exc:
+                    live_error = str(exc)
         files = download_library.list_files()
         recent_tasks = task_manager.list_recent(4)
         return templates.TemplateResponse(
@@ -243,6 +277,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 "session": session,
                 "courses": courses,
                 "course_error": course_error,
+                "live_lessons": live_lessons,
+                "live_error": live_error,
                 "files": files,
                 "recent_tasks": recent_tasks,
                 "running_task_count": sum(task.status == "running" for task in recent_tasks),
@@ -449,7 +485,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         error = None
         detail = None
         try:
-            detail = classroom_client.refresh_course_detail(course_id)
+            detail = enrich_live_status(classroom_client.refresh_course_detail(course_id))
         except ClassroomClientError as exc:
             error = str(exc)
         return templates.TemplateResponse(
@@ -1153,9 +1189,119 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         courses = classroom_client.list_courses(term_id=term_id or None)
         return {"courses": [course.__dict__ for course in courses]}
 
+    @app.get("/api/courses/{course_id}/lessons/{lesson_id}/live")
+    def api_live_lesson(course_id: str, lesson_id: str) -> dict[str, object]:
+        try:
+            info = classroom_client.get_live_lesson_info(course_id, lesson_id)
+        except ClassroomClientError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        qualities = [
+            {
+                "id": quality,
+                "label": label,
+                "playlist_url": (
+                    f"/api/courses/{quote(course_id, safe='')}/lessons/"
+                    f"{quote(lesson_id, safe='')}/live/playlist?quality={quality}"
+                ),
+            }
+            for quality, label in (
+                ("original", "原画"),
+                ("high", "高清"),
+                ("standard", "流畅"),
+            )
+            if quality in info.playlist_urls
+        ]
+        return {
+            "course_id": info.course_id,
+            "lesson_id": info.lesson_id,
+            "course_title": info.course_title,
+            "lesson_title": info.lesson_title,
+            "lecturer": info.lecturer,
+            "room_name": info.room_name,
+            "start_at": info.start_at,
+            "end_at": info.end_at,
+            "is_live": info.is_live,
+            "ppt_running": info.ppt_running,
+            "official_url": info.official_url,
+            "qualities": qualities,
+            "playlist_url": qualities[0]["playlist_url"] if qualities else "",
+        }
+
+    @app.get("/api/courses/{course_id}/lessons/{lesson_id}/live/playlist")
+    def api_live_playlist(course_id: str, lesson_id: str, quality: str = "original") -> Response:
+        try:
+            source_url = classroom_client.get_live_playlist_url(course_id, lesson_id, quality)
+            content, _ = classroom_client.download_live_media(source_url, max_bytes=2 * 1024 * 1024)
+            playlist = rewrite_live_playlist(content.decode("utf-8", errors="replace"), source_url)
+        except ClassroomClientError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return Response(
+            content=playlist,
+            media_type="application/vnd.apple.mpegurl",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/api/courses/{course_id}/lessons/{lesson_id}/live/ppt")
+    def api_live_ppt(course_id: str, lesson_id: str, after_id: int = 0) -> dict[str, object]:
+        try:
+            slides = classroom_client.list_live_ppt_slides(
+                course_id,
+                lesson_id,
+                after_id=max(0, after_id),
+            )
+        except ClassroomClientError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "slides": [
+                {
+                    "id": slide.id,
+                    "image_url": f"/api/live/ppt-image?url={quote(slide.image_url, safe='')}",
+                    "thumbnail_url": (
+                        f"/api/live/ppt-image?url={quote(slide.thumbnail_url, safe='')}"
+                        if slide.thumbnail_url
+                        else ""
+                    ),
+                    "created_at": slide.created_at,
+                    "offset_seconds": slide.offset_seconds,
+                }
+                for slide in slides
+            ],
+            "last_id": max((slide.id for slide in slides), default=max(0, after_id)),
+        }
+
+    @app.get("/api/live/media")
+    def api_live_media(url: str) -> Response:
+        try:
+            content, content_type = classroom_client.download_live_media(url)
+            if "mpegurl" in content_type.lower() or url.split("?", 1)[0].lower().endswith(".m3u8"):
+                content = rewrite_live_playlist(
+                    content.decode("utf-8", errors="replace"),
+                    url,
+                ).encode("utf-8")
+                content_type = "application/vnd.apple.mpegurl"
+        except ClassroomClientError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return Response(
+            content=content,
+            media_type=content_type.split(";", 1)[0],
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/api/live/ppt-image")
+    def api_live_ppt_image(url: str) -> Response:
+        try:
+            content, content_type = classroom_client.download_live_ppt_image(url)
+        except ClassroomClientError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return Response(
+            content=content,
+            media_type=content_type.split(";", 1)[0],
+            headers={"Cache-Control": "private, max-age=10"},
+        )
+
     @app.get("/api/courses/{course_id}")
     def api_course_detail(course_id: str) -> dict[str, object]:
-        detail = classroom_client.get_course_detail(course_id)
+        detail = enrich_live_status(classroom_client.get_course_detail(course_id))
         return {
             "course": detail.course.__dict__,
             "lessons": [
