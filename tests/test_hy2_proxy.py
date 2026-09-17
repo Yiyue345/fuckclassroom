@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import socketserver
 import tempfile
@@ -176,12 +177,16 @@ class Hy2ProxyTests(unittest.TestCase):
     def test_enabled_hy2_auto_builds_missing_runner_on_startup(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             config = _hy2_config(Path(directory))
-            built_name = "hy2_serve.exe" if config.hy2_runner_path.suffix == ".exe" else "hy2_serve"
+            built_name = "hy2_serve.exe" if os.name == "nt" else "hy2_serve"
             built_runner = config.data_dir / "hy2" / "build" / "release" / built_name
             built_runner.parent.mkdir(parents=True)
             built_runner.write_bytes(b"auto-runner")
 
             with (
+                patch(
+                    "fuckclassroom.course_selection.hy2_prebuilt.install_prebuilt_runner",
+                    return_value=False,
+                ),
                 patch("fuckclassroom.course_selection.proxy.shutil.which", return_value="cargo"),
                 patch(
                     "fuckclassroom.course_selection.proxy.subprocess.Popen",
