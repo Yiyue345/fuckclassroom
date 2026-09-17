@@ -23,6 +23,7 @@ _ENDPOINT_PATTERN = re.compile(
     r"^RUST_HY2_SOCKS\s+port=(\d+)\s+user=([^\s]+)\s+pass=([^\s]+)$"
 )
 _MAX_PROXY_HEADER_BYTES = 64 * 1024
+_HY2_BUILD_TIMEOUT_SECONDS = 900.0
 
 
 class Hy2ProxyError(RuntimeError):
@@ -37,6 +38,8 @@ class Hy2ProxyStatus:
     proxy_url: str = ""
     runner_path: str = ""
     source_dir: str = ""
+    building: bool = False
+    build_detail: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -55,6 +58,8 @@ class Hy2ProxyManager:
         self._lock = threading.RLock()
         self._build_lock = threading.Lock()
         self._build_thread: threading.Thread | None = None
+        self._build_started_at: float | None = None
+        self._build_detail = ""
         self._process: subprocess.Popen[str] | None = None
         self._bridge: _ConnectProxyServer | None = None
         self._bridge_thread: threading.Thread | None = None
@@ -78,6 +83,8 @@ class Hy2ProxyManager:
             if not self._runner_needs_rebuild():
                 return False
             self._build_error = ""
+            self._build_detail = "正在准备 Cargo 构建"
+            self._build_started_at = time.monotonic()
             thread = threading.Thread(
                 target=self._auto_build_worker,
                 name="hy2-auto-build",
@@ -104,14 +111,24 @@ class Hy2ProxyManager:
         with self._build_lock:
             if not force and not self._runner_needs_rebuild():
                 self._build_error = ""
+                self._build_detail = ""
+                self._build_started_at = None
                 _report(progress, 100, "Hy2 代理组件已是最新版本")
                 return False
+            if self._build_started_at is None:
+                self._build_started_at = time.monotonic()
+            if not self._build_detail:
+                self._build_detail = "正在准备 Cargo 构建"
             try:
                 self._compile_runner(progress)
             except Hy2ProxyError as exc:
                 self._build_error = str(exc)
+                self._build_detail = ""
+                self._build_started_at = None
                 raise
             self._build_error = ""
+            self._build_detail = ""
+            self._build_started_at = None
             return True
 
     def ensure_started(self, timeout_seconds: float = 30.0) -> str:
@@ -186,12 +203,18 @@ class Hy2ProxyManager:
             self.start_auto_build()
         build_thread = self._build_thread
         building = bool(build_thread and build_thread.is_alive())
+        build_detail = self._build_detail
         with self._lock:
             running = self._is_running_locked()
             if running:
                 message = "Hy2 代理正在运行"
             elif building:
-                message = "Hy2 代理组件正在自动构建"
+                elapsed = 0
+                if self._build_started_at is not None:
+                    elapsed = max(0, int(time.monotonic() - self._build_started_at))
+                message = f"Hy2 代理组件正在自动构建（已等待 {_format_elapsed(elapsed)}）"
+                if build_detail:
+                    message += f"：{build_detail}"
             elif self._build_error:
                 message = f"Hy2 代理自动构建失败：{self._build_error}"
             elif not self.config.hy2_enabled:
@@ -207,6 +230,8 @@ class Hy2ProxyManager:
                 proxy_url=self._proxy_url if running else "",
                 runner_path=str(self.config.hy2_runner_path),
                 source_dir=str(self.config.hy2_source_dir),
+                building=building,
+                build_detail=build_detail if building else "",
             )
 
     def stop(self) -> None:
@@ -252,36 +277,83 @@ class Hy2ProxyManager:
 
         target_dir = self.config.data_dir / "hy2" / "build"
         target_dir.mkdir(parents=True, exist_ok=True)
+        command = [
+            cargo,
+            "build",
+            "--release",
+            "--bin",
+            "hy2_serve",
+            "--manifest-path",
+            str(manifest),
+            "--target-dir",
+            str(target_dir),
+        ]
+        if (source_dir / "Cargo.lock").is_file():
+            command.insert(3, "--locked")
+
+        self._build_detail = "Cargo 已启动，正在检查/下载依赖"
         _report(progress, 8, "正在编译内置 Hy2 代理组件")
+        creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+        env = os.environ.copy()
+        env.setdefault("CARGO_TERM_COLOR", "never")
+        output: queue.Queue[str | None] = queue.Queue()
         try:
-            result = subprocess.run(
-                [
-                    cargo,
-                    "build",
-                    "--release",
-                    "--bin",
-                    "hy2_serve",
-                    "--manifest-path",
-                    str(manifest),
-                    "--target-dir",
-                    str(target_dir),
-                ],
+            process = subprocess.Popen(
+                command,
                 cwd=str(source_dir),
                 stdin=subprocess.DEVNULL,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=900,
-                creationflags=(
-                    subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-                ),
+                bufsize=1,
+                creationflags=creation_flags,
+                env=env,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except OSError as exc:
             raise Hy2ProxyError(f"Hy2 代理组件构建失败：{exc}") from exc
-        if result.returncode != 0:
-            detail = _last_nonempty_line(result.stderr) or _last_nonempty_line(result.stdout)
-            raise Hy2ProxyError(f"Hy2 代理组件构建失败：{detail or 'Cargo 返回非零状态'}")
+
+        reader = threading.Thread(target=_read_process_lines, args=(process, output), daemon=True)
+        reader.start()
+        deadline = time.monotonic() + _HY2_BUILD_TIMEOUT_SECONDS
+        last_line = ""
+        timed_out = False
+        while True:
+            if time.monotonic() >= deadline:
+                timed_out = True
+                if process.poll() is None:
+                    process.kill()
+                break
+            if process.poll() is not None and output.empty():
+                break
+            try:
+                line = output.get(timeout=0.25)
+            except queue.Empty:
+                continue
+            if line is None:
+                if process.poll() is not None:
+                    break
+                continue
+            stripped = _compact_status_line(line)
+            if not stripped:
+                continue
+            last_line = stripped
+            self._build_detail = stripped
+            _report(progress, 12, f"Hy2 构建：{stripped}")
+
+        try:
+            return_code = process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return_code = process.wait(timeout=5)
+
+        if timed_out:
+            raise Hy2ProxyError("Hy2 代理组件构建超过 15 分钟，已停止 Cargo；请检查 Rust/crates.io 网络")
+        if return_code != 0:
+            raise Hy2ProxyError(
+                f"Hy2 代理组件构建失败：{last_line or f'Cargo 返回状态 {return_code}'}"
+            )
 
         built_name = "hy2_serve.exe" if os.name == "nt" else "hy2_serve"
         built_runner = target_dir / "release" / built_name
@@ -289,6 +361,7 @@ class Hy2ProxyManager:
             raise Hy2ProxyError(f"构建完成但没有找到代理程序：{built_runner}")
         runner = self.config.hy2_runner_path
         runner.parent.mkdir(parents=True, exist_ok=True)
+        self._build_detail = "Cargo 构建完成，正在安装本地代理组件"
         shutil.copy2(built_runner, runner)
         _report(progress, 78, "Hy2 代理组件已构建")
 
@@ -507,6 +580,15 @@ def _relay(left: socket.socket, right: socket.socket) -> None:
 
 def _last_nonempty_line(content: str) -> str:
     return next((line.strip() for line in reversed(content.splitlines()) if line.strip()), "")
+
+
+def _compact_status_line(line: str) -> str:
+    return re.sub(r"\s+", " ", line).strip()[-220:]
+
+
+def _format_elapsed(seconds: int) -> str:
+    minutes, seconds = divmod(max(0, seconds), 60)
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 def _report(progress: ProgressCallback | None, percent: int, message: str) -> None:
