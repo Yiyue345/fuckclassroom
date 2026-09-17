@@ -260,6 +260,8 @@
   const video = workspace.querySelector("[data-course-video]");
   const videoEmpty = workspace.querySelector("[data-video-empty]");
   const videoExternal = workspace.querySelector("[data-video-external]");
+  const videoTitle = workspace.querySelector("[data-video-title]");
+  const liveBadge = workspace.querySelector("[data-live-badge]");
   const pptCard = workspace.querySelector("[data-ppt-card]");
   const pptStage = workspace.querySelector("[data-ppt-stage]");
   const pptStatus = workspace.querySelector("[data-ppt-status]");
@@ -274,6 +276,9 @@
   let pptPages = [];
   let pptIndex = 0;
   let pptLoadToken = 0;
+  let livePptTimer = 0;
+  let hlsPlayer = null;
+  let videoLoadToken = 0;
 
   function setLinkState(link, href) {
     const enabled = Boolean(href);
@@ -291,10 +296,18 @@
     pptNext.disabled = !hasSlides || pptIndex === pptPages.length - 1;
   }
 
+  function updateLivePptAspect(page) {
+    if (!pptCard.classList.contains("live-mode")) return;
+    const image = page?.querySelector("img.live-ppt-image");
+    if (!image?.naturalWidth || !image?.naturalHeight) return;
+    pptStage.style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
+  }
+
   function showPptPage(index) {
     if (!pptPages.length) return;
     pptIndex = Math.max(0, Math.min(index, pptPages.length - 1));
     pptPages.forEach((page, pageIndex) => page.classList.toggle("active", pageIndex === pptIndex));
+    updateLivePptAspect(pptPages[pptIndex]);
     updatePptControls();
   }
 
@@ -307,9 +320,83 @@
     updatePptControls();
   }
 
+  function stopLivePptPolling() {
+    if (livePptTimer) window.clearTimeout(livePptTimer);
+    livePptTimer = 0;
+  }
+
+  function destroyVideoSource() {
+    video.pause();
+    if (hlsPlayer) hlsPlayer.destroy();
+    hlsPlayer = null;
+    video.removeAttribute("src");
+    video.load();
+  }
+
+  function appendLiveSlides(slides) {
+    if (!slides.length) return;
+    const followLatest = !pptPages.length || pptIndex === pptPages.length - 1;
+    pptStatus.classList.add("hidden");
+    for (const slide of slides) {
+      if (pptPages.some((page) => page.dataset.liveSlideId === String(slide.id))) continue;
+      const page = D.createElement("div");
+      page.className = "ppt-slide-page live-ppt-slide";
+      page.dataset.liveSlideId = String(slide.id);
+      const image = D.createElement("img");
+      image.className = "live-ppt-image";
+      image.alt = `直播课件第 ${pptPages.length + 1} 页`;
+      image.decoding = "async";
+      image.width = 1280;
+      image.height = 720;
+      image.addEventListener("load", () => {
+        if (page.classList.contains("active")) updateLivePptAspect(page);
+      }, { once: true });
+      image.src = slide.image_url;
+      page.append(image);
+      pptStage.append(page);
+      pptPages.push(page);
+    }
+    pptFullscreen.disabled = !pptPages.length;
+    if (followLatest) showPptPage(pptPages.length - 1);
+    else updatePptControls();
+  }
+
+  function loadLivePpt(row, token) {
+    const endpoint = row.dataset.livePptUrl || "";
+    setLinkState(pptDownload, "");
+    pptFullscreen.disabled = true;
+    resetPpt("正在连接直播 PPT…", "loading");
+    let afterId = 0;
+
+    const poll = async () => {
+      if (token !== pptLoadToken || !endpoint) return;
+      try {
+        const separator = endpoint.includes("?") ? "&" : "?";
+        const response = await fetch(`${endpoint}${separator}after_id=${afterId}`, { credentials: "same-origin" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        if (token !== pptLoadToken) return;
+        const slides = Array.isArray(payload.slides) ? payload.slides : [];
+        appendLiveSlides(slides);
+        afterId = Math.max(afterId, num(payload.last_id), ...slides.map((slide) => num(slide.id)));
+        if (!pptPages.length) resetPpt("等待教师推送 PPT…", "loading");
+      } catch (error) {
+        if (token !== pptLoadToken) return;
+        if (!pptPages.length) resetPpt(`直播 PPT 暂时不可用：${error.message || error}`, "error");
+      }
+      if (token === pptLoadToken) livePptTimer = window.setTimeout(poll, 3000);
+    };
+    poll();
+  }
+
   async function loadPpt(row) {
-    const url = row.dataset.pptUrl || "";
+    stopLivePptPolling();
     const token = ++pptLoadToken;
+    if (row.dataset.live === "true") {
+      loadLivePpt(row, token);
+      return;
+    }
+    const url = row.dataset.pptUrl || "";
     setLinkState(pptDownload, url);
     pptFullscreen.disabled = !url;
     if (!url) {
@@ -343,12 +430,65 @@
     }
   }
 
-  function loadVideo(row, autoplay = false) {
-    const url = row.dataset.videoUrl || "";
-    video.pause();
-    if (!url) {
-      video.removeAttribute("src");
+  function attachVideoSource(url, autoplay) {
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = url;
       video.load();
+      if (autoplay) video.play().catch(() => {});
+      return;
+    }
+    if (window.Hls?.isSupported()) {
+      hlsPlayer = new window.Hls({ liveSyncDurationCount: 3, maxLiveSyncPlaybackRate: 1.25 });
+      hlsPlayer.loadSource(url);
+      hlsPlayer.attachMedia(video);
+      hlsPlayer.on(window.Hls.Events.MANIFEST_PARSED, () => {
+        if (autoplay) video.play().catch(() => {});
+      });
+      hlsPlayer.on(window.Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return;
+        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) hlsPlayer.startLoad();
+        else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) hlsPlayer.recoverMediaError();
+        else {
+          hlsPlayer.destroy();
+          hlsPlayer = null;
+          video.classList.add("hidden");
+          videoEmpty.classList.remove("hidden");
+          videoEmpty.textContent = "直播流连接失败，请稍后重试或在平台中打开";
+        }
+      });
+      return;
+    }
+    throw new Error("当前浏览器不支持 HLS 直播播放");
+  }
+
+  async function loadVideo(row, autoplay = false) {
+    const token = ++videoLoadToken;
+    const url = row.dataset.videoUrl || "";
+    destroyVideoSource();
+    if (row.dataset.live === "true") {
+      video.classList.add("hidden");
+      videoEmpty.classList.remove("hidden");
+      videoEmpty.textContent = "正在连接直播画面…";
+      setLinkState(videoExternal, "");
+      try {
+        const response = await fetch(row.dataset.liveInfoUrl, { credentials: "same-origin" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+        if (token !== videoLoadToken) return;
+        setLinkState(videoExternal, payload.official_url || "");
+        if (!payload.is_live || !payload.playlist_url) throw new Error("直播流暂未就绪");
+        videoEmpty.classList.add("hidden");
+        video.classList.remove("hidden");
+        attachVideoSource(payload.playlist_url, autoplay);
+      } catch (error) {
+        if (token !== videoLoadToken) return;
+        video.classList.add("hidden");
+        videoEmpty.classList.remove("hidden");
+        videoEmpty.textContent = `直播加载失败：${error.message || error}`;
+      }
+      return;
+    }
+    if (!url) {
       video.classList.add("hidden");
       videoEmpty.classList.remove("hidden");
       videoEmpty.textContent = "本课次暂无课堂录像";
@@ -359,10 +499,8 @@
     setLinkState(videoExternal, url);
     videoEmpty.classList.add("hidden");
     video.classList.remove("hidden");
-    if (video.src !== url) {
-      video.src = url;
-      video.load();
-    }
+    video.src = url;
+    video.load();
     if (autoplay) video.play().catch(() => {});
   }
 
@@ -375,6 +513,11 @@
       candidate.setAttribute("aria-current", active ? "true" : "false");
     });
     currentLesson.textContent = row.dataset.lessonTitle || "当前课次";
+    const isLive = row.dataset.live === "true";
+    videoTitle.textContent = isLive ? "课堂直播" : "课堂录像";
+    liveBadge.classList.toggle("hidden", !isLive);
+    pptCard.classList.toggle("live-mode", isLive);
+    if (!isLive) pptStage.style.removeProperty("aspect-ratio");
     loadVideo(row, options.autoplay === true);
     loadPpt(row);
 
@@ -424,6 +567,14 @@
     if (event.key === "ArrowRight") showPptPage(pptIndex + 1);
   });
 
-  const initialRow = rows.find((row) => row.dataset.videoUrl || row.dataset.pptUrl) || rows[0];
+  const requestedLesson = new URLSearchParams(window.location.search).get("lesson");
+  const initialRow = rows.find((row) => row.dataset.lessonId === requestedLesson)
+    || rows.find((row) => row.dataset.live === "true")
+    || rows.find((row) => row.dataset.videoUrl || row.dataset.pptUrl)
+    || rows[0];
   if (initialRow) selectLesson(initialRow);
+  window.addEventListener("beforeunload", () => {
+    stopLivePptPolling();
+    destroyVideoSource();
+  });
 })();

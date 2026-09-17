@@ -115,8 +115,8 @@
     thumbnailHeading.textContent = currentPages.length ? `幻灯片 · ${currentPages.length} 页` : '幻灯片';
 
     currentPages.forEach((page, index) => {
-      const sourceSvg = page.querySelector('svg.ppt-slide-svg');
-      if (!sourceSvg) return;
+      const sourceVisual = page.querySelector('svg.ppt-slide-svg, img.live-ppt-image');
+      if (!sourceVisual) return;
 
       const button = document.createElement('button');
       button.type = 'button';
@@ -124,7 +124,7 @@
       button.setAttribute('aria-label', `跳转到第 ${index + 1} 页`);
       button.title = `第 ${index + 1} 页`;
 
-      const preview = sourceSvg.cloneNode(true);
+      const preview = sourceVisual.cloneNode(true);
       preview.removeAttribute('id');
       button.append(preview);
 

@@ -13,7 +13,12 @@ from .client import (
     Lesson,
     LessonExportTarget,
     LessonResource,
+    LiveLesson,
+    LiveLessonInfo,
+    LivePptSlide,
     Term,
+    is_allowed_live_media_url,
+    rewrite_live_playlist,
 )
 from .ocr_integrity import install_ocr_failure_guard
 from .semester_sync import SemesterSnapshot, SemesterSyncService
@@ -29,7 +34,12 @@ __all__ = [
     "Lesson",
     "LessonExportTarget",
     "LessonResource",
+    "LiveLesson",
+    "LiveLessonInfo",
+    "LivePptSlide",
     "Term",
+    "is_allowed_live_media_url",
+    "rewrite_live_playlist",
     "SemesterSnapshot",
     "SemesterSyncService",
 ]
