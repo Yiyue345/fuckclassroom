@@ -70,18 +70,18 @@ jobs:
       - name: Stage runner
         shell: bash
         run: |
-          mkdir -p .hy2-out
+          mkdir -p hy2-out
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp rust_module/hy2_proxy/target/release/hy2_serve.exe .hy2-out/hy2_serve.exe
+            cp rust_module/hy2_proxy/target/release/hy2_serve.exe hy2-out/hy2_serve.exe
           else
-            cp rust_module/hy2_proxy/target/release/hy2_serve .hy2-out/hy2_serve
+            cp rust_module/hy2_proxy/target/release/hy2_serve hy2-out/hy2_serve
           fi
 
       - name: Upload runner
         uses: actions/upload-artifact@v4
         with:
           name: hy2-${{ steps.platform.outputs.key }}
-          path: .hy2-out/*
+          path: hy2-out/*
           if-no-files-found: error
           retention-days: 7
 
