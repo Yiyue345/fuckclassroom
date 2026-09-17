@@ -80,7 +80,12 @@
     notice.classList.remove("hidden", "success");
     notice.classList.add("error");
     addText(notice, "strong", "直播 PPT 二维码识别组件未就绪");
-    addText(notice, "span", message || "请按 docs/QR_ASSISTANT.md 构建 PyO3 扩展。", "muted");
+    addText(
+      notice,
+      "span",
+      message || "请先安装 rust_module/wxscan_py 中的 PyO3 扩展，然后刷新页面。",
+      "muted",
+    );
   }
 
   function currentLiveEndpoint(slideId) {
