@@ -176,4 +176,9 @@
   });
 
   rebuildThumbnails();
+
+  const qrAssistantScript = document.createElement('script');
+  qrAssistantScript.src = '/static/qr_assistant.js?v=20260917-1';
+  qrAssistantScript.defer = true;
+  document.head.append(qrAssistantScript);
 })();
