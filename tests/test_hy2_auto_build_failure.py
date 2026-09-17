@@ -22,7 +22,13 @@ class Hy2AutoBuildFailureTests(unittest.TestCase):
     def test_missing_cargo_failure_is_not_erased_by_status_reads(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             config = self._config(Path(directory))
-            with patch("fuckclassroom.course_selection.proxy.shutil.which", return_value=None):
+            with (
+                patch(
+                    "fuckclassroom.course_selection.hy2_prebuilt.install_prebuilt_runner",
+                    return_value=False,
+                ),
+                patch("fuckclassroom.course_selection.proxy.shutil.which", return_value=None),
+            ):
                 manager = Hy2ProxyManager(config)
                 self.assertTrue(manager.wait_for_auto_build(2.0))
 
@@ -38,10 +44,16 @@ class Hy2AutoBuildFailureTests(unittest.TestCase):
     def test_unexpected_build_exception_is_exposed_in_status(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             config = self._config(Path(directory))
-            with patch.object(
-                Hy2ProxyManager,
-                "_compile_runner",
-                side_effect=ValueError("boom"),
+            with (
+                patch(
+                    "fuckclassroom.course_selection.hy2_prebuilt.install_prebuilt_runner",
+                    return_value=False,
+                ),
+                patch.object(
+                    Hy2ProxyManager,
+                    "_compile_runner",
+                    side_effect=ValueError("boom"),
+                ),
             ):
                 manager = Hy2ProxyManager(config)
                 self.assertTrue(manager.wait_for_auto_build(2.0))
