@@ -61,6 +61,43 @@ class _FakeSocksHandler(socketserver.BaseRequestHandler):
             raise AssertionError(f"{left!r} != {right!r}")
 
 
+class _FakeBuildStdout:
+    def __init__(self, process: "_FakeBuildProcess", lines: list[str]) -> None:
+        self.process = process
+        self.lines = iter(lines)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> str:
+        try:
+            return next(self.lines)
+        except StopIteration:
+            self.process.done = True
+            raise
+
+
+class _FakeBuildProcess:
+    def __init__(self, lines: list[str] | None = None, returncode: int = 0) -> None:
+        self.done = False
+        self.returncode = returncode
+        self.stdout = _FakeBuildStdout(
+            self,
+            lines or ["Compiling test-crate v0.1.0\n", "Finished release profile\n"],
+        )
+
+    def poll(self):
+        return self.returncode if self.done else None
+
+    def wait(self, timeout=None):
+        del timeout
+        self.done = True
+        return self.returncode
+
+    def kill(self) -> None:
+        self.done = True
+
+
 class _FailingOpener:
     def open(self, *_args, **_kwargs):
         raise URLError("offline")
@@ -122,19 +159,41 @@ class Hy2ProxyTests(unittest.TestCase):
 
             with (
                 patch("fuckclassroom.course_selection.proxy.shutil.which", return_value="cargo"),
-                patch("fuckclassroom.course_selection.proxy.subprocess.run") as run,
+                patch(
+                    "fuckclassroom.course_selection.proxy.subprocess.Popen",
+                    return_value=_FakeBuildProcess(),
+                ) as popen,
             ):
-                run.return_value.returncode = 0
-                run.return_value.stdout = ""
-                run.return_value.stderr = ""
                 manager.build_runner()
 
-            command = run.call_args.args[0]
+            command = popen.call_args.args[0]
             self.assertIn("--bin", command)
             self.assertIn("hy2_serve", command)
             self.assertNotIn("--example", command)
             self.assertEqual(Path(command[command.index("--manifest-path") + 1]), config.hy2_source_dir / "Cargo.toml")
             self.assertEqual(config.hy2_runner_path.read_bytes(), b"runner")
+
+    def test_enabled_hy2_auto_builds_missing_runner_on_startup(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            config = _hy2_config(Path(directory))
+            built_name = "hy2_serve.exe" if config.hy2_runner_path.suffix == ".exe" else "hy2_serve"
+            built_runner = config.data_dir / "hy2" / "build" / "release" / built_name
+            built_runner.parent.mkdir(parents=True)
+            built_runner.write_bytes(b"auto-runner")
+
+            with (
+                patch("fuckclassroom.course_selection.proxy.shutil.which", return_value="cargo"),
+                patch(
+                    "fuckclassroom.course_selection.proxy.subprocess.Popen",
+                    return_value=_FakeBuildProcess(),
+                ) as popen,
+            ):
+                manager = Hy2ProxyManager(config)
+                self.assertTrue(manager.wait_for_auto_build(2.0))
+
+            self.assertTrue(popen.called)
+            self.assertEqual(config.hy2_runner_path.read_bytes(), b"auto-runner")
+            self.assertIn("已就绪", manager.get_status().message)
 
     def test_connect_bridge_tunnels_data(self) -> None:
         socks = _FakeSocksServer(("127.0.0.1", 0), _FakeSocksHandler)

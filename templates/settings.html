@@ -10,7 +10,6 @@
   <div class="page-head"><div><h1>设置</h1><p class="page-description">管理外观、课程偏好、文字提取、本地语音转写和 AI 服务配置。</p></div><div class="head-actions"><button class="btn primary" type="submit" form="settings-form">保存更改</button></div></div>
 
   {% if saved %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>设置已保存。</span></div>{% endif %}
-  {% if hy2_built %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>Hy2 代理组件已构建。</span></div>{% endif %}
   {% if cache_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>缓存已清除。</span></div>{% endif %}
   {% if credentials_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>统一桂电自动登录凭据已清除。</span></div>{% endif %}
   {% if login_state_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>课程录播与本科教务登录状态已清除。</span></div>{% endif %}
@@ -18,14 +17,6 @@
   {% if credential_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ credential_error }}</span></div>{% endif %}
   {% if login_state_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>登录状态清除失败：{{ login_state_error }}</span></div>{% endif %}
   {% if error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>{% endif %}
-
-  <div class="notice inline-task-status hidden" id="settings-task-status" role="status" aria-live="polite">
-    <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
-    <div class="inline-task-body">
-      <div class="inline-task-message" data-task-message>正在准备构建</div>
-      <div class="progress" aria-hidden="true"><span data-task-progress></span></div>
-    </div>
-  </div>
 
   <div class="settings-layout">
     <nav class="settings-nav"><a class="active" href="#appearance">外观</a><a href="#courses">课程与资源</a><a href="#auto-selection">定时选课</a><a href="#network">账号与网络</a><a href="#extraction">文字提取</a><a href="#ai">AI 服务</a><a href="#storage">缓存与存储</a></nav>
@@ -64,8 +55,8 @@
           <div><h2>账号与网络</h2><p>统一账号同时用于课程录播与本科教务，校外教务访问可使用内置 Hy2 通道。</p></div>
           <div class="fields">
             <label class="check-row"><input type="checkbox" name="hy2_enabled" {% if settings.hy2_enabled %}checked{% endif %}><span>启用 Hy2 教务代理</span></label>
-            <div class="detail-grid"><div class="detail-item"><label>运行状态</label><strong>{{ hy2_status.message }}</strong></div><div class="detail-item"><label>Rust 模块</label><strong>项目内置</strong></div></div>
-            <button class="btn" type="submit" form="hy2-build-form" data-task-submit><svg class="icon"><use href="/static/icons.svg#play"></use></svg>构建内置组件</button>
+            <div class="detail-grid"><div class="detail-item"><label>运行状态</label><strong>{{ hy2_status.message }}</strong></div><div class="detail-item"><label>Rust 模块</label><strong>启动时自动检查并构建</strong></div></div>
+            <p class="field-hint">Hy2 已启用时，应用启动会自动检查内置 Rust 组件；首次运行或源码更新后会在后台自动构建，不再需要手动编译。</p>
             <div class="field-row"><div class="field"><label for="selection_username">统一桂电账号</label><input class="input mono" id="selection_username" name="selection_username" autocomplete="username" value="{{ selection_credentials.username }}"></div><div class="field"><label for="selection_password">统一桂电密码</label><input class="input mono" id="selection_password" name="selection_password" type="password" autocomplete="new-password" placeholder="{% if selection_credentials.is_saved %}已加密保存，留空保持不变{% else %}未保存{% endif %}"></div></div>
             <div class="detail-grid"><div class="detail-item"><label>自动登录</label><strong>{{ selection_credentials.message }}</strong></div><div class="detail-item"><label>保护方式</label><strong>Windows DPAPI</strong></div></div>
             <button class="btn danger" type="submit" form="login-state-clear-form"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除登录状态</button>
@@ -119,7 +110,6 @@
           </div>
         </section>
       </form>
-      <form id="hy2-build-form" method="post" action="/settings/hy2/build" data-inline-task data-task-status="#settings-task-status" data-task-source-form="#settings-form" data-task-starting="正在启动 Hy2 代理构建" data-task-fallback="Hy2 代理构建失败" data-task-success="Hy2 代理组件已构建"></form>
       <form id="credential-clear-form" method="post" action="/settings/selection-credentials/clear" data-confirm="确认清除录播与教务共用的自动登录凭据？"></form>
       <form id="login-state-clear-form" method="post" action="/settings/login-state/clear" data-confirm="确认清除课程录播与本科教务的当前登录状态？已保存的自动登录凭据会保留。"></form>
 
