@@ -70,8 +70,18 @@ class Hy2ProxyManager:
             self.start_auto_build()
 
     def start_auto_build(self) -> bool:
-        """Start a background build when the bundled runner is missing or stale."""
-        if not self.config.hy2_enabled or not self._runner_needs_rebuild():
+        """Start one background build when the bundled runner is missing or stale.
+
+        A failed startup build is deliberately not retried by status polling. Otherwise
+        every settings-page refresh can erase the real Cargo error and reset the UI to
+        "00:00 / preparing" forever. A process restart or an explicit ensure/build call
+        may retry after the environment has been fixed.
+        """
+        if (
+            not self.config.hy2_enabled
+            or self._build_error
+            or not self._runner_needs_rebuild()
+        ):
             return False
         current = self._build_thread
         if current is not None and current.is_alive():
@@ -80,9 +90,8 @@ class Hy2ProxyManager:
             current = self._build_thread
             if current is not None and current.is_alive():
                 return False
-            if not self._runner_needs_rebuild():
+            if self._build_error or not self._runner_needs_rebuild():
                 return False
-            self._build_error = ""
             self._build_detail = "正在准备 Cargo 构建"
             self._build_started_at = time.monotonic()
             thread = threading.Thread(
@@ -119,6 +128,8 @@ class Hy2ProxyManager:
                 self._build_started_at = time.monotonic()
             if not self._build_detail:
                 self._build_detail = "正在准备 Cargo 构建"
+            # An explicit attempt is a real retry, so clear the previous failure while it runs.
+            self._build_error = ""
             try:
                 self._compile_runner(progress)
             except Hy2ProxyError as exc:
@@ -126,6 +137,14 @@ class Hy2ProxyManager:
                 self._build_detail = ""
                 self._build_started_at = None
                 raise
+            except Exception as exc:
+                wrapped = Hy2ProxyError(
+                    f"Hy2 代理组件构建异常：{type(exc).__name__}: {exc}"
+                )
+                self._build_error = str(wrapped)
+                self._build_detail = ""
+                self._build_started_at = None
+                raise wrapped from exc
             self._build_error = ""
             self._build_detail = ""
             self._build_started_at = None
@@ -199,7 +218,12 @@ class Hy2ProxyManager:
         return "/settings?hy2_built=1"
 
     def get_status(self) -> Hy2ProxyStatus:
-        if self.config.hy2_enabled and self._runner_needs_rebuild():
+        # Status reads must not turn a completed failure into an endless retry loop.
+        if (
+            self.config.hy2_enabled
+            and not self._build_error
+            and self._runner_needs_rebuild()
+        ):
             self.start_auto_build()
         build_thread = self._build_thread
         building = bool(build_thread and build_thread.is_alive())
@@ -244,6 +268,11 @@ class Hy2ProxyManager:
         except Hy2ProxyError:
             # The error is stored by ensure_built and exposed through get_status().
             return
+        except Exception as exc:
+            # Last-resort protection for failures outside the normal build wrapper.
+            self._build_error = f"Hy2 自动构建线程异常：{type(exc).__name__}: {exc}"
+            self._build_detail = ""
+            self._build_started_at = None
 
     def _runner_needs_rebuild(self) -> bool:
         runner = self.config.hy2_runner_path
