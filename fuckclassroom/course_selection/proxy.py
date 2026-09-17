@@ -53,22 +53,81 @@ class Hy2ProxyManager:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self._lock = threading.RLock()
+        self._build_lock = threading.Lock()
+        self._build_thread: threading.Thread | None = None
         self._process: subprocess.Popen[str] | None = None
         self._bridge: _ConnectProxyServer | None = None
         self._bridge_thread: threading.Thread | None = None
         self._proxy_url = ""
         self._last_error = ""
+        self._build_error = ""
+        if self.config.hy2_enabled:
+            self.start_auto_build()
+
+    def start_auto_build(self) -> bool:
+        """Start a background build when the bundled runner is missing or stale."""
+        if not self.config.hy2_enabled or not self._runner_needs_rebuild():
+            return False
+        current = self._build_thread
+        if current is not None and current.is_alive():
+            return False
+        with self._build_lock:
+            current = self._build_thread
+            if current is not None and current.is_alive():
+                return False
+            if not self._runner_needs_rebuild():
+                return False
+            self._build_error = ""
+            thread = threading.Thread(
+                target=self._auto_build_worker,
+                name="hy2-auto-build",
+                daemon=True,
+            )
+            self._build_thread = thread
+            thread.start()
+            return True
+
+    def wait_for_auto_build(self, timeout_seconds: float | None = None) -> bool:
+        thread = self._build_thread
+        if thread is None:
+            return True
+        thread.join(timeout=None if timeout_seconds is None else max(0.0, timeout_seconds))
+        return not thread.is_alive()
+
+    def ensure_built(
+        self,
+        progress: ProgressCallback | None = None,
+        *,
+        force: bool = False,
+    ) -> bool:
+        """Ensure the bundled Rust runner exists and matches the checked-in source."""
+        with self._build_lock:
+            if not force and not self._runner_needs_rebuild():
+                self._build_error = ""
+                _report(progress, 100, "Hy2 代理组件已是最新版本")
+                return False
+            try:
+                self._compile_runner(progress)
+            except Hy2ProxyError as exc:
+                self._build_error = str(exc)
+                raise
+            self._build_error = ""
+            return True
 
     def ensure_started(self, timeout_seconds: float = 30.0) -> str:
         if not self.config.hy2_enabled:
             raise Hy2ProxyError("Hy2 代理尚未启用")
+
+        # A startup build may still be running. Waiting on _build_lock here makes the
+        # first Hy2 request join that build instead of failing with "尚未构建".
+        self.ensure_built()
         with self._lock:
             if self._is_running_locked():
                 return self._proxy_url
             self._stop_locked()
             runner = self.config.hy2_runner_path
             if not runner.is_file():
-                self._last_error = "代理组件尚未构建，请先在设置中构建 Hy2 代理"
+                self._last_error = "Hy2 代理组件自动构建未生成可执行文件"
                 raise Hy2ProxyError(self._last_error)
 
             output: queue.Queue[str | None] = queue.Queue()
@@ -110,6 +169,79 @@ class Hy2ProxyManager:
             return self._proxy_url
 
     def build_runner(self, progress: ProgressCallback | None = None) -> str:
+        """Force a rebuild. Kept for backward compatibility with the old endpoint."""
+        self.ensure_built(progress, force=True)
+        with self._lock:
+            self._stop_locked()
+        if self.config.hy2_enabled:
+            _report(progress, 82, "Hy2 代理组件已构建，正在启动连接")
+            self.ensure_started()
+            _report(progress, 100, "Hy2 代理已启动")
+        else:
+            _report(progress, 100, "Hy2 代理组件已准备好")
+        return "/settings?hy2_built=1"
+
+    def get_status(self) -> Hy2ProxyStatus:
+        if self.config.hy2_enabled and self._runner_needs_rebuild():
+            self.start_auto_build()
+        build_thread = self._build_thread
+        building = bool(build_thread and build_thread.is_alive())
+        with self._lock:
+            running = self._is_running_locked()
+            if running:
+                message = "Hy2 代理正在运行"
+            elif building:
+                message = "Hy2 代理组件正在自动构建"
+            elif self._build_error:
+                message = f"Hy2 代理自动构建失败：{self._build_error}"
+            elif not self.config.hy2_enabled:
+                message = "Hy2 代理未启用（启用后将自动构建）"
+            elif self._runner_needs_rebuild():
+                message = "Hy2 代理组件等待自动构建"
+            else:
+                message = "代理组件已就绪，将在访问本科教务时启动"
+            return Hy2ProxyStatus(
+                enabled=self.config.hy2_enabled,
+                running=running,
+                message=message,
+                proxy_url=self._proxy_url if running else "",
+                runner_path=str(self.config.hy2_runner_path),
+                source_dir=str(self.config.hy2_source_dir),
+            )
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stop_locked()
+
+    def _auto_build_worker(self) -> None:
+        try:
+            self.ensure_built()
+        except Hy2ProxyError:
+            # The error is stored by ensure_built and exposed through get_status().
+            return
+
+    def _runner_needs_rebuild(self) -> bool:
+        runner = self.config.hy2_runner_path
+        if not runner.is_file():
+            return True
+        try:
+            runner_mtime = runner.stat().st_mtime_ns
+        except OSError:
+            return True
+
+        source_dir = self.config.hy2_source_dir
+        tracked: list[Path] = [source_dir / "Cargo.toml"]
+        for name in ("Cargo.lock", "build.rs"):
+            candidate = source_dir / name
+            if candidate.is_file():
+                tracked.append(candidate)
+        tracked.extend(path for path in source_dir.rglob("*.rs") if path.is_file())
+        try:
+            return any(path.is_file() and path.stat().st_mtime_ns > runner_mtime for path in tracked)
+        except OSError:
+            return True
+
+    def _compile_runner(self, progress: ProgressCallback | None = None) -> None:
         source_dir = self.config.hy2_source_dir
         manifest = source_dir / "Cargo.toml"
         if not manifest.is_file():
@@ -158,41 +290,7 @@ class Hy2ProxyManager:
         runner = self.config.hy2_runner_path
         runner.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(built_runner, runner)
-        _report(progress, 78, "Hy2 代理组件已构建，正在启动连接")
-        with self._lock:
-            self._stop_locked()
-        if self.config.hy2_enabled:
-            self.ensure_started()
-            _report(progress, 100, "Hy2 代理已启动")
-        else:
-            _report(progress, 100, "Hy2 代理组件已准备好")
-        return "/settings?hy2_built=1"
-
-    def get_status(self) -> Hy2ProxyStatus:
-        with self._lock:
-            running = self._is_running_locked()
-            if running:
-                message = "Hy2 代理正在运行"
-            elif self._last_error:
-                message = self._last_error
-            elif not self.config.hy2_runner_path.is_file():
-                message = "代理组件尚未构建"
-            elif self.config.hy2_enabled:
-                message = "代理组件已就绪，将在访问本科教务时启动"
-            else:
-                message = "Hy2 代理未启用"
-            return Hy2ProxyStatus(
-                enabled=self.config.hy2_enabled,
-                running=running,
-                message=message,
-                proxy_url=self._proxy_url if running else "",
-                runner_path=str(self.config.hy2_runner_path),
-                source_dir=str(self.config.hy2_source_dir),
-            )
-
-    def stop(self) -> None:
-        with self._lock:
-            self._stop_locked()
+        _report(progress, 78, "Hy2 代理组件已构建")
 
     def _wait_for_endpoint(
         self,
@@ -336,6 +434,8 @@ def _socks5_connect(endpoint: _SocksEndpoint, host: str, port: int) -> socket.so
             if attempt < 2:
                 time.sleep(0.15 * (attempt + 1))
     raise Hy2ProxyError(f"Hy2 连接 {host}:{port} 失败：{last_error}") from last_error
+
+
 def _socks5_connect_once(endpoint: _SocksEndpoint, host: str, port: int) -> socket.socket:
     upstream = socket.create_connection(("127.0.0.1", endpoint.port), timeout=10)
     try:
