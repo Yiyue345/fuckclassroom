@@ -24,6 +24,8 @@ TRANS_EXPORT_PATH = "/personal/courseapi/vlabpassportapi/v1/account-profile/rcou
 LIVE_LIST_PATH = "/courseapi/v2/course-live/search-live-course-list"
 LIVE_INFO_PATH = "/courseapi/v3/portal-home-setting/get-sub-info"
 LIVE_PPT_PATH = "/pptnote/v1/schedule/search-ppt"
+_PPT_CACHE_META_SCHEMA = 1
+_PPT_PROVISIONAL_STATUSES = {"running", "pending", "processing", "queued", "waiting"}
 
 
 class ClassroomClientError(RuntimeError):
@@ -400,12 +402,15 @@ class ClassroomClient:
             / _safe_filename(lesson.title)
             / filename
         )
+        exists = path.exists()
+        if export_kind == "ppt" and exists:
+            exists = self._ppt_cache_is_reusable(course_id, lesson_id, path)
         return LessonExportTarget(
             kind=export_kind,
             filename=filename,
             path=path,
             content_type=content_type,
-            exists=path.exists(),
+            exists=exists,
         )
 
     def download_lesson_export(self, course_id: str, lesson_id: str, export_kind: str) -> ExportedFile:
@@ -439,6 +444,8 @@ class ClassroomClient:
 
         target.path.parent.mkdir(parents=True, exist_ok=True)
         target.path.write_bytes(content)
+        if export_kind == "ppt":
+            self._mark_ppt_cache_state(course_id, lesson_id, target.path)
         return ExportedFile(
             filename=target.filename,
             content=content,
@@ -451,6 +458,111 @@ class ClassroomClient:
             ),
             saved_path=target.path,
         )
+
+    def _ppt_cache_is_reusable(self, course_id: str, lesson_id: str, path: Path) -> bool:
+        meta = self._read_ppt_cache_meta(path)
+        if (
+            meta is not None
+            and meta.get("schema") == _PPT_CACHE_META_SCHEMA
+            and str(meta.get("course_id") or "") == str(course_id)
+            and str(meta.get("lesson_id") or "") == str(lesson_id)
+            and meta.get("provisional") is False
+        ):
+            return True
+
+        try:
+            provisional, status = self._current_ppt_cache_state(course_id, lesson_id)
+        except ClassroomClientError:
+            # Network/session failure must not throw away an otherwise usable local file.
+            # Keep the cache unfinalized so a later access retries the state check.
+            return True
+
+        if provisional:
+            self._write_ppt_cache_meta(
+                path,
+                course_id=course_id,
+                lesson_id=lesson_id,
+                provisional=True,
+                status=status,
+            )
+            return True
+
+        # Missing metadata is treated as a legacy cache. Once the platform reports
+        # that PPT generation is finished, force one refresh so an incomplete file
+        # downloaded during the live session cannot become a permanent cache hit.
+        return False
+
+    def _mark_ppt_cache_state(self, course_id: str, lesson_id: str, path: Path) -> None:
+        try:
+            provisional, status = self._current_ppt_cache_state(course_id, lesson_id)
+        except ClassroomClientError:
+            provisional, status = True, "unknown"
+        try:
+            self._write_ppt_cache_meta(
+                path,
+                course_id=course_id,
+                lesson_id=lesson_id,
+                provisional=provisional,
+                status=status,
+            )
+        except OSError:
+            # The PPT itself was downloaded successfully. Metadata failure should not
+            # make the export unusable; next access will simply validate it again.
+            pass
+
+    def _current_ppt_cache_state(self, course_id: str, lesson_id: str) -> tuple[bool, str]:
+        detail = self.refresh_course_detail(course_id)
+        lesson = next((item for item in detail.lessons if item.id == lesson_id), None)
+        if lesson is None:
+            raise ClassroomClientError("未找到指定课次")
+        resource = next((item for item in lesson.resources if item.kind == "ppt"), None)
+        if resource is None:
+            # If the platform temporarily stops advertising the export, do not
+            # invalidate a local PPT that may be the only usable copy.
+            return True, "unavailable"
+        status = str(resource.status or "").strip().lower()
+        if status:
+            return status in _PPT_PROVISIONAL_STATUSES, status
+        return lesson.is_live, "running" if lesson.is_live else "ready"
+
+    @staticmethod
+    def _ppt_cache_meta_path(path: Path) -> Path:
+        return path.with_suffix(path.suffix + ".meta.json")
+
+    def _read_ppt_cache_meta(self, path: Path) -> dict[str, Any] | None:
+        meta_path = self._ppt_cache_meta_path(path)
+        if not meta_path.is_file():
+            return None
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _write_ppt_cache_meta(
+        self,
+        path: Path,
+        *,
+        course_id: str,
+        lesson_id: str,
+        provisional: bool,
+        status: str,
+    ) -> None:
+        meta_path = self._ppt_cache_meta_path(path)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema": _PPT_CACHE_META_SCHEMA,
+            "course_id": str(course_id),
+            "lesson_id": str(lesson_id),
+            "provisional": bool(provisional),
+            "ppt_status": status,
+        }
+        temporary = meta_path.with_name(meta_path.name + ".tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(meta_path)
 
     def _get_json(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         url = self._absolute_url(path, params)
