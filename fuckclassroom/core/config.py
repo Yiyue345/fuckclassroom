@@ -189,7 +189,23 @@ class AppConfig:
     @property
     def hy2_runner_path(self) -> Path:
         runner_name = "hy2_serve.exe" if os.name == "nt" else "hy2_serve"
-        return self.data_dir / "hy2" / runner_name
+        runner_path = self.data_dir / "hy2" / runner_name
+
+        # Normal installations should not need a Rust toolchain. CI checks in a
+        # source-fingerprinted, SHA-256-verified runner for supported platforms.
+        # Keep an existing local Cargo output authoritative for developer builds so
+        # the legacy build/test path remains available as a fallback.
+        local_build = self.data_dir / "hy2" / "build" / "release" / runner_name
+        if not local_build.is_file():
+            try:
+                from ..course_selection.hy2_prebuilt import install_prebuilt_runner
+
+                install_prebuilt_runner(self.hy2_source_dir, runner_path)
+            except Exception:
+                # Unsupported platforms, missing/stale prebuilts, or a damaged
+                # package all fall back to Hy2ProxyManager's Cargo build path.
+                pass
+        return runner_path
 
     def _settings(self):
         return SettingsStore(self.data_dir / "settings.json").load()
