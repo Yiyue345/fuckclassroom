@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urljoin
+
 from fastapi import FastAPI, HTTPException
 
 from ..classroom import ClassroomClient, ClassroomClientError
@@ -10,6 +12,9 @@ from ..classroom.qr_scan import (
     analyze_qr_payload,
 )
 from ..core.config import AppConfig
+
+
+GUET_CHANGKE_BASE_URL = "https://courses.guet.edu.cn/"
 
 
 def register_qr_assistant_routes(app: FastAPI, config: AppConfig | None = None) -> None:
@@ -44,7 +49,12 @@ def register_qr_assistant_routes(app: FastAPI, config: AppConfig | None = None) 
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         unique_payloads = list(dict.fromkeys(decoded))
-        matches = [analyze_qr_payload(raw).to_dict() for raw in unique_payloads]
+        matches: list[dict[str, object]] = []
+        for raw in unique_payloads:
+            match = analyze_qr_payload(raw).to_dict()
+            if match["platform"] == "changke" and not match["action_url"] and raw.startswith("/"):
+                match["action_url"] = urljoin(GUET_CHANGKE_BASE_URL, raw)
+            matches.append(match)
         return {
             "slide_id": slide.id,
             "created_at": slide.created_at,
