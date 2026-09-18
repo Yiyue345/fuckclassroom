@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from http.cookiejar import Cookie, CookieJar
@@ -24,6 +26,9 @@ TRANS_EXPORT_PATH = "/personal/courseapi/vlabpassportapi/v1/account-profile/rcou
 LIVE_LIST_PATH = "/courseapi/v2/course-live/search-live-course-list"
 LIVE_INFO_PATH = "/courseapi/v3/portal-home-setting/get-sub-info"
 LIVE_PPT_PATH = "/pptnote/v1/schedule/search-ppt"
+_PPT_CACHE_META_SCHEMA = 3
+_PPT_PROVISIONAL_STATUSES = {"running", "pending", "processing", "queued", "waiting"}
+_PPT_ARCHIVE_RECHECK_SECONDS = 10 * 60
 
 
 class ClassroomClientError(RuntimeError):
@@ -300,45 +305,54 @@ class ClassroomClient:
         *,
         after_id: int = 0,
     ) -> list[LivePptSlide]:
-        payload = self._get_json(
-            LIVE_PPT_PATH,
-            {
-                "course_id": course_id,
-                "sub_id": lesson_id,
-                "page": "1",
-                "per_page": "500",
-            },
-        )
-        rows = payload.get("list") if isinstance(payload.get("list"), list) else []
         slides: list[LivePptSlide] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            slide_id = _to_int(row.get("id")) or 0
-            if slide_id <= after_id:
-                continue
-            raw_content = row.get("content")
-            try:
-                content = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(content, dict):
-                continue
-            image_url = str(content.get("pptimgurl") or "")
-            if not _is_allowed_classroom_asset(image_url, "/play/"):
-                continue
-            thumbnail_url = str(content.get("pptthumb") or "")
-            if thumbnail_url and not _is_allowed_classroom_asset(thumbnail_url, "/play/"):
-                thumbnail_url = ""
-            slides.append(
-                LivePptSlide(
-                    id=slide_id,
-                    image_url=image_url,
-                    thumbnail_url=thumbnail_url,
-                    created_at=str(content.get("created") or row.get("create_time") or ""),
-                    offset_seconds=_to_int(row.get("created_sec")) or 0,
-                )
+        seen_ids: set[int] = set()
+        page = 1
+        per_page = 100
+        while page <= 50:
+            payload = self._get_json(
+                LIVE_PPT_PATH,
+                {
+                    "course_id": course_id,
+                    "sub_id": lesson_id,
+                    "page": str(page),
+                    "per_page": str(per_page),
+                },
             )
+            rows = payload.get("list") if isinstance(payload.get("list"), list) else []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                slide_id = _to_int(row.get("id")) or 0
+                if slide_id <= after_id or slide_id in seen_ids:
+                    continue
+                raw_content = row.get("content")
+                try:
+                    content = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(content, dict):
+                    continue
+                image_url = str(content.get("pptimgurl") or "")
+                if not _is_allowed_classroom_asset(image_url, "/play/"):
+                    continue
+                thumbnail_url = str(content.get("pptthumb") or "")
+                if thumbnail_url and not _is_allowed_classroom_asset(thumbnail_url, "/play/"):
+                    thumbnail_url = ""
+                seen_ids.add(slide_id)
+                slides.append(
+                    LivePptSlide(
+                        id=slide_id,
+                        image_url=image_url,
+                        thumbnail_url=thumbnail_url,
+                        created_at=str(content.get("created") or row.get("create_time") or ""),
+                        offset_seconds=_to_int(row.get("created_sec")) or 0,
+                    )
+                )
+            total = _to_int(payload.get("total"))
+            if not rows or len(rows) < per_page or (total is not None and page * per_page >= total):
+                break
+            page += 1
         return sorted(slides, key=lambda slide: (slide.id, slide.offset_seconds))
 
     def get_live_playlist_url(self, course_id: str, lesson_id: str, quality: str) -> str:
@@ -400,12 +414,15 @@ class ClassroomClient:
             / _safe_filename(lesson.title)
             / filename
         )
+        exists = path.exists()
+        if export_kind == "ppt" and exists:
+            exists = self._ppt_cache_is_reusable(course_id, lesson_id, path)
         return LessonExportTarget(
             kind=export_kind,
             filename=filename,
             path=path,
             content_type=content_type,
-            exists=path.exists(),
+            exists=exists,
         )
 
     def download_lesson_export(self, course_id: str, lesson_id: str, export_kind: str) -> ExportedFile:
@@ -428,6 +445,7 @@ class ClassroomClient:
         content, response_type = self._get_bytes(
             path,
             {"course_id": course_id, "sub_id": lesson_id},
+            no_cache=export_kind == "ppt",
         )
         if content.lstrip().startswith(b"{"):
             try:
@@ -439,6 +457,8 @@ class ClassroomClient:
 
         target.path.parent.mkdir(parents=True, exist_ok=True)
         target.path.write_bytes(content)
+        if export_kind == "ppt":
+            self._mark_ppt_cache_state(course_id, lesson_id, target.path)
         return ExportedFile(
             filename=target.filename,
             content=content,
@@ -451,6 +471,167 @@ class ClassroomClient:
             ),
             saved_path=target.path,
         )
+
+    def _ppt_cache_is_reusable(self, course_id: str, lesson_id: str, path: Path) -> bool:
+        meta = self._read_ppt_cache_meta(path)
+        meta_matches = (
+            meta is not None
+            and meta.get("schema") == _PPT_CACHE_META_SCHEMA
+            and str(meta.get("course_id") or "") == str(course_id)
+            and str(meta.get("lesson_id") or "") == str(lesson_id)
+        )
+
+        # A recording-ready cache was verified against the uncached live list after
+        # the lesson had a recording. That state is stable enough to reuse directly.
+        if (
+            meta_matches
+            and meta.get("provisional") is False
+            and str(meta.get("ppt_status") or "") == "recording-ready"
+        ):
+            return True
+        if (
+            meta_matches
+            and str(meta.get("ppt_status") or "") == "archive-newer"
+            and self._ppt_cache_meta_is_recent(path)
+        ):
+            return True
+
+        try:
+            provisional, status = self._current_ppt_cache_state(course_id, lesson_id)
+        except ClassroomClientError:
+            # Network/session failure must not throw away an otherwise usable local file.
+            # Keep the cache unfinalized so a later access retries the state check.
+            return True
+
+        if provisional:
+            self._write_ppt_cache_meta(
+                path,
+                course_id=course_id,
+                lesson_id=lesson_id,
+                provisional=True,
+                status=status,
+            )
+            return True
+
+        if (
+            meta_matches
+            and meta.get("provisional") is False
+            and str(meta.get("ppt_status") or "") == status
+        ):
+            return True
+
+        # Legacy metadata, old schemas, provisional caches, and a changed final
+        # state all force one fresh export. This migrates PPTs that older versions
+        # incorrectly marked final while they still only contained live-session pages.
+        return False
+
+    def _mark_ppt_cache_state(self, course_id: str, lesson_id: str, path: Path) -> None:
+        try:
+            provisional, status = self._current_ppt_cache_state(course_id, lesson_id)
+        except ClassroomClientError:
+            provisional, status = True, "unknown"
+        if not provisional and status == "recording-ready":
+            try:
+                archive_count = len(self.list_live_ppt_slides(course_id, lesson_id))
+                export_count = _pptx_slide_count(path)
+            except (ClassroomClientError, OSError, zipfile.BadZipFile):
+                pass
+            else:
+                if archive_count > export_count:
+                    provisional, status = True, "archive-newer"
+        try:
+            self._write_ppt_cache_meta(
+                path,
+                course_id=course_id,
+                lesson_id=lesson_id,
+                provisional=provisional,
+                status=status,
+            )
+        except OSError:
+            # The PPT itself was downloaded successfully. Metadata failure should not
+            # make the export unusable; next access will simply validate it again.
+            pass
+
+    def _current_ppt_cache_state(self, course_id: str, lesson_id: str) -> tuple[bool, str]:
+        detail = self.refresh_course_detail(course_id)
+        lesson = next((item for item in detail.lessons if item.id == lesson_id), None)
+        if lesson is None:
+            raise ClassroomClientError("未找到指定课次")
+
+        # api_pass.ppt_status may stay "running" after a lesson has already become
+        # a recording. The uncached live-list is the authoritative live signal.
+        try:
+            live_ids = {
+                item.lesson_id
+                for item in self.list_current_live_lessons([detail.course])
+            }
+        except ClassroomClientError:
+            live_ids = None
+        if live_ids is not None:
+            if lesson_id in live_ids:
+                return True, "live"
+            has_recording = any(
+                item.kind == "video" and item.is_downloadable
+                for item in lesson.resources
+            )
+            if has_recording:
+                return False, "recording-ready"
+
+        resource = next((item for item in lesson.resources if item.kind == "ppt"), None)
+        if resource is None:
+            # If the platform temporarily stops advertising the export, do not
+            # invalidate a local PPT that may be the only usable copy.
+            return True, "unavailable"
+        status = str(resource.status or "").strip().lower()
+        if status:
+            return status in _PPT_PROVISIONAL_STATUSES, status
+        return lesson.is_live, "running" if lesson.is_live else "ready"
+
+    @staticmethod
+    def _ppt_cache_meta_path(path: Path) -> Path:
+        return path.with_suffix(path.suffix + ".meta.json")
+
+    def _read_ppt_cache_meta(self, path: Path) -> dict[str, Any] | None:
+        meta_path = self._ppt_cache_meta_path(path)
+        if not meta_path.is_file():
+            return None
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _ppt_cache_meta_is_recent(self, path: Path) -> bool:
+        try:
+            age = time.time() - self._ppt_cache_meta_path(path).stat().st_mtime
+        except OSError:
+            return False
+        return 0 <= age < _PPT_ARCHIVE_RECHECK_SECONDS
+
+    def _write_ppt_cache_meta(
+        self,
+        path: Path,
+        *,
+        course_id: str,
+        lesson_id: str,
+        provisional: bool,
+        status: str,
+    ) -> None:
+        meta_path = self._ppt_cache_meta_path(path)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema": _PPT_CACHE_META_SCHEMA,
+            "course_id": str(course_id),
+            "lesson_id": str(lesson_id),
+            "provisional": bool(provisional),
+            "ppt_status": status,
+        }
+        temporary = meta_path.with_name(meta_path.name + ".tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(meta_path)
 
     def _get_json(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         url = self._absolute_url(path, params)
@@ -495,9 +676,19 @@ class ClassroomClient:
         self.cache.set(cache_name, payload)
         return payload
 
-    def _get_bytes(self, path: str, params: dict[str, str]) -> tuple[bytes, str]:
+    def _get_bytes(
+        self,
+        path: str,
+        params: dict[str, str],
+        *,
+        no_cache: bool = False,
+    ) -> tuple[bytes, str]:
         url = self._absolute_url(path, params)
-        request = Request(url, headers=_request_headers("*/*"))
+        headers = _request_headers("*/*")
+        if no_cache:
+            headers["Cache-Control"] = "no-cache"
+            headers["Pragma"] = "no-cache"
+        request = Request(url, headers=headers)
         opener = build_opener(HTTPCookieProcessor(self._cookie_jar()))
         try:
             with opener.open(request, timeout=60) as response:
@@ -740,6 +931,15 @@ def _resource_title(kind: str, file_type: str) -> str:
 def _safe_filename(value: str) -> str:
     cleaned = "".join(char if char not in r'\/:*?"<>|' else "_" for char in value).strip()
     return cleaned[:80] or "未命名"
+
+
+def _pptx_slide_count(path: Path) -> int:
+    with zipfile.ZipFile(path) as archive:
+        return sum(
+            1
+            for name in archive.namelist()
+            if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)
+        )
 
 
 def _export_kind_info(export_kind: str) -> tuple[str, str, str]:

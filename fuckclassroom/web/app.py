@@ -111,6 +111,27 @@ def _run_for_result(operation: Callable[[], object], result_url: str) -> str:
     return result_url
 
 
+def _reconcile_live_status(detail: CourseDetail, live_ids: set[str]) -> CourseDetail:
+    """Make the uncached live-list authoritative over stale api_pass flags."""
+    lessons = []
+    for lesson in detail.lessons:
+        if lesson.id in live_ids:
+            lessons.append(replace(lesson, is_live=True, status_label="直播中"))
+            continue
+        if not lesson.is_live:
+            lessons.append(lesson)
+            continue
+        has_recording = any(
+            resource.kind == "video" and resource.is_downloadable
+            for resource in lesson.resources
+        )
+        status_label = lesson.status_label
+        if status_label == "直播中":
+            status_label = "录播已生成" if has_recording else ""
+        lessons.append(replace(lesson, is_live=False, status_label=status_label))
+    return CourseDetail(course=detail.course, lessons=lessons)
+
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
     app_config = config or AppConfig()
     classroom_client = ClassroomClient(app_config)
@@ -153,7 +174,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return auth_service.verify_saved_session(auto_relogin=True)
 
     def enrich_live_status(detail: CourseDetail) -> CourseDetail:
-        """Overlay the uncached live-list state onto cached course-detail rows."""
+        """Overlay the uncached live-list state onto course-detail rows."""
         try:
             live_ids = {
                 item.lesson_id
@@ -161,17 +182,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             }
         except ClassroomClientError:
             return detail
-        if not live_ids:
-            return detail
-        return CourseDetail(
-            course=detail.course,
-            lessons=[
-                replace(lesson, is_live=True, status_label="直播中")
-                if lesson.id in live_ids
-                else lesson
-                for lesson in detail.lessons
-            ],
-        )
+        return _reconcile_live_status(detail, live_ids)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -515,7 +526,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return Response(
             content=exported.content,
             media_type=exported.content_type,
-            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quoted_name}"},
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quoted_name}",
+                "Cache-Control": "no-store",
+            },
         )
 
     @app.get("/downloads", response_class=HTMLResponse)
@@ -1241,6 +1255,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get("/api/courses/{course_id}/lessons/{lesson_id}/ppt/slides")
     @app.get("/api/courses/{course_id}/lessons/{lesson_id}/live/ppt")
     def api_live_ppt(course_id: str, lesson_id: str, after_id: int = 0) -> dict[str, object]:
         try:
@@ -1266,6 +1281,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 }
                 for slide in slides
             ],
+            "total": len(slides),
             "last_id": max((slide.id for slide in slides), default=max(0, after_id)),
         }
 

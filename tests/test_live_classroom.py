@@ -9,10 +9,12 @@ from fuckclassroom.classroom.client import (
     ClassroomClient,
     ClassroomClientError,
     Course,
+    CourseDetail,
     is_allowed_live_media_url,
     rewrite_live_playlist,
 )
 from fuckclassroom.core.config import AppConfig
+from fuckclassroom.web.app import _reconcile_live_status
 
 
 class LiveClassroomTests(unittest.TestCase):
@@ -60,6 +62,32 @@ class LiveClassroomTests(unittest.TestCase):
 
         self.assertTrue(lesson.is_live)
         self.assertEqual(lesson.status_label, "直播中")
+
+    def test_live_list_clears_stale_running_flag_after_recording_exists(self) -> None:
+        lesson = self.client._lesson_from_row(
+            {
+                "id": "lesson-8",
+                "title": "二叉树",
+                "content": {
+                    "api_pass": {"ppt": "token", "ppt_status": "running"},
+                    "file_list": [
+                        {
+                            "file_name": "https://classroom.guet.edu.cn/play/recording.mp4",
+                            "file_type": "mp4",
+                        }
+                    ],
+                },
+            },
+            "course-1",
+        )
+        course = Course("course-1", "数据结构", "张老师", "", "", "", "")
+        reconciled = _reconcile_live_status(
+            CourseDetail(course=course, lessons=[lesson]),
+            set(),
+        )
+
+        self.assertFalse(reconciled.lessons[0].is_live)
+        self.assertEqual(reconciled.lessons[0].status_label, "录播已生成")
 
     def test_live_info_exposes_available_qualities(self) -> None:
         self.client._get_json = lambda _path, _params=None: {  # type: ignore[method-assign]
@@ -114,6 +142,33 @@ class LiveClassroomTests(unittest.TestCase):
         self.assertEqual([slide.id for slide in slides], [11])
         self.assertEqual(slides[0].offset_seconds, 23)
 
+    def test_live_ppt_rows_follow_platform_pagination(self) -> None:
+        requested_pages: list[int] = []
+
+        def get_json(_path, params=None):
+            page = int(params["page"])
+            requested_pages.append(page)
+            start = (page - 1) * 100 + 1
+            remaining = max(0, 131 - start + 1)
+            rows = [
+                {
+                    "id": index,
+                    "content": json.dumps(
+                        {"pptimgurl": f"https://classroom.guet.edu.cn/play/ppt/{index}.jpg"}
+                    ),
+                }
+                for index in range(start, start + min(100, remaining))
+            ]
+            return {"code": 0, "total": 131, "list": rows}
+
+        self.client._get_json = get_json  # type: ignore[method-assign]
+
+        slides = self.client.list_live_ppt_slides("course-1", "lesson-8")
+
+        self.assertEqual(len(slides), 131)
+        self.assertEqual(requested_pages, [1, 2])
+        self.assertEqual(slides[-1].id, 131)
+
     def test_hls_rewrite_only_allows_platform_media(self) -> None:
         source = "https://classroom.guet.edu.cn/pgc/live/master.m3u8?auth_key=x"
         output = rewrite_live_playlist(
@@ -139,10 +194,12 @@ class LiveClassroomTests(unittest.TestCase):
         self.assertIn("live-now-icon", overview)
         self.assertIn("app.css?v=20260917-2", base)
         self.assertIn("data-live-info-url", detail)
+        self.assertIn("data-ppt-slides-url", detail)
         self.assertIn("进入直播", detail)
         self.assertIn("window.Hls", script)
         self.assertIn("window.setTimeout(poll, 3000)", script)
         self.assertIn('pptStage.style.aspectRatio', script)
+        self.assertIn("snapshotSlides.length > exportSlides.length", script)
         self.assertIn("aspect-ratio: 16 / 9", styles)
 
 
