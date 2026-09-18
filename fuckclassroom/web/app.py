@@ -255,6 +255,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             hy2_proxy.stop()
 
     app = FastAPI(title="Fuck Classroom", lifespan=lifespan)
+    app.state.classroom_client = classroom_client
+    app.state.ketangpai_client = ketangpai_client
     app.state.get_classroom_session_status = auth_service.get_session_status
     app.state.get_selection_session_status = course_selection.get_session_status
     app.state.semester_sync = semester_sync

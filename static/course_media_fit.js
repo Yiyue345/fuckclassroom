@@ -178,7 +178,7 @@
   rebuildThumbnails();
 
   const qrAssistantScript = document.createElement('script');
-  qrAssistantScript.src = '/static/qr_assistant.js?v=20260917-1';
+  qrAssistantScript.src = '/static/qr_assistant.js?v=20260918-3';
   qrAssistantScript.defer = true;
   document.head.append(qrAssistantScript);
 })();
