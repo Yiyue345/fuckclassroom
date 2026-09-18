@@ -408,7 +408,7 @@
     try {
       let slides = pptCache.get(url);
       if (!slides) {
-        const response = await fetch(url, { credentials: "same-origin" });
+        const response = await fetch(url, { credentials: "same-origin", cache: "no-store" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         slides = await parsePpt(await response.arrayBuffer());
         pptCache.set(url, slides);

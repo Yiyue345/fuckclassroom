@@ -20,7 +20,7 @@ _PPT_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presen
 
 
 class PptExportCacheRefreshTests(unittest.TestCase):
-    def _detail(self, status: str) -> CourseDetail:
+    def _detail(self, status: str, *, with_recording: bool = False) -> CourseDetail:
         course = Course(
             id="course-1",
             title="测试课程",
@@ -44,7 +44,18 @@ class PptExportCacheRefreshTests(unittest.TestCase):
                     title="下载课件",
                     url="https://classroom.guet.edu.cn/ppt",
                     status=status,
-                )
+                ),
+                *(
+                    [
+                        LessonResource(
+                            kind="video",
+                            title="课堂录像",
+                            url="https://classroom.guet.edu.cn/recording.mp4",
+                        )
+                    ]
+                    if with_recording
+                    else []
+                ),
             ],
             is_live=status == "running",
         )
@@ -82,6 +93,36 @@ class PptExportCacheRefreshTests(unittest.TestCase):
             )
             self.assertFalse(metadata["provisional"])
             self.assertEqual(metadata["ppt_status"], "finished")
+
+    def test_recording_overrides_stale_running_ppt_status(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            config = AppConfig(data_dir=Path(directory))
+            client = ClassroomClient(config)
+            ppt_path = self._ppt_path(config)
+            ppt_path.parent.mkdir(parents=True, exist_ok=True)
+            ppt_path.write_bytes(b"partial-live-ppt")
+
+            stale_detail = self._detail("running", with_recording=True)
+            with (
+                patch.object(client, "get_course_detail", return_value=stale_detail),
+                patch.object(client, "refresh_course_detail", return_value=stale_detail),
+                patch.object(client, "list_current_live_lessons", return_value=[]),
+                patch.object(
+                    client,
+                    "_get_bytes",
+                    return_value=(b"complete-recording-ppt", _PPT_MIME),
+                ) as download,
+            ):
+                exported = client.download_lesson_export("course-1", "lesson-1", "ppt")
+
+            self.assertFalse(exported.from_cache)
+            self.assertEqual(ppt_path.read_bytes(), b"complete-recording-ppt")
+            self.assertTrue(download.called)
+            metadata = json.loads(
+                ppt_path.with_suffix(".pptx.meta.json").read_text(encoding="utf-8")
+            )
+            self.assertFalse(metadata["provisional"])
+            self.assertEqual(metadata["ppt_status"], "recording-ready")
 
     def test_live_ppt_cache_stays_provisional_and_is_reused_until_live_ends(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:

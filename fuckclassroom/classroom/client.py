@@ -515,6 +515,26 @@ class ClassroomClient:
         lesson = next((item for item in detail.lessons if item.id == lesson_id), None)
         if lesson is None:
             raise ClassroomClientError("未找到指定课次")
+
+        # api_pass.ppt_status may stay "running" after a lesson has already become
+        # a recording. The uncached live-list is the authoritative live signal.
+        try:
+            live_ids = {
+                item.lesson_id
+                for item in self.list_current_live_lessons([detail.course])
+            }
+        except ClassroomClientError:
+            live_ids = None
+        if live_ids is not None:
+            if lesson_id in live_ids:
+                return True, "live"
+            has_recording = any(
+                item.kind == "video" and item.is_downloadable
+                for item in lesson.resources
+            )
+            if has_recording:
+                return False, "recording-ready"
+
         resource = next((item for item in lesson.resources if item.kind == "ppt"), None)
         if resource is None:
             # If the platform temporarily stops advertising the export, do not

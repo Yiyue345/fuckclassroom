@@ -13,6 +13,7 @@ from fuckclassroom.classroom.client import (
     rewrite_live_playlist,
 )
 from fuckclassroom.core.config import AppConfig
+from fuckclassroom.web.app import _reconcile_live_status
 
 
 class LiveClassroomTests(unittest.TestCase):
@@ -60,6 +61,32 @@ class LiveClassroomTests(unittest.TestCase):
 
         self.assertTrue(lesson.is_live)
         self.assertEqual(lesson.status_label, "直播中")
+
+    def test_live_list_clears_stale_running_flag_after_recording_exists(self) -> None:
+        lesson = self.client._lesson_from_row(
+            {
+                "id": "lesson-8",
+                "title": "二叉树",
+                "content": {
+                    "api_pass": {"ppt": "token", "ppt_status": "running"},
+                    "file_list": [
+                        {
+                            "file_name": "https://classroom.guet.edu.cn/play/recording.mp4",
+                            "file_type": "mp4",
+                        }
+                    ],
+                },
+            },
+            "course-1",
+        )
+        course = Course("course-1", "数据结构", "张老师", "", "", "", "")
+        reconciled = _reconcile_live_status(
+            CourseDetail(course=course, lessons=[lesson]),
+            set(),
+        )
+
+        self.assertFalse(reconciled.lessons[0].is_live)
+        self.assertEqual(reconciled.lessons[0].status_label, "录播已生成")
 
     def test_live_info_exposes_available_qualities(self) -> None:
         self.client._get_json = lambda _path, _params=None: {  # type: ignore[method-assign]
