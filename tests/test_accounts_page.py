@@ -38,10 +38,13 @@ class AccountsPageTests(unittest.TestCase):
             self.assertEqual(response.template.name, "accounts.html")
             self.assertIn('id="classroom-session"', body)
             self.assertIn('id="selection-session"', body)
+            self.assertIn('id="ketangpai-session"', body)
             self.assertIn('data-sidebar-session="classroom"', body)
             self.assertIn('data-sidebar-session="selection"', body)
             self.assertIn('action="/auth/start"', body)
             self.assertIn('action="/selection/login"', body)
+            self.assertIn('action="/accounts/ketangpai/login"', body)
+            self.assertIn('action="/accounts/ketangpai/sms/start"', body)
 
     def test_legacy_selection_session_page_redirects_to_accounts(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
