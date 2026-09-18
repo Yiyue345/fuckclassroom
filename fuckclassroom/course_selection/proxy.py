@@ -30,6 +30,10 @@ class Hy2ProxyError(RuntimeError):
     pass
 
 
+class _Hy2ApplicationControlBlocked(Hy2ProxyError):
+    pass
+
+
 @dataclass(frozen=True)
 class Hy2ProxyStatus:
     enabled: bool
@@ -154,20 +158,47 @@ class Hy2ProxyManager:
         if not self.config.hy2_enabled:
             raise Hy2ProxyError("Hy2 代理尚未启用")
 
-        # A startup build may still be running. Waiting on _build_lock here makes the
-        # first Hy2 request join that build instead of failing with "尚未构建".
+        # Normal path: use the verified CI-built runner. If Windows Smart App
+        # Control rejects that unsigned executable (WinError/os error 4551), rebuild
+        # the same Rust source locally and retry once. Rust is therefore only needed
+        # as a Windows fallback, not for normal installations.
         self.ensure_built()
+        try:
+            return self._start_runner_once(timeout_seconds)
+        except _Hy2ApplicationControlBlocked as blocked:
+            self._build_detail = "预编译 Hy2 被 Windows 应用控制拦截，正在尝试本地 Rust 构建"
+            try:
+                self.ensure_built(force=True)
+            except Hy2ProxyError as build_exc:
+                self._last_error = (
+                    f"{blocked}；自动切换到本地 Rust 构建也失败：{build_exc}。"
+                    "正常安装不需要 Rust；仅此兜底路径需要 Cargo。"
+                )
+                raise Hy2ProxyError(self._last_error) from build_exc
+
+            try:
+                return self._start_runner_once(timeout_seconds)
+            except _Hy2ApplicationControlBlocked as local_blocked:
+                self._last_error = (
+                    "Windows 应用控制同时阻止了预编译和本地构建的 Hy2 runner。"
+                    "程序不会自动关闭 Windows 安全功能；请关闭 Hy2，改用公网教务或 WebVPN。"
+                )
+                raise Hy2ProxyError(self._last_error) from local_blocked
+
+    def _start_runner_once(self, timeout_seconds: float) -> str:
         with self._lock:
             if self._is_running_locked():
                 return self._proxy_url
             self._stop_locked()
             runner = self.config.hy2_runner_path
             if not runner.is_file():
-                self._last_error = "Hy2 代理组件自动构建未生成可执行文件"
+                self._last_error = "Hy2 代理组件未生成可执行文件"
                 raise Hy2ProxyError(self._last_error)
 
             output: queue.Queue[str | None] = queue.Queue()
-            creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+            creation_flags = (
+                subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+            )
             try:
                 process = subprocess.Popen(
                     [str(runner)],
@@ -182,11 +213,21 @@ class Hy2ProxyManager:
                     creationflags=creation_flags,
                 )
             except OSError as exc:
+                if _is_windows_application_control_error(exc):
+                    self._last_error = (
+                        "Windows 应用控制阻止了 Hy2 代理组件"
+                        "（WinError/os error 4551，通常来自 Smart App Control）"
+                    )
+                    raise _Hy2ApplicationControlBlocked(self._last_error) from exc
                 self._last_error = f"Hy2 代理组件启动失败：{exc}"
                 raise Hy2ProxyError(self._last_error) from exc
 
             self._process = process
-            reader = threading.Thread(target=_read_process_lines, args=(process, output), daemon=True)
+            reader = threading.Thread(
+                target=_read_process_lines,
+                args=(process, output),
+                daemon=True,
+            )
             reader.start()
             endpoint = self._wait_for_endpoint(process, output, timeout_seconds)
             try:
@@ -285,7 +326,7 @@ class Hy2ProxyManager:
 
         source_dir = self.config.hy2_source_dir
         tracked: list[Path] = [source_dir / "Cargo.toml"]
-        for name in ("Cargo.lock", "build.rs"):
+        for name in ("Cargo.lock", "build.rs", "rust-toolchain.toml", "rust-toolchain"):
             candidate = source_dir / name
             if candidate.is_file():
                 tracked.append(candidate)
@@ -302,7 +343,10 @@ class Hy2ProxyManager:
             raise Hy2ProxyError(f"没有找到内置 Hy2 Rust 工程：{manifest}")
         cargo = shutil.which("cargo")
         if not cargo:
-            raise Hy2ProxyError("没有找到 Cargo，请先安装 Rust 工具链")
+            raise Hy2ProxyError(
+                "没有找到 Cargo。正常使用预编译 Hy2 不需要 Rust；"
+                "当前只有本地构建兜底需要 rustup/Cargo，项目会按 rust-toolchain.toml 使用 Rust 1.96.0"
+            )
 
         target_dir = self.config.data_dir / "hy2" / "build"
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -605,6 +649,23 @@ def _relay(left: socket.socket, right: socket.socket) -> None:
             if not data:
                 return
             target.sendall(data)
+
+
+def _is_windows_application_control_error(exc: OSError) -> bool:
+    code = getattr(exc, "winerror", None)
+    if code is None:
+        code = getattr(exc, "errno", None)
+    if code == 4551:
+        return True
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "application control policy",
+            "smart app control",
+            "应用程序控制策略",
+        )
+    )
 
 
 def _last_nonempty_line(content: str) -> str:

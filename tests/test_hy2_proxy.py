@@ -20,6 +20,7 @@ from fuckclassroom.course_selection.proxy import (
     Hy2ProxyManager,
     _ConnectProxyServer,
     _SocksEndpoint,
+    _is_windows_application_control_error,
     _parse_authority,
 )
 
@@ -97,6 +98,30 @@ class _FakeBuildProcess:
 
     def kill(self) -> None:
         self.done = True
+
+
+class _FakeRunnerProcess:
+    def __init__(self) -> None:
+        self.stdout = iter(["RUST_HY2_SOCKS port=19091 user=user pass=pass\n"])
+        self.stopped = False
+        self.returncode = None
+
+    def poll(self):
+        return 0 if self.stopped else None
+
+    def terminate(self) -> None:
+        self.stopped = True
+        self.returncode = 0
+
+    def wait(self, timeout=None):
+        del timeout
+        self.stopped = True
+        self.returncode = 0
+        return 0
+
+    def kill(self) -> None:
+        self.stopped = True
+        self.returncode = 0
 
 
 class _FailingOpener:
@@ -199,6 +224,38 @@ class Hy2ProxyTests(unittest.TestCase):
             self.assertTrue(popen.called)
             self.assertEqual(config.hy2_runner_path.read_bytes(), b"auto-runner")
             self.assertIn("已就绪", manager.get_status().message)
+
+    def test_application_control_error_recognizes_os_error_4551(self) -> None:
+        self.assertTrue(
+            _is_windows_application_control_error(
+                OSError(4551, "Application Control policy has blocked this file")
+            )
+        )
+        self.assertFalse(_is_windows_application_control_error(OSError(2, "not found")))
+
+    def test_smart_app_control_block_falls_back_to_local_cargo_build(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            config = _hy2_config(Path(directory))
+            self.assertTrue(config.hy2_runner_path.is_file())
+            manager = Hy2ProxyManager(config)
+            blocked = OSError(4551, "Application Control policy has blocked this file")
+            local_runner = _FakeRunnerProcess()
+
+            with (
+                patch.object(manager, "ensure_built") as ensure_built,
+                patch(
+                    "fuckclassroom.course_selection.proxy.subprocess.Popen",
+                    side_effect=[blocked, local_runner],
+                ),
+            ):
+                proxy_url = manager.ensure_started(timeout_seconds=1.0)
+
+            try:
+                self.assertTrue(proxy_url.startswith("http://127.0.0.1:"))
+                self.assertEqual(ensure_built.call_count, 2)
+                self.assertEqual(ensure_built.call_args_list[1].kwargs, {"force": True})
+            finally:
+                manager.stop()
 
     def test_connect_bridge_tunnels_data(self) -> None:
         socks = _FakeSocksServer(("127.0.0.1", 0), _FakeSocksHandler)
