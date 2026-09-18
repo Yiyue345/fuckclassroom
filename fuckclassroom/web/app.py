@@ -1255,6 +1255,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get("/api/courses/{course_id}/lessons/{lesson_id}/ppt/slides")
     @app.get("/api/courses/{course_id}/lessons/{lesson_id}/live/ppt")
     def api_live_ppt(course_id: str, lesson_id: str, after_id: int = 0) -> dict[str, object]:
         try:
@@ -1280,6 +1281,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 }
                 for slide in slides
             ],
+            "total": len(slides),
             "last_id": max((slide.id for slide in slides), default=max(0, after_id)),
         }
 

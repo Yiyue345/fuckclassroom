@@ -79,7 +79,7 @@
 
         <section class="course-media-card course-ppt-card" data-ppt-card>
           <header class="course-media-card-header">
-            <div class="course-media-card-title"><svg class="icon"><use href="/static/icons.svg#presentation"></use></svg><h2>PPT 课件</h2></div>
+            <div class="course-media-card-title"><svg class="icon"><use href="/static/icons.svg#presentation"></use></svg><h2>PPT 课件</h2><span class="status blue hidden" data-ppt-source></span></div>
             <div class="course-media-card-actions">
               <a class="btn small disabled" href="#" aria-disabled="true" tabindex="-1" data-ppt-download><svg class="icon small"><use href="/static/icons.svg#download"></use></svg>下载原文件</a>
               <button class="btn small" type="button" disabled data-ppt-fullscreen><svg class="icon small"><use href="/static/icons.svg#presentation"></use></svg>全屏查看</button>
@@ -116,7 +116,7 @@
             {% if resource.kind == "video" and resource.is_downloadable and not media.video_url %}{% set media.video_url = resource.url %}{% endif %}
             {% if resource.kind == "ppt" and resource.is_downloadable and not media.ppt_url %}{% set media.ppt_url = "/courses/" ~ detail.course.id ~ "/lessons/" ~ lesson.id ~ "/download/ppt" %}{% endif %}
           {% endfor %}
-          <article class="lesson-row course-lesson-row{% if lesson.is_live %} is-live{% endif %}" tabindex="0" aria-current="false" data-lesson-row data-lesson-index="{{ loop.index }}" data-lesson-id="{{ lesson.id }}" data-lesson-title="{{ lesson.title }}" data-video-url="{{ media.video_url }}" data-ppt-url="{{ media.ppt_url }}" data-live="{{ 'true' if lesson.is_live else 'false' }}" data-live-info-url="/api/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/live" data-live-ppt-url="/api/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/live/ppt">
+          <article class="lesson-row course-lesson-row{% if lesson.is_live %} is-live{% endif %}" tabindex="0" aria-current="false" data-lesson-row data-lesson-index="{{ loop.index }}" data-lesson-id="{{ lesson.id }}" data-lesson-title="{{ lesson.title }}" data-video-url="{{ media.video_url }}" data-ppt-url="{{ media.ppt_url }}" data-live="{{ 'true' if lesson.is_live else 'false' }}" data-live-info-url="/api/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/live" data-ppt-slides-url="/api/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/ppt/slides">
             <div class="lesson-number">{{ "%02d"|format(loop.index) }}</div>
             <div><div class="row-title">{{ lesson.title }}</div><div class="row-sub">{{ lesson.start_at or "时间未公布" }}{% if lesson.lecturer or detail.course.teacher %} · {{ lesson.lecturer or detail.course.teacher }}{% endif %}{% if lesson.room_name %} · {{ lesson.room_name }}{% endif %}{% if lesson.duration_seconds %} · {{ lesson.duration_seconds // 60 }} 分钟{% endif %}</div></div>
             <div class="resource-line">
@@ -143,4 +143,4 @@
   {% endif %}
 {% endblock %}
 
-{% block scripts %}<script src="/static/vendor/hls.min.js?v=1.7.3"></script><script src="/static/course_media.js?v=20260918-2"></script><script src="/static/course_media_fit.js?v=20260917-2"></script><script src="/static/task_detail_progress.js?v=20260916-1"></script>{% endblock %}
+{% block scripts %}<script src="/static/vendor/hls.min.js?v=1.7.3"></script><script src="/static/course_media.js?v=20260918-3"></script><script src="/static/course_media_fit.js?v=20260917-2"></script><script src="/static/task_detail_progress.js?v=20260916-1"></script>{% endblock %}

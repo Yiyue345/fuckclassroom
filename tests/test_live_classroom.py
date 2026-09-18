@@ -142,6 +142,33 @@ class LiveClassroomTests(unittest.TestCase):
         self.assertEqual([slide.id for slide in slides], [11])
         self.assertEqual(slides[0].offset_seconds, 23)
 
+    def test_live_ppt_rows_follow_platform_pagination(self) -> None:
+        requested_pages: list[int] = []
+
+        def get_json(_path, params=None):
+            page = int(params["page"])
+            requested_pages.append(page)
+            start = (page - 1) * 100 + 1
+            remaining = max(0, 131 - start + 1)
+            rows = [
+                {
+                    "id": index,
+                    "content": json.dumps(
+                        {"pptimgurl": f"https://classroom.guet.edu.cn/play/ppt/{index}.jpg"}
+                    ),
+                }
+                for index in range(start, start + min(100, remaining))
+            ]
+            return {"code": 0, "total": 131, "list": rows}
+
+        self.client._get_json = get_json  # type: ignore[method-assign]
+
+        slides = self.client.list_live_ppt_slides("course-1", "lesson-8")
+
+        self.assertEqual(len(slides), 131)
+        self.assertEqual(requested_pages, [1, 2])
+        self.assertEqual(slides[-1].id, 131)
+
     def test_hls_rewrite_only_allows_platform_media(self) -> None:
         source = "https://classroom.guet.edu.cn/pgc/live/master.m3u8?auth_key=x"
         output = rewrite_live_playlist(
@@ -167,10 +194,12 @@ class LiveClassroomTests(unittest.TestCase):
         self.assertIn("live-now-icon", overview)
         self.assertIn("app.css?v=20260917-2", base)
         self.assertIn("data-live-info-url", detail)
+        self.assertIn("data-ppt-slides-url", detail)
         self.assertIn("进入直播", detail)
         self.assertIn("window.Hls", script)
         self.assertIn("window.setTimeout(poll, 3000)", script)
         self.assertIn('pptStage.style.aspectRatio', script)
+        self.assertIn("snapshotSlides.length > exportSlides.length", script)
         self.assertIn("aspect-ratio: 16 / 9", styles)
 
 

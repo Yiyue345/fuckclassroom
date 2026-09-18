@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from http.cookiejar import Cookie, CookieJar
@@ -24,8 +26,9 @@ TRANS_EXPORT_PATH = "/personal/courseapi/vlabpassportapi/v1/account-profile/rcou
 LIVE_LIST_PATH = "/courseapi/v2/course-live/search-live-course-list"
 LIVE_INFO_PATH = "/courseapi/v3/portal-home-setting/get-sub-info"
 LIVE_PPT_PATH = "/pptnote/v1/schedule/search-ppt"
-_PPT_CACHE_META_SCHEMA = 2
+_PPT_CACHE_META_SCHEMA = 3
 _PPT_PROVISIONAL_STATUSES = {"running", "pending", "processing", "queued", "waiting"}
+_PPT_ARCHIVE_RECHECK_SECONDS = 10 * 60
 
 
 class ClassroomClientError(RuntimeError):
@@ -302,45 +305,54 @@ class ClassroomClient:
         *,
         after_id: int = 0,
     ) -> list[LivePptSlide]:
-        payload = self._get_json(
-            LIVE_PPT_PATH,
-            {
-                "course_id": course_id,
-                "sub_id": lesson_id,
-                "page": "1",
-                "per_page": "500",
-            },
-        )
-        rows = payload.get("list") if isinstance(payload.get("list"), list) else []
         slides: list[LivePptSlide] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            slide_id = _to_int(row.get("id")) or 0
-            if slide_id <= after_id:
-                continue
-            raw_content = row.get("content")
-            try:
-                content = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(content, dict):
-                continue
-            image_url = str(content.get("pptimgurl") or "")
-            if not _is_allowed_classroom_asset(image_url, "/play/"):
-                continue
-            thumbnail_url = str(content.get("pptthumb") or "")
-            if thumbnail_url and not _is_allowed_classroom_asset(thumbnail_url, "/play/"):
-                thumbnail_url = ""
-            slides.append(
-                LivePptSlide(
-                    id=slide_id,
-                    image_url=image_url,
-                    thumbnail_url=thumbnail_url,
-                    created_at=str(content.get("created") or row.get("create_time") or ""),
-                    offset_seconds=_to_int(row.get("created_sec")) or 0,
-                )
+        seen_ids: set[int] = set()
+        page = 1
+        per_page = 100
+        while page <= 50:
+            payload = self._get_json(
+                LIVE_PPT_PATH,
+                {
+                    "course_id": course_id,
+                    "sub_id": lesson_id,
+                    "page": str(page),
+                    "per_page": str(per_page),
+                },
             )
+            rows = payload.get("list") if isinstance(payload.get("list"), list) else []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                slide_id = _to_int(row.get("id")) or 0
+                if slide_id <= after_id or slide_id in seen_ids:
+                    continue
+                raw_content = row.get("content")
+                try:
+                    content = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(content, dict):
+                    continue
+                image_url = str(content.get("pptimgurl") or "")
+                if not _is_allowed_classroom_asset(image_url, "/play/"):
+                    continue
+                thumbnail_url = str(content.get("pptthumb") or "")
+                if thumbnail_url and not _is_allowed_classroom_asset(thumbnail_url, "/play/"):
+                    thumbnail_url = ""
+                seen_ids.add(slide_id)
+                slides.append(
+                    LivePptSlide(
+                        id=slide_id,
+                        image_url=image_url,
+                        thumbnail_url=thumbnail_url,
+                        created_at=str(content.get("created") or row.get("create_time") or ""),
+                        offset_seconds=_to_int(row.get("created_sec")) or 0,
+                    )
+                )
+            total = _to_int(payload.get("total"))
+            if not rows or len(rows) < per_page or (total is not None and page * per_page >= total):
+                break
+            page += 1
         return sorted(slides, key=lambda slide: (slide.id, slide.offset_seconds))
 
     def get_live_playlist_url(self, course_id: str, lesson_id: str, quality: str) -> str:
@@ -477,6 +489,12 @@ class ClassroomClient:
             and str(meta.get("ppt_status") or "") == "recording-ready"
         ):
             return True
+        if (
+            meta_matches
+            and str(meta.get("ppt_status") or "") == "archive-newer"
+            and self._ppt_cache_meta_is_recent(path)
+        ):
+            return True
 
         try:
             provisional, status = self._current_ppt_cache_state(course_id, lesson_id)
@@ -512,6 +530,15 @@ class ClassroomClient:
             provisional, status = self._current_ppt_cache_state(course_id, lesson_id)
         except ClassroomClientError:
             provisional, status = True, "unknown"
+        if not provisional and status == "recording-ready":
+            try:
+                archive_count = len(self.list_live_ppt_slides(course_id, lesson_id))
+                export_count = _pptx_slide_count(path)
+            except (ClassroomClientError, OSError, zipfile.BadZipFile):
+                pass
+            else:
+                if archive_count > export_count:
+                    provisional, status = True, "archive-newer"
         try:
             self._write_ppt_cache_meta(
                 path,
@@ -573,6 +600,13 @@ class ClassroomClient:
         except (OSError, json.JSONDecodeError):
             return None
         return payload if isinstance(payload, dict) else None
+
+    def _ppt_cache_meta_is_recent(self, path: Path) -> bool:
+        try:
+            age = time.time() - self._ppt_cache_meta_path(path).stat().st_mtime
+        except OSError:
+            return False
+        return 0 <= age < _PPT_ARCHIVE_RECHECK_SECONDS
 
     def _write_ppt_cache_meta(
         self,
@@ -897,6 +931,15 @@ def _resource_title(kind: str, file_type: str) -> str:
 def _safe_filename(value: str) -> str:
     cleaned = "".join(char if char not in r'\/:*?"<>|' else "_" for char in value).strip()
     return cleaned[:80] or "未命名"
+
+
+def _pptx_slide_count(path: Path) -> int:
+    with zipfile.ZipFile(path) as archive:
+        return sum(
+            1
+            for name in archive.namelist()
+            if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)
+        )
 
 
 def _export_kind_info(export_kind: str) -> tuple[str, str, str]:

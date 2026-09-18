@@ -270,12 +270,13 @@
   const pptCounter = workspace.querySelector("[data-ppt-counter]");
   const pptPrev = workspace.querySelector("[data-ppt-prev]");
   const pptNext = workspace.querySelector("[data-ppt-next]");
+  const pptSource = workspace.querySelector("[data-ppt-source]");
   const pptCache = new Map();
+  const pptSnapshotCache = new Map();
 
   let selectedRow = null;
   let pptPages = [];
   let pptIndex = 0;
-  let pptSourceLabel = "";
   let pptLoadToken = 0;
   let livePptTimer = 0;
   let hlsPlayer = null;
@@ -292,11 +293,15 @@
 
   function updatePptControls() {
     const hasSlides = pptPages.length > 0;
-    pptCounter.textContent = hasSlides
-      ? `${pptIndex + 1} / ${pptPages.length}${pptSourceLabel ? ` · ${pptSourceLabel}` : ""}`
-      : "0 / 0";
+    pptCounter.textContent = hasSlides ? `${pptIndex + 1} / ${pptPages.length}` : "0 / 0";
     pptPrev.disabled = !hasSlides || pptIndex === 0;
     pptNext.disabled = !hasSlides || pptIndex === pptPages.length - 1;
+  }
+
+  function setPptSource(label, tone = "blue") {
+    pptSource.textContent = label;
+    pptSource.className = `status ${tone}${label ? "" : " hidden"}`;
+    updatePptControls();
   }
 
   function updateLivePptAspect(page) {
@@ -336,9 +341,9 @@
     video.load();
   }
 
-  function appendLiveSlides(slides) {
+  function appendSnapshotSlides(slides, followNewest = true) {
     if (!slides.length) return;
-    const followLatest = !pptPages.length || pptIndex === pptPages.length - 1;
+    const followLatest = followNewest && (!pptPages.length || pptIndex === pptPages.length - 1);
     pptStatus.classList.add("hidden");
     for (const slide of slides) {
       if (pptPages.some((page) => page.dataset.liveSlideId === String(slide.id))) continue;
@@ -347,7 +352,7 @@
       page.dataset.liveSlideId = String(slide.id);
       const image = D.createElement("img");
       image.className = "live-ppt-image";
-      image.alt = `直播课件第 ${pptPages.length + 1} 页`;
+      image.alt = `课堂课件第 ${pptPages.length + 1} 页`;
       image.decoding = "async";
       image.width = 1280;
       image.height = 720;
@@ -361,13 +366,26 @@
     }
     pptFullscreen.disabled = !pptPages.length;
     if (followLatest) showPptPage(pptPages.length - 1);
+    else if (pptPages.length && !pptPages.some((page) => page.classList.contains("active"))) showPptPage(0);
     else updatePptControls();
   }
 
+  async function fetchPptSnapshots(endpoint) {
+    if (!endpoint) return [];
+    if (pptSnapshotCache.has(endpoint)) return pptSnapshotCache.get(endpoint);
+    const response = await fetch(endpoint, { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const slides = Array.isArray(payload.slides) ? payload.slides : [];
+    pptSnapshotCache.set(endpoint, slides);
+    return slides;
+  }
+
   function loadLivePpt(row, token) {
-    const endpoint = row.dataset.livePptUrl || "";
+    const endpoint = row.dataset.pptSlidesUrl || "";
     setLinkState(pptDownload, "");
     pptFullscreen.disabled = true;
+    setPptSource("实时更新", "red");
     resetPpt("正在连接直播 PPT…", "loading");
     let afterId = 0;
 
@@ -380,7 +398,7 @@
         const payload = await response.json();
         if (token !== pptLoadToken) return;
         const slides = Array.isArray(payload.slides) ? payload.slides : [];
-        appendLiveSlides(slides);
+        appendSnapshotSlides(slides);
         afterId = Math.max(afterId, num(payload.last_id), ...slides.map((slide) => num(slide.id)));
         if (!pptPages.length) resetPpt("等待教师推送 PPT…", "loading");
       } catch (error) {
@@ -396,32 +414,50 @@
     stopLivePptPolling();
     const token = ++pptLoadToken;
     if (row.dataset.live === "true") {
-      pptSourceLabel = "直播接口";
       loadLivePpt(row, token);
       return;
     }
-    pptSourceLabel = "录播导出";
     const url = row.dataset.pptUrl || "";
+    const snapshotEndpoint = row.dataset.pptSlidesUrl || "";
     setLinkState(pptDownload, url);
-    pptFullscreen.disabled = !url;
-    if (!url) {
-      resetPpt("本课次暂无 PPT 课件");
+    setPptSource("");
+    pptFullscreen.disabled = true;
+    resetPpt("正在读取课件…", "loading");
+    let exportSlides = [];
+    let exportError = null;
+    let snapshotSlides = [];
+    const snapshotPromise = fetchPptSnapshots(snapshotEndpoint).catch(() => []);
+
+    if (url) {
+      try {
+        exportSlides = pptCache.get(url) || [];
+        if (!exportSlides.length) {
+          const response = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          exportSlides = await parsePpt(await response.arrayBuffer());
+          pptCache.set(url, exportSlides);
+        }
+      } catch (error) {
+        exportError = error;
+      }
+    }
+    snapshotSlides = await snapshotPromise;
+    if (token !== pptLoadToken) return;
+
+    if (snapshotSlides.length > exportSlides.length) {
+      pptCard.classList.add("live-mode");
+      resetPpt("正在打开完整课堂快照…", "loading");
+      setPptSource(`完整快照 · ${snapshotSlides.length} 页`);
+      appendSnapshotSlides(snapshotSlides, false);
       return;
     }
 
-    resetPpt("正在读取课件…", "loading");
-    try {
-      let slides = pptCache.get(url);
-      if (!slides) {
-        const response = await fetch(url, { credentials: "same-origin", cache: "no-store" });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        slides = await parsePpt(await response.arrayBuffer());
-        pptCache.set(url, slides);
-      }
-      if (token !== pptLoadToken) return;
-
+    if (exportSlides.length) {
+      pptCard.classList.remove("live-mode");
+      pptStage.style.removeProperty("aspect-ratio");
+      setPptSource("录播课件");
       pptStatus.classList.add("hidden");
-      pptPages = slides.map((slide) => {
+      pptPages = exportSlides.map((slide) => {
         const page = D.createElement("div");
         page.className = "ppt-slide-page";
         page.append(slide.cloneNode(true));
@@ -429,10 +465,14 @@
         return page;
       });
       showPptPage(0);
-    } catch (error) {
-      if (token !== pptLoadToken) return;
-      resetPpt(`课件读取失败：${error.message || error}。可使用“下载原文件”查看。`, "error");
+      return;
     }
+
+    if (!url && !snapshotSlides.length) {
+      resetPpt("本课次暂无 PPT 课件");
+      return;
+    }
+    resetPpt(`课件读取失败：${exportError?.message || exportError || "没有可用页面"}。`, "error");
   }
 
   function attachVideoSource(url, autoplay) {
