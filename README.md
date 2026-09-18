@@ -12,7 +12,7 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-普通使用不需要安装 Rust 工具链，也不需要手工构建 Hy2 组件。
+普通使用不需要安装 Rust 工具链，也不需要手工构建 Hy2 组件。只有在 Windows Smart App Control 拦截预编译 Hy2、且希望启用本地构建兜底时，才需要额外安装 rustup/Cargo。
 
 ## 启动
 
@@ -163,11 +163,26 @@ summary.md          AI 总结（生成总结后才存在）
 
 ## 校外访问与 Hy2
 
-本科教务登录会根据当前网络选择可用入口。校内可直接访问；校外可使用 WebVPN，也可以在“设置 > 账号与网络”中启用 Hy2。
+本科教务登录会根据当前网络选择可用入口。校内可直接访问；校外可使用公网入口、WebVPN，也可以在“设置 > 账号与网络”中启用 Hy2。
 
-Hy2 runner 已提供预编译版本，程序会根据当前平台自动选择并校验对应组件，因此普通用户不需要安装 Rust，也不需要手工执行 Cargo 构建。启用“Hy2 教务代理”后，程序会在需要访问本科教务时自动启动代理。
+Hy2 采用两级启动策略：
 
-如果 Hy2 当前不可用，系统仍会继续尝试其他可用入口。
+1. **默认使用预编译 runner**：程序根据当前平台选择仓库中的 CI 预编译组件，并先校验源码指纹与 SHA-256。正常情况下不需要 Rust/Cargo。
+2. **Windows 本地构建兜底**：如果 Windows Smart App Control 以 WinError/os error 4551 拦截预编译的 `hy2_serve.exe`，程序会自动尝试使用本机 Cargo 重新编译一次并重试。项目内的 `rust-toolchain.toml` 已固定 Rust 1.96.0。
+
+因此，只有遇到 Smart App Control 拦截并希望继续使用 Hy2 时，才需要准备 rustup/Cargo。可先安装 rustup，然后确认 1.96.0 工具链可用：
+
+```powershell
+rustup toolchain install 1.96.0 --profile minimal
+cd rust_module\hy2_proxy
+cargo --version
+```
+
+这里应看到 Cargo 1.96.x。之后重新触发 Hy2，程序会自动走本地构建兜底，不需要手工执行 `cargo build`。
+
+如果本机没有 Cargo，本地兜底会给出明确提示；如果 Smart App Control 连本地构建出的 runner 也继续拦截，程序不会关闭或绕过 Windows 安全功能，此时请关闭 Hy2，继续使用公网教务或 WebVPN。
+
+更详细的工作方式和排错说明见 `docs/hy2.md`。
 
 ## 缓存与本地文件
 
