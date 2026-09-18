@@ -10,7 +10,7 @@
     },
     "windows-x86_64": {
       "file": "windows-x86_64/hy2_serve.exe",
-      "sha256": "1e8801655bbcfc190349c50d3b1a042cbaf9fb7290f82df0f9e9b9bcf7ddf8ab"
+      "sha256": "e37081ecc4207153f72548b8e8218de5b86131b09ec1d044ad69fc2ec495e018"
     }
   },
   "schema": 1,
