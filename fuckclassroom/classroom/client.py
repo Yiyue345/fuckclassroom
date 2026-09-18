@@ -433,6 +433,7 @@ class ClassroomClient:
         content, response_type = self._get_bytes(
             path,
             {"course_id": course_id, "sub_id": lesson_id},
+            no_cache=export_kind == "ppt",
         )
         if content.lstrip().startswith(b"{"):
             try:
@@ -641,9 +642,19 @@ class ClassroomClient:
         self.cache.set(cache_name, payload)
         return payload
 
-    def _get_bytes(self, path: str, params: dict[str, str]) -> tuple[bytes, str]:
+    def _get_bytes(
+        self,
+        path: str,
+        params: dict[str, str],
+        *,
+        no_cache: bool = False,
+    ) -> tuple[bytes, str]:
         url = self._absolute_url(path, params)
-        request = Request(url, headers=_request_headers("*/*"))
+        headers = _request_headers("*/*")
+        if no_cache:
+            headers["Cache-Control"] = "no-cache"
+            headers["Pragma"] = "no-cache"
+        request = Request(url, headers=headers)
         opener = build_opener(HTTPCookieProcessor(self._cookie_jar()))
         try:
             with opener.open(request, timeout=60) as response:
