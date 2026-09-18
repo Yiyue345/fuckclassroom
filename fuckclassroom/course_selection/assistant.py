@@ -58,6 +58,7 @@ class CourseSelectionAssistant(
         self._access_mode = ""
         self._access_mode_checked_at = 0.0
         self._access_mode_lock = threading.Lock()
+        self._access_policy = threading.local()
         self.session_check_path = self.session_dir / "session_check.json"
         self._selection_token = ""
         self._selection_token_expires_at = 0.0

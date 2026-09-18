@@ -68,6 +68,33 @@ class QRScannerUnavailable(QRScannerError):
     pass
 
 
+class _OpenCVScanner:
+    """Compatibility backend used when the optional wxscan extension is unavailable."""
+
+    def __init__(self, cv2: Any, numpy: Any) -> None:
+        self._cv2 = cv2
+        self._numpy = numpy
+        self._detector = cv2.QRCodeDetector()
+        self._lock = threading.Lock()
+
+    def scan(self, image_bytes: bytes) -> list[str]:
+        encoded = self._numpy.frombuffer(image_bytes, dtype=self._numpy.uint8)
+        image = self._cv2.imdecode(encoded, self._cv2.IMREAD_GRAYSCALE)
+        if image is None:
+            raise ValueError("无法解码图片")
+
+        with self._lock:
+            decoded: list[str] = []
+            multi = self._detector.detectAndDecodeMulti(image)
+            if len(multi) >= 2 and multi[0]:
+                decoded.extend(str(value) for value in multi[1] if value)
+            if not decoded:
+                value, _, _ = self._detector.detectAndDecode(image)
+                if value:
+                    decoded.append(str(value))
+        return decoded
+
+
 @dataclass(frozen=True)
 class QRPayload:
     platform: str
@@ -173,7 +200,7 @@ def analyze_qr_payload(raw: str) -> QRPayload:
 
 
 class WxScanService:
-    """Lazy, process-local wrapper around the PyO3 wxscan extension."""
+    """Lazy QR scanner that prefers wxscan and falls back to OpenCV."""
 
     def __init__(self, config: AppConfig) -> None:
         self.model_dir = config.data_dir / "models" / "wxscan"
@@ -195,17 +222,23 @@ class WxScanService:
                 return self._scanner
             try:
                 native = importlib.import_module("fuckclassroom_wxscan")
-            except ImportError as exc:
-                raise QRScannerUnavailable(
-                    "未安装 wxscan PyO3 扩展，请在 rust_module/wxscan_py 中执行 "
-                    "`python -m pip install maturin && maturin develop --release`"
-                ) from exc
-            detect_path, sr_path = self._ensure_models()
-            try:
+                detect_path, sr_path = self._ensure_models()
                 self._scanner = native.Scanner(detect_path.read_bytes(), sr_path.read_bytes())
-            except Exception as exc:  # noqa: BLE001
-                raise QRScannerUnavailable(f"wxscan 模型加载失败：{exc}") from exc
+            except Exception:  # noqa: BLE001 - the OpenCV backend is the recovery path.
+                self._scanner = self._create_opencv_scanner()
             return self._scanner
+
+    @staticmethod
+    def _create_opencv_scanner() -> _OpenCVScanner:
+        try:
+            import cv2
+            import numpy
+        except ImportError as fallback_exc:
+            raise QRScannerUnavailable(
+                "二维码识别后端未安装；请重新安装 requirements.txt，或构建 "
+                "rust_module/wxscan_py 中的 wxscan 扩展"
+            ) from fallback_exc
+        return _OpenCVScanner(cv2, numpy)
 
     def _ensure_models(self) -> tuple[Path, Path]:
         self.model_dir.mkdir(parents=True, exist_ok=True)

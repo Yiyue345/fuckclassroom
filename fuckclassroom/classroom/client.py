@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
+import uuid
 import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from http.cookiejar import Cookie, CookieJar
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, Request, build_opener
@@ -18,6 +20,7 @@ from ..core.config import AppConfig
 
 
 BASE_URL = "https://classroom.guet.edu.cn"
+CHANGKE_BASE_URL = "https://courses.guet.edu.cn"
 COURSE_LIST_PATH = "/personal/courseapi/vlabpassportapi/v1/account-profile/course"
 COURSE_DETAIL_PATH = "/personal/courseapi/vlabpassportapi/v1/projects/{course_id}"
 TERM_LIST_PATH = "/personal/courseapi/vlabpassportapi/v1/course/term-list"
@@ -29,6 +32,8 @@ LIVE_PPT_PATH = "/pptnote/v1/schedule/search-ppt"
 _PPT_CACHE_META_SCHEMA = 3
 _PPT_PROVISIONAL_STATUSES = {"running", "pending", "processing", "queued", "waiting"}
 _PPT_ARCHIVE_RECHECK_SECONDS = 10 * 60
+_CHANGKE_SESSION_LOCK = threading.Lock()
+_QR_DEVICE_LOCK = threading.Lock()
 
 
 class ClassroomClientError(RuntimeError):
@@ -154,6 +159,11 @@ class ClassroomClient:
     def __init__(self, config: AppConfig | None = None) -> None:
         self.config = config or AppConfig()
         self.cache = JsonCache(self.config.cache_dir / "classroom")
+        self._session_recoverer: Callable[[], Any] | None = None
+
+    def set_session_recoverer(self, recoverer: Callable[[], Any]) -> None:
+        """Attach the shared GUET login recovery used by Changke SSO."""
+        self._session_recoverer = recoverer
 
     def verify_session(self) -> None:
         self._get_json(COURSE_LIST_PATH, {"nowpage": "1", "per-page": "1"})
@@ -374,6 +384,178 @@ class ClassroomClient:
         if not _is_allowed_classroom_asset(url, "/play/"):
             raise ClassroomClientError("不允许代理该课件图片地址")
         return self._download_live_asset(url, max_bytes=12 * 1024 * 1024)
+
+    def get_qr_device_id(self) -> str:
+        """Return a stable, locally generated device id for the signed-in account."""
+        path = self.config.data_dir / "account" / "qr_device.json"
+        with _QR_DEVICE_LOCK:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                value = str(payload.get("device_id") or "")
+                return str(uuid.UUID(value))
+            except (OSError, ValueError, json.JSONDecodeError, AttributeError):
+                pass
+
+            value = str(uuid.uuid4())
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(path.name + ".tmp")
+            temporary.write_text(
+                json.dumps({"schema": 1, "device_id": value}, ensure_ascii=False, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(path)
+            return value
+
+    def answer_qr_rollcall(
+        self,
+        rollcall_id: str,
+        data: str,
+        device_id: str,
+    ) -> dict[str, Any]:
+        """Submit a scanned QR token through the official Changke endpoint."""
+        rollcall_id = str(rollcall_id).strip()
+        data = str(data).strip()
+        if not re.fullmatch(r"\d+", rollcall_id) or not data:
+            raise ClassroomClientError("二维码签到参数不完整")
+
+        body = json.dumps(
+            {"data": data, "deviceId": str(device_id)},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        url = f"{CHANGKE_BASE_URL}/api/rollcall/{quote(rollcall_id, safe='')}/answer_qr_rollcall"
+
+        for attempt in range(2):
+            session_id = self._ensure_changke_session(force=attempt > 0)
+            headers = _request_headers("application/json")
+            headers.update(
+                {
+                    "Content-Type": "application/json",
+                    "Origin": CHANGKE_BASE_URL,
+                    "Referer": f"{CHANGKE_BASE_URL}/",
+                    "x-session-id": session_id,
+                }
+            )
+            request = Request(url, data=body, headers=headers, method="PUT")
+            opener = build_opener(HTTPCookieProcessor(self._cookie_jar()))
+            try:
+                with opener.open(request, timeout=30) as response:
+                    status = int(getattr(response, "status", 200))
+                    raw = response.read().decode("utf-8", errors="replace")
+            except HTTPError as exc:
+                status = exc.code
+                raw = exc.read().decode("utf-8", errors="replace")
+            except URLError as exc:
+                raise ClassroomClientError(f"畅课签到请求失败：{exc.reason}") from exc
+
+            if status in (401, 403) and attempt == 0:
+                continue
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                if attempt == 0:
+                    continue
+                if status in (401, 403):
+                    raise ClassroomClientError("畅课登录会话已失效，请重新登录") from exc
+                raise ClassroomClientError("畅课签到接口返回异常") from exc
+            if not isinstance(payload, dict):
+                raise ClassroomClientError("畅课签到接口返回异常")
+            payload["_http_status"] = status
+            return payload
+
+        raise ClassroomClientError("畅课登录会话已失效，请重新登录")
+
+    def _ensure_changke_session(self, *, force: bool = False) -> str:
+        if not force:
+            saved = self._stored_changke_session()
+            if saved:
+                return saved
+        with _CHANGKE_SESSION_LOCK:
+            if not force:
+                saved = self._stored_changke_session()
+                if saved:
+                    return saved
+            recovery_error = ""
+            for recovery_attempt in range(2):
+                if not self.config.storage_state_path.is_file():
+                    if recovery_attempt == 0 and self._recover_guet_session():
+                        continue
+                    raise ClassroomClientError(
+                        recovery_error or "尚未保存统一桂电登录会话，请先在账户与认证中保存账号"
+                    )
+                try:
+                    storage_state = json.loads(
+                        self.config.storage_state_path.read_text(encoding="utf-8")
+                    )
+                    if force:
+                        storage_state["cookies"] = [
+                            item
+                            for item in storage_state.get("cookies", [])
+                            if not (
+                                item.get("name") in {"session", "role_token"}
+                                and str(item.get("domain") or "").lstrip(".")
+                                == "courses.guet.edu.cn"
+                            )
+                        ]
+
+                    from playwright.sync_api import sync_playwright
+
+                    with sync_playwright() as playwright:
+                        browser = playwright.chromium.launch(headless=True)
+                        try:
+                            context = browser.new_context(storage_state=storage_state)
+                            page = context.new_page()
+                            page.goto(
+                                f"{CHANGKE_BASE_URL}/",
+                                wait_until="domcontentloaded",
+                                timeout=60_000,
+                            )
+                            page.wait_for_timeout(1500)
+                            updated_state = context.storage_state()
+                        finally:
+                            browser.close()
+                except Exception as exc:  # noqa: BLE001 - one user-facing auth boundary.
+                    recovery_error = f"无法建立畅课签到会话：{exc}"
+                    if recovery_attempt == 0 and self._recover_guet_session():
+                        continue
+                    raise ClassroomClientError(recovery_error) from exc
+
+                session_id = _changke_session_from_state(updated_state)
+                if session_id:
+                    temporary = self.config.storage_state_path.with_name(
+                        self.config.storage_state_path.name + ".tmp"
+                    )
+                    temporary.write_text(
+                        json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+                    temporary.replace(self.config.storage_state_path)
+                    return session_id
+                if recovery_attempt == 0 and self._recover_guet_session():
+                    continue
+                break
+            raise ClassroomClientError(
+                recovery_error or "畅课单点登录失败，请在账户与认证中重新登录"
+            )
+
+    def _recover_guet_session(self) -> bool:
+        if self._session_recoverer is None:
+            return False
+        try:
+            status = self._session_recoverer()
+        except Exception:  # noqa: BLE001 - the caller reports one stable auth error.
+            return False
+        return bool(getattr(status, "is_logged_in", status))
+
+    def _stored_changke_session(self) -> str:
+        try:
+            storage_state = json.loads(
+                self.config.storage_state_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            return ""
+        return _changke_session_from_state(storage_state)
 
     def _download_live_asset(self, url: str, *, max_bytes: int) -> tuple[bytes, str]:
         request = Request(url, headers=_request_headers("*/*"))
@@ -967,6 +1149,19 @@ def _request_headers(accept: str) -> dict[str, str]:
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
         ),
     }
+
+
+def _changke_session_from_state(storage_state: dict[str, Any]) -> str:
+    for item in storage_state.get("cookies", []):
+        if not isinstance(item, dict) or item.get("name") != "session":
+            continue
+        domain = str(item.get("domain") or "").lstrip(".").lower()
+        if domain != "courses.guet.edu.cn":
+            continue
+        value = str(item.get("value") or "")
+        if value:
+            return value
+    return ""
 
 
 def is_allowed_live_media_url(url: str) -> bool:

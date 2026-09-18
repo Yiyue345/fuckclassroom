@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from http.cookiejar import CookieJar
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from fuckclassroom.classroom.client import (
     ClassroomClient,
@@ -169,6 +171,42 @@ class LiveClassroomTests(unittest.TestCase):
         self.assertEqual(requested_pages, [1, 2])
         self.assertEqual(slides[-1].id, 131)
 
+    def test_qr_device_id_is_stable_and_locally_persisted(self) -> None:
+        first = self.client.get_qr_device_id()
+        second = ClassroomClient(self.client.config).get_qr_device_id()
+
+        self.assertEqual(first, second)
+        self.assertTrue((self.client.config.data_dir / "account" / "qr_device.json").is_file())
+
+    def test_qr_rollcall_uses_official_put_endpoint_and_session(self) -> None:
+        response = Mock()
+        response.status = 200
+        response.read.return_value = b'{"id":7,"status":"on_call"}'
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        opener = Mock()
+        opener.open.return_value = response
+
+        with (
+            patch.object(self.client, "_ensure_changke_session", return_value="session-1"),
+            patch.object(self.client, "_cookie_jar", return_value=CookieJar()),
+            patch("fuckclassroom.classroom.client.build_opener", return_value=opener),
+        ):
+            payload = self.client.answer_qr_rollcall("9", "fresh-token", "device-1")
+
+        self.assertEqual(payload["status"], "on_call")
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.method, "PUT")
+        self.assertEqual(
+            request.full_url,
+            "https://courses.guet.edu.cn/api/rollcall/9/answer_qr_rollcall",
+        )
+        self.assertEqual(
+            json.loads(request.data.decode("utf-8")),
+            {"data": "fresh-token", "deviceId": "device-1"},
+        )
+        self.assertEqual(request.headers["X-session-id"], "session-1")
+
     def test_hls_rewrite_only_allows_platform_media(self) -> None:
         source = "https://classroom.guet.edu.cn/pgc/live/master.m3u8?auth_key=x"
         output = rewrite_live_playlist(
@@ -192,7 +230,7 @@ class LiveClassroomTests(unittest.TestCase):
 
         self.assertIn("正在直播", overview)
         self.assertIn("live-now-icon", overview)
-        self.assertIn("app.css?v=20260917-2", base)
+        self.assertIn("app.css?v=20260918-3", base)
         self.assertIn("data-live-info-url", detail)
         self.assertIn("data-ppt-slides-url", detail)
         self.assertIn("进入直播", detail)
