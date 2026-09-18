@@ -290,6 +290,20 @@ class Hy2ProxyTests(unittest.TestCase):
                 self.assertEqual(assistant._detect_access_mode(force=True), "hy2")
             self.assertEqual(proxy.starts, 1)
 
+    def test_passive_access_status_defers_hy2_and_uses_public_probe(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            config = _hy2_config(Path(directory))
+            proxy = _FakeHy2Proxy()
+            assistant = CourseSelectionAssistant(config, hy2_proxy=proxy)
+            with patch(
+                "fuckclassroom.course_selection.browser.build_opener",
+                side_effect=[_FailingOpener(), _SuccessfulOpener()],
+            ):
+                access = assistant.get_access_info(force=True)
+
+            self.assertEqual(access["mode"], "public")
+            self.assertEqual(proxy.starts, 0)
+
     def test_detection_uses_public_ldap_when_hy2_cannot_start(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             config = _hy2_config(Path(directory))

@@ -188,6 +188,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def verify_classroom_session():
         return auth_service.verify_saved_session(auto_relogin=True)
 
+    def verify_selection_session_without_hy2():
+        with course_selection.defer_hy2_start():
+            return course_selection.verify_saved_session(
+                timeout_ms=60_000,
+                auto_relogin=True,
+            )
+
+    def refresh_selection_info_without_hy2():
+        with course_selection.defer_hy2_start():
+            return course_selection.refresh_selection_info_for_web(timeout_ms=60_000)
+
     def enrich_live_status(detail: CourseDetail) -> CourseDetail:
         """Overlay the uncached live-list state onto course-detail rows."""
         try:
@@ -215,14 +226,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         async def verify_saved_sessions() -> None:
             results = await asyncio.gather(
                 asyncio.to_thread(verify_classroom_session),
-                asyncio.to_thread(
-                    course_selection.verify_saved_session,
-                    timeout_ms=60_000,
-                    auto_relogin=True,
-                ),
+                asyncio.to_thread(verify_selection_session_without_hy2),
+                asyncio.to_thread(ketangpai_client.verify_session, auto_relogin=True),
                 return_exceptions=True,
             )
-            labels = ("课程录播", "WebVPN/教务")
+            labels = ("课程录播", "WebVPN/教务", "课堂派")
             for label, result in zip(labels, results):
                 if isinstance(result, Exception):
                     logger.warning("启动时%s会话检测失败：%s", label, result)
@@ -232,8 +240,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if not isinstance(selection_result, Exception) and selection_result.is_valid is True:
                 try:
                     await asyncio.to_thread(
-                        course_selection.refresh_selection_info_for_web,
-                        timeout_ms=60_000,
+                        refresh_selection_info_without_hy2,
                     )
                 except Exception as exc:  # noqa: BLE001 - startup refresh must not stop the app.
                     logger.warning("启动时选课信息刷新失败：%s", exc)

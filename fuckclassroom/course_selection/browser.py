@@ -5,6 +5,7 @@ import json
 import re
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from http.cookiejar import Cookie, CookieJar
@@ -687,8 +688,25 @@ class SelectionBrowserMixin:
         return sync_playwright()
 
     def get_access_info(self, force: bool = False) -> dict[str, str]:
-        access = self._selection_access(force=force)
+        # Rendering a status page must not launch the optional unsigned Hy2 runner.
+        with self.defer_hy2_start():
+            access = self._selection_access(force=force)
         return {"mode": access.mode, "label": access.label}
+
+    @contextmanager
+    def defer_hy2_start(self):
+        """Temporarily probe only direct/public/WebVPN access paths.
+
+        This is used during application startup and passive status rendering so
+        Windows Smart App Control is not prompted by an optional local executable.
+        Explicit selection operations continue to use Hy2 when it is enabled.
+        """
+        previous = bool(getattr(self._access_policy, "defer_hy2", False))
+        self._access_policy.defer_hy2 = True
+        try:
+            yield
+        finally:
+            self._access_policy.defer_hy2 = previous
 
     def invalidate_access_mode(self) -> None:
         with self._access_mode_lock:
@@ -715,7 +733,8 @@ class SelectionBrowserMixin:
                         mode = "campus"
             except (HTTPError, URLError, TimeoutError, OSError):
                 pass
-            if mode == "webvpn" and self.config.hy2_enabled:
+            hy2_deferred = bool(getattr(self._access_policy, "defer_hy2", False))
+            if mode == "webvpn" and self.config.hy2_enabled and not hy2_deferred:
                 try:
                     proxy_url = self.hy2_proxy.ensure_started()
                     proxy_opener = build_opener(
