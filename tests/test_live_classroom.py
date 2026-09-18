@@ -9,6 +9,7 @@ from fuckclassroom.classroom.client import (
     ClassroomClient,
     ClassroomClientError,
     Course,
+    CourseDetail,
     is_allowed_live_media_url,
     rewrite_live_playlist,
 )
