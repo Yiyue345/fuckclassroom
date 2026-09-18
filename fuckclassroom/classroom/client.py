@@ -24,7 +24,7 @@ TRANS_EXPORT_PATH = "/personal/courseapi/vlabpassportapi/v1/account-profile/rcou
 LIVE_LIST_PATH = "/courseapi/v2/course-live/search-live-course-list"
 LIVE_INFO_PATH = "/courseapi/v3/portal-home-setting/get-sub-info"
 LIVE_PPT_PATH = "/pptnote/v1/schedule/search-ppt"
-_PPT_CACHE_META_SCHEMA = 1
+_PPT_CACHE_META_SCHEMA = 2
 _PPT_PROVISIONAL_STATUSES = {"running", "pending", "processing", "queued", "waiting"}
 
 
@@ -461,12 +461,19 @@ class ClassroomClient:
 
     def _ppt_cache_is_reusable(self, course_id: str, lesson_id: str, path: Path) -> bool:
         meta = self._read_ppt_cache_meta(path)
-        if (
+        meta_matches = (
             meta is not None
             and meta.get("schema") == _PPT_CACHE_META_SCHEMA
             and str(meta.get("course_id") or "") == str(course_id)
             and str(meta.get("lesson_id") or "") == str(lesson_id)
+        )
+
+        # A recording-ready cache was verified against the uncached live list after
+        # the lesson had a recording. That state is stable enough to reuse directly.
+        if (
+            meta_matches
             and meta.get("provisional") is False
+            and str(meta.get("ppt_status") or "") == "recording-ready"
         ):
             return True
 
@@ -487,9 +494,16 @@ class ClassroomClient:
             )
             return True
 
-        # Missing metadata is treated as a legacy cache. Once the platform reports
-        # that PPT generation is finished, force one refresh so an incomplete file
-        # downloaded during the live session cannot become a permanent cache hit.
+        if (
+            meta_matches
+            and meta.get("provisional") is False
+            and str(meta.get("ppt_status") or "") == status
+        ):
+            return True
+
+        # Legacy metadata, old schemas, provisional caches, and a changed final
+        # state all force one fresh export. This migrates PPTs that older versions
+        # incorrectly marked final while they still only contained live-session pages.
         return False
 
     def _mark_ppt_cache_state(self, course_id: str, lesson_id: str, path: Path) -> None:

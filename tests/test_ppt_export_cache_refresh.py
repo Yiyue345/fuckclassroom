@@ -124,6 +124,49 @@ class PptExportCacheRefreshTests(unittest.TestCase):
             self.assertFalse(metadata["provisional"])
             self.assertEqual(metadata["ppt_status"], "recording-ready")
 
+    def test_old_final_metadata_is_revalidated_after_cache_schema_upgrade(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            config = AppConfig(data_dir=Path(directory))
+            client = ClassroomClient(config)
+            ppt_path = self._ppt_path(config)
+            ppt_path.parent.mkdir(parents=True, exist_ok=True)
+            ppt_path.write_bytes(b"old-eight-page-ppt")
+            ppt_path.with_suffix(".pptx.meta.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "course_id": "course-1",
+                        "lesson_id": "lesson-1",
+                        "provisional": False,
+                        "ppt_status": "finished",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            recording_detail = self._detail("running", with_recording=True)
+            with (
+                patch.object(client, "get_course_detail", return_value=recording_detail),
+                patch.object(client, "refresh_course_detail", return_value=recording_detail),
+                patch.object(client, "list_current_live_lessons", return_value=[]),
+                patch.object(
+                    client,
+                    "_get_bytes",
+                    return_value=(b"fresh-131-page-ppt", _PPT_MIME),
+                ) as download,
+            ):
+                exported = client.download_lesson_export("course-1", "lesson-1", "ppt")
+
+            self.assertFalse(exported.from_cache)
+            self.assertEqual(ppt_path.read_bytes(), b"fresh-131-page-ppt")
+            self.assertTrue(download.called)
+            metadata = json.loads(
+                ppt_path.with_suffix(".pptx.meta.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(metadata["schema"], 2)
+            self.assertFalse(metadata["provisional"])
+            self.assertEqual(metadata["ppt_status"], "recording-ready")
+
     def test_live_ppt_cache_stays_provisional_and_is_reused_until_live_ends(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             config = AppConfig(data_dir=Path(directory))

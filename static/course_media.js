@@ -275,6 +275,7 @@
   let selectedRow = null;
   let pptPages = [];
   let pptIndex = 0;
+  let pptSourceLabel = "";
   let pptLoadToken = 0;
   let livePptTimer = 0;
   let hlsPlayer = null;
@@ -291,7 +292,9 @@
 
   function updatePptControls() {
     const hasSlides = pptPages.length > 0;
-    pptCounter.textContent = hasSlides ? `${pptIndex + 1} / ${pptPages.length}` : "0 / 0";
+    pptCounter.textContent = hasSlides
+      ? `${pptIndex + 1} / ${pptPages.length}${pptSourceLabel ? ` · ${pptSourceLabel}` : ""}`
+      : "0 / 0";
     pptPrev.disabled = !hasSlides || pptIndex === 0;
     pptNext.disabled = !hasSlides || pptIndex === pptPages.length - 1;
   }
@@ -393,9 +396,11 @@
     stopLivePptPolling();
     const token = ++pptLoadToken;
     if (row.dataset.live === "true") {
+      pptSourceLabel = "直播接口";
       loadLivePpt(row, token);
       return;
     }
+    pptSourceLabel = "录播导出";
     const url = row.dataset.pptUrl || "";
     setLinkState(pptDownload, url);
     pptFullscreen.disabled = !url;
