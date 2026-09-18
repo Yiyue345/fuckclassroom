@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import threading
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -26,6 +28,11 @@ from ..classroom import (
 )
 from ..classroom.downloads import DownloadLibrary
 from ..classroom.extraction import ExtractionError, LessonExtractionService
+from ..classroom.ketangpai import (
+    KetangpaiClient,
+    KetangpaiCredentialStore,
+    KetangpaiError,
+)
 from ..core.cache import JsonCache
 from ..core.config import PROJECT_ROOT, AppConfig
 from ..core.settings import SettingsStore
@@ -149,6 +156,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         verification_broker=verification_broker,
         login_lock=login_lock,
     )
+    classroom_client.set_session_recoverer(
+        lambda: auth_service.verify_saved_session(auto_relogin=True)
+    )
+    ketangpai_client = KetangpaiClient(
+        KetangpaiCredentialStore(app_config.data_dir / "account" / "ketangpai.json")
+    )
     course_selection = CourseSelectionAssistant(
         app_config,
         hy2_proxy=hy2_proxy,
@@ -161,6 +174,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     cache_store = JsonCache(app_config.cache_dir)
     download_library = DownloadLibrary(app_config.downloads_dir)
     task_manager = TaskManager()
+    ketangpai_sms_sessions: dict[str, dict[str, object]] = {}
+    ketangpai_sms_lock = threading.Lock()
     runtime_settings = settings_store.load()
     auto_selection = AutoSelectionService(
         course_selection,
@@ -172,6 +187,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     def verify_classroom_session():
         return auth_service.verify_saved_session(auto_relogin=True)
+
+    def verify_selection_session_without_hy2():
+        with course_selection.defer_hy2_start():
+            return course_selection.verify_saved_session(
+                timeout_ms=60_000,
+                auto_relogin=True,
+            )
+
+    def refresh_selection_info_without_hy2():
+        with course_selection.defer_hy2_start():
+            return course_selection.refresh_selection_info_for_web(timeout_ms=60_000)
 
     def enrich_live_status(detail: CourseDetail) -> CourseDetail:
         """Overlay the uncached live-list state onto course-detail rows."""
@@ -200,14 +226,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         async def verify_saved_sessions() -> None:
             results = await asyncio.gather(
                 asyncio.to_thread(verify_classroom_session),
-                asyncio.to_thread(
-                    course_selection.verify_saved_session,
-                    timeout_ms=60_000,
-                    auto_relogin=True,
-                ),
+                asyncio.to_thread(verify_selection_session_without_hy2),
+                asyncio.to_thread(ketangpai_client.verify_session, auto_relogin=True),
                 return_exceptions=True,
             )
-            labels = ("课程录播", "WebVPN/教务")
+            labels = ("课程录播", "WebVPN/教务", "课堂派")
             for label, result in zip(labels, results):
                 if isinstance(result, Exception):
                     logger.warning("启动时%s会话检测失败：%s", label, result)
@@ -217,8 +240,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if not isinstance(selection_result, Exception) and selection_result.is_valid is True:
                 try:
                     await asyncio.to_thread(
-                        course_selection.refresh_selection_info_for_web,
-                        timeout_ms=60_000,
+                        refresh_selection_info_without_hy2,
                     )
                 except Exception as exc:  # noqa: BLE001 - startup refresh must not stop the app.
                     logger.warning("启动时选课信息刷新失败：%s", exc)
@@ -240,6 +262,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             hy2_proxy.stop()
 
     app = FastAPI(title="Fuck Classroom", lifespan=lifespan)
+    app.state.classroom_client = classroom_client
+    app.state.ketangpai_client = ketangpai_client
     app.state.get_classroom_session_status = auth_service.get_session_status
     app.state.get_selection_session_status = course_selection.get_session_status
     app.state.semester_sync = semester_sync
@@ -619,6 +643,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.get("/accounts", response_class=HTMLResponse)
     def accounts(request: Request) -> HTMLResponse:
+        sms_session_id = request.query_params.get("ketangpai_sms_session", "")
+        with ketangpai_sms_lock:
+            now = time.time()
+            for key in list(ketangpai_sms_sessions):
+                if now - float(ketangpai_sms_sessions[key].get("created_at") or 0) > 600:
+                    ketangpai_sms_sessions.pop(key, None)
+            sms_session = ketangpai_sms_sessions.get(sms_session_id)
         return templates.TemplateResponse(
             request,
             "accounts.html",
@@ -629,7 +660,153 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 "selection_access": course_selection.get_access_info(),
                 "credentials": course_selection.get_credential_status(),
                 "select_error": request.query_params.get("select_error"),
+                "ketangpai_session": ketangpai_client.get_session_status(),
+                "ketangpai_notice": request.query_params.get("ketangpai_notice"),
+                "ketangpai_error": request.query_params.get("ketangpai_error"),
+                "ketangpai_sms_sent": request.query_params.get("ketangpai_sms_sent") == "1",
+                "ketangpai_sms": (
+                    {"session_id": sms_session_id, **sms_session}
+                    if sms_session is not None
+                    else None
+                ),
             },
+        )
+
+    @app.post("/accounts/ketangpai/login")
+    async def ketangpai_password_login(request: Request) -> RedirectResponse:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        try:
+            status = ketangpai_client.login_password(
+                (parsed.get("account") or [""])[-1],
+                (parsed.get("password") or [""])[-1],
+            )
+        except (KetangpaiError, CredentialStoreError) as exc:
+            return RedirectResponse(
+                f"/accounts?ketangpai_error={quote(str(exc))}#ketangpai-session",
+                status_code=303,
+            )
+        return RedirectResponse(
+            f"/accounts?ketangpai_notice={quote(status.message)}#ketangpai-session",
+            status_code=303,
+        )
+
+    @app.post("/accounts/ketangpai/verify")
+    def verify_ketangpai_login() -> RedirectResponse:
+        try:
+            status = ketangpai_client.verify_session(auto_relogin=True)
+        except (KetangpaiError, CredentialStoreError) as exc:
+            return RedirectResponse(
+                f"/accounts?ketangpai_error={quote(str(exc))}#ketangpai-session",
+                status_code=303,
+            )
+        key = "ketangpai_notice" if status.is_valid else "ketangpai_error"
+        return RedirectResponse(
+            f"/accounts?{key}={quote(status.message)}#ketangpai-session",
+            status_code=303,
+        )
+
+    @app.post("/accounts/ketangpai/logout")
+    def clear_ketangpai_login() -> RedirectResponse:
+        try:
+            ketangpai_client.clear_session()
+        except CredentialStoreError as exc:
+            return RedirectResponse(
+                f"/accounts?ketangpai_error={quote(str(exc))}#ketangpai-session",
+                status_code=303,
+            )
+        return RedirectResponse(
+            "/accounts?ketangpai_notice=课堂派会话已清除#ketangpai-session",
+            status_code=303,
+        )
+
+    @app.post("/accounts/ketangpai/sms/start")
+    async def start_ketangpai_sms(request: Request) -> RedirectResponse:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        mobile = (parsed.get("mobile") or [""])[-1].strip()
+        if not mobile.isdigit() or len(mobile) != 11:
+            return RedirectResponse(
+                "/accounts?ketangpai_error=请输入%2011%20位课堂派登录手机号#ketangpai-session",
+                status_code=303,
+            )
+        session_id = secrets.token_urlsafe(24)
+        with ketangpai_sms_lock:
+            ketangpai_sms_sessions[session_id] = {
+                "mobile": mobile,
+                "created_at": time.time(),
+                "sent": False,
+            }
+        return RedirectResponse(
+            f"/accounts?ketangpai_sms_session={quote(session_id)}#ketangpai-session",
+            status_code=303,
+        )
+
+    def get_ketangpai_sms_session(session_id: str) -> dict[str, object]:
+        with ketangpai_sms_lock:
+            session = ketangpai_sms_sessions.get(session_id)
+            if session and time.time() - float(session.get("created_at") or 0) <= 600:
+                return dict(session)
+        raise HTTPException(status_code=404, detail="课堂派短信登录会话已过期")
+
+    @app.get("/accounts/ketangpai/sms/captcha")
+    def ketangpai_sms_captcha(session_id: str) -> Response:
+        get_ketangpai_sms_session(session_id)
+        try:
+            content, content_type = ketangpai_client.request_sms_captcha(session_id)
+        except KetangpaiError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/accounts/ketangpai/sms/send")
+    async def send_ketangpai_sms(request: Request) -> RedirectResponse:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        session_id = (parsed.get("session_id") or [""])[-1]
+        captcha = (parsed.get("captcha") or [""])[-1]
+        try:
+            session = get_ketangpai_sms_session(session_id)
+            notice = ketangpai_client.send_sms_code(
+                str(session["mobile"]), captcha, session_id
+            )
+        except (KetangpaiError, HTTPException) as exc:
+            message = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            return RedirectResponse(
+                f"/accounts?ketangpai_sms_session={quote(session_id)}&ketangpai_error={quote(str(message))}#ketangpai-session",
+                status_code=303,
+            )
+        with ketangpai_sms_lock:
+            if session_id in ketangpai_sms_sessions:
+                ketangpai_sms_sessions[session_id]["sent"] = True
+        return RedirectResponse(
+            f"/accounts?ketangpai_sms_session={quote(session_id)}&ketangpai_sms_sent=1&ketangpai_notice={quote(notice)}#ketangpai-session",
+            status_code=303,
+        )
+
+    @app.post("/accounts/ketangpai/sms/login")
+    async def login_ketangpai_sms(request: Request) -> RedirectResponse:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        session_id = (parsed.get("session_id") or [""])[-1]
+        code = (parsed.get("code") or [""])[-1]
+        try:
+            session = get_ketangpai_sms_session(session_id)
+            status = ketangpai_client.login_sms(str(session["mobile"]), code)
+        except (KetangpaiError, CredentialStoreError, HTTPException) as exc:
+            message = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            return RedirectResponse(
+                f"/accounts?ketangpai_sms_session={quote(session_id)}&ketangpai_error={quote(str(message))}#ketangpai-session",
+                status_code=303,
+            )
+        with ketangpai_sms_lock:
+            ketangpai_sms_sessions.pop(session_id, None)
+        return RedirectResponse(
+            f"/accounts?ketangpai_notice={quote(status.message)}#ketangpai-session",
+            status_code=303,
         )
 
     @app.get("/selection")
