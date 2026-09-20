@@ -52,6 +52,19 @@ class AutoSelectionSettingsTests(unittest.TestCase):
         self.assertEqual(updated.catalog_lesson_name_targets, ("数据结构-01", "操作系统-02"))
         self.assertEqual(restored.catalog_lesson_name_targets, updated.catalog_lesson_name_targets)
 
+    def test_auto_summary_defaults_on_and_can_be_disabled(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            store = SettingsStore(Path(directory) / "settings.json")
+            self.assertTrue(store.load().auto_summarize_after_extract)
+
+            disabled = store.update_from_form({"auto_summarize_after_extract": ""})
+            self.assertFalse(disabled.auto_summarize_after_extract)
+            self.assertFalse(store.load().auto_summarize_after_extract)
+
+            enabled = store.update_from_form({"auto_summarize_after_extract": "on"})
+            self.assertTrue(enabled.auto_summarize_after_extract)
+            self.assertTrue(store.load().auto_summarize_after_extract)
+
     def test_legacy_hy2_source_path_is_removed_on_save(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             path = Path(directory) / "settings.json"
