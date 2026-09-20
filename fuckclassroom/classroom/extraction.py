@@ -268,8 +268,15 @@ class LessonExtractionService:
         # regenerated from the new video transcript + PPT text.
         summary_path = output_dir / "summary.md"
         summary_path.unlink(missing_ok=True)
+        has_source_text = bool(transcript_text.strip() or ppt_text.strip())
         if self.config.auto_summarize_after_extract:
-            if self.config.ai_api_key:
+            if not has_source_text:
+                _task_log(
+                    progress,
+                    "视频转写与 PPT 文本均为空，已跳过自动 AI 总结。",
+                    "warning",
+                )
+            elif self.config.ai_api_key:
                 _report(progress, 92, "正在将视频转写与 PPT 文本发送给 AI 总结")
                 _task_log(
                     progress,
