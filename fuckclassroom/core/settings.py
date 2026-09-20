@@ -33,6 +33,7 @@ class AppSettings:
     asr_use_batched: bool = True
     asr_simplified_chinese: bool = True
     auto_open_outputs_after_extract: bool = False
+    auto_summarize_after_extract: bool = True
     default_term_id: str = ""
     hy2_enabled: bool = False
     auto_selection_retry_seconds: int = 5
@@ -80,6 +81,9 @@ class AppSettings:
                 data.get("asr_simplified_chinese"), cls.asr_simplified_chinese
             ),
             auto_open_outputs_after_extract=_to_bool(data.get("auto_open_outputs_after_extract")),
+            auto_summarize_after_extract=_to_bool_default(
+                data.get("auto_summarize_after_extract"), cls.auto_summarize_after_extract
+            ),
             default_term_id=str(data.get("default_term_id") or ""),
             hy2_enabled=_to_bool(data.get("hy2_enabled")),
             auto_selection_retry_seconds=_bounded_int(
@@ -167,6 +171,7 @@ class SettingsStore:
                 "asr_use_batched": form.get("asr_use_batched", ""),
                 "asr_simplified_chinese": form.get("asr_simplified_chinese", ""),
                 "auto_open_outputs_after_extract": form.get("auto_open_outputs_after_extract"),
+                "auto_summarize_after_extract": form.get("auto_summarize_after_extract"),
                 "default_term_id": form.get("default_term_id", current.default_term_id),
                 "hy2_enabled": form.get("hy2_enabled"),
                 "auto_selection_retry_seconds": form.get(
