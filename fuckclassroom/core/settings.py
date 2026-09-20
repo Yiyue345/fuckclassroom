@@ -171,7 +171,7 @@ class SettingsStore:
                 "asr_use_batched": form.get("asr_use_batched", ""),
                 "asr_simplified_chinese": form.get("asr_simplified_chinese", ""),
                 "auto_open_outputs_after_extract": form.get("auto_open_outputs_after_extract"),
-                "auto_summarize_after_extract": form.get("auto_summarize_after_extract"),
+                "auto_summarize_after_extract": form.get("auto_summarize_after_extract", ""),
                 "default_term_id": form.get("default_term_id", current.default_term_id),
                 "hy2_enabled": form.get("hy2_enabled"),
                 "auto_selection_retry_seconds": form.get(
