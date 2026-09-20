@@ -119,16 +119,16 @@ PPT 文字提取会同时处理：
 transcript.md       语音转写
 ppt_ocr.md          PPT 文本与 OCR
 combined.md         合并后的课程文本
-summary.md          AI 总结（生成总结后才存在）
+summary.md          AI 总结（配置 AI 后默认在文字提取结束时自动生成）
 ```
 
 任务运行时会在课程页显示总体进度和当前子任务进度，也可以在任务页面查看详细日志。启用“提取完成后自动打开结果页”后，任务结束会直接进入结果页面。
 
 ## AI 总结
 
-完成文字提取后，可以在课次结果页点击“生成 AI 总结”。
+文字提取完成后，程序默认会把视频语音转写与 PPT/OCR 文本合并为 `combined.md`，随后自动发送给 AI 生成 `summary.md`。使用前请在“设置 > AI 服务”中填写兼容 OpenAI Chat Completions 的服务地址、模型和 API Key。
 
-使用前请在“设置 > AI 服务”中填写兼容 OpenAI Chat Completions 的服务地址、模型和 API Key。AI 总结使用 `combined.md` 中已经合并的语音转写和 PPT 文本作为输入。
+“文字提取完成后自动生成 AI 总结”可以在同一设置页关闭。未配置 API Key、或 AI 请求失败时，本地转写、PPT OCR 与 `combined.md` 仍会保留；课次结果页的“生成 AI 总结”按钮也可以随时手动重新生成。每次重新提取文字都会先使旧总结失效，避免展示与最新转写不一致的历史总结。
 
 ## 本科教务选课
 
