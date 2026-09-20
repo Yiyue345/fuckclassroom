@@ -249,7 +249,7 @@ class LessonExtractionService:
             ppt_body = f"{ppt_body}\n\n## 提醒\n{warning_text}".strip()
         ppt_text_path.write_text(_section("课件 OCR", ppt_body), encoding="utf-8")
 
-        _report(progress, 90, "正在合并提取结果")
+        _report(progress, 88, "正在合并视频转写与 PPT 文本")
         combined_text = "\n\n".join(
             [
                 f"# {detail.course.title} - {lesson.title}",
@@ -263,8 +263,41 @@ class LessonExtractionService:
             )
         combined_path = output_dir / "combined.md"
         combined_path.write_text(combined_text, encoding="utf-8")
-        _report(progress, 100, "文字提取完成")
 
+        # combined.md has just changed, so any previous summary is stale until it is
+        # regenerated from the new video transcript + PPT text.
+        summary_path = output_dir / "summary.md"
+        summary_path.unlink(missing_ok=True)
+        if self.config.auto_summarize_after_extract:
+            if self.config.ai_api_key:
+                _report(progress, 92, "正在将视频转写与 PPT 文本发送给 AI 总结")
+                _task_log(
+                    progress,
+                    "已合并视频转写与 PPT/OCR 文本，开始自动生成 AI 课程总结。",
+                    "info",
+                )
+                try:
+                    summary = self.ai.summarize_course_text(combined_text)
+                    summary_path.write_text(
+                        _section("AI 课程总结", summary),
+                        encoding="utf-8",
+                    )
+                    _task_log(progress, "AI 自动总结已写入 summary.md", "info")
+                except (AIClientError, OSError, ValueError) as exc:
+                    warning = f"AI 自动总结失败：{exc}"
+                    warnings.append(warning)
+                    _task_log(progress, warning, "warning")
+            else:
+                _task_log(
+                    progress,
+                    "未配置 AI API Key，已跳过自动总结；视频转写与 PPT 文本仍已正常保存。",
+                    "warning",
+                )
+
+        if summary_path.exists():
+            _report(progress, 100, "文字提取与 AI 总结完成")
+        else:
+            _report(progress, 100, "文字提取完成")
         return ExtractionResult(
             course_id=course_id,
             lesson_id=lesson_id,
@@ -272,7 +305,7 @@ class LessonExtractionService:
             transcript_path=transcript_path,
             ppt_text_path=ppt_text_path,
             combined_path=combined_path,
-            summary_path=output_dir / "summary.md" if (output_dir / "summary.md").exists() else None,
+            summary_path=summary_path if summary_path.exists() else None,
             warnings=warnings,
         )
 
