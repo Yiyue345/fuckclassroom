@@ -71,6 +71,24 @@ class UiModularizationTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(path.is_file())
 
+    def test_settings_shell_uses_plugin_panel_contexts(self) -> None:
+        shell = Path(
+            "fuckclassroom/plugins/core_ui/templates/core/settings.html"
+        ).read_text(encoding="utf-8")
+        core_routes = Path(
+            "fuckclassroom/plugins/core_ui/routes.py"
+        ).read_text(encoding="utf-8")
+        classroom_panel = Path(
+            "fuckclassroom/plugins/classroom/templates/classroom_settings_courses.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("settings_panels", shell)
+        self.assertIn("panel_context", shell)
+        self.assertNotIn("plugin_registry.settings_panels", shell)
+        self.assertNotIn("semester_sync", core_routes)
+        self.assertNotIn('"terms": terms', core_routes)
+        self.assertIn("panel_context.terms", classroom_panel)
+
     def test_feature_javascript_is_not_kept_in_core_app_bundle(self) -> None:
         core = Path("static/app.js").read_text(encoding="utf-8")
         classroom = Path(

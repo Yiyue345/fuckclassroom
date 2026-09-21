@@ -28,7 +28,6 @@ def build_router(context: PluginContext) -> APIRouter:
     verification_broker = services.get("verification_broker")
     plugin_manager = services.get("plugin_manager")
 
-    semester_sync = services.maybe("semester_sync")
     auth_service = services.maybe("auth_service")
 
     hy2_proxy = services.maybe("hy2_proxy")
@@ -225,23 +224,20 @@ def build_router(context: PluginContext) -> APIRouter:
 
     @router.get("/settings", response_class=HTMLResponse)
     def settings(request: Request) -> HTMLResponse:
-        error = None
-        terms = []
-        if semester_sync is not None:
-            try:
-                snapshot = semester_sync.sync()
-                terms = list(snapshot.terms)
-                if snapshot.error:
-                    error = f"学期同步失败，已使用缓存：{snapshot.error}"
-            except Exception as exc:  # noqa: BLE001 - optional plugin failure is rendered in UI.
-                error = str(exc)
+        panels = []
+        for panel in plugin_registry.settings_panels:
+            panel_context = (
+                panel.context_factory(services, request)
+                if panel.context_factory is not None
+                else {}
+            )
+            panels.append({"panel": panel, "context": panel_context})
         return templates.TemplateResponse(
             request,
             "core/settings.html",
             {
-                "session": (auth_service.get_session_status() if auth_service is not None else {}),
                 "settings": settings_store.load().to_public_dict(),
-                "terms": terms,
+                "settings_panels": panels,
                 "saved": request.query_params.get("saved") == "1",
                 "hy2_built": request.query_params.get("hy2_built") == "1",
                 "cache_cleared": request.query_params.get("cache_cleared") == "1",
@@ -250,14 +246,6 @@ def build_router(context: PluginContext) -> APIRouter:
                 "credentials_cleared": request.query_params.get("credentials_cleared") == "1",
                 "login_state_cleared": request.query_params.get("login_state_cleared") == "1",
                 "login_state_error": request.query_params.get("login_state_error"),
-                "selection_credentials": credential_store.public_status(),
-                "cache_info": cache_store.info(),
-                "hy2_status": (
-                    hy2_proxy.get_status().to_dict()
-                    if hy2_proxy is not None
-                    else {"message": "选课插件未启用"}
-                ),
-                "error": error,
             },
         )
 

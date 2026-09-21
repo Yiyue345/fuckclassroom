@@ -40,6 +40,7 @@ class SettingsPanel:
     in_form: bool = True
     show_in_nav: bool = True
     checkbox_fields: tuple[str, ...] = ()
+    context_factory: Callable[["ServiceContainer", Any], dict[str, object]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

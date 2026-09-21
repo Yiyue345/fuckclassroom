@@ -751,11 +751,17 @@ API v1 的导航图标只能引用 core SVG sprite 中已有的 symbol。自定�
 插件可以注册：
 
 ```python
+def build_settings_context(services, request):
+    client = services.get("my_plugin.client")
+    return {"status": client.status()}
+
+
 SettingsPanel(
     key="my-plugin-settings",
     label="My Plugin",
     template="my_plugin/settings.html",
     order=70,
+    context_factory=build_settings_context,
 )
 ```
 
@@ -770,6 +776,15 @@ SettingsPanel(
 | `in_form` | 是否放入 core 的 `/settings` form |
 | `show_in_nav` | 是否显示在设置页左侧导航 |
 | `checkbox_fields` | core settings form 中需要处理“未提交即 false”的 checkbox 名 |
+| `context_factory` | 可选；页面请求时调用，参数为 `ServiceContainer` 和 request，返回当前面板上下文 |
+
+面板模板会拿到统一变量 `panel_context`，值就是 `context_factory` 返回的字典：
+
+```jinja2
+<div>{{ panel_context.status }}</div>
+```
+
+如果不需要额外数据，可以省略 `context_factory`，此时 `panel_context` 为空字典。factory 只会为当前启用插件注册的面板执行；不要在其中做长时间阻塞工作。
 
 ### 第三方插件的重要限制
 

@@ -80,7 +80,13 @@ class SidebarNavigationTests(unittest.TestCase):
             environment.get_template(panel.template)
 
         self.assertIn('{% set active_system = "common" %}', settings)
-        self.assertIn("plugin_registry.settings_panels", settings)
+        self.assertIn("settings_panels", settings)
+        self.assertNotIn("plugin_registry.settings_panels", settings)
+
+        panels = {panel.key: panel for panel in registry.settings_panels}
+        self.assertIsNotNone(panels["courses"].context_factory)
+        self.assertIsNotNone(panels["network"].context_factory)
+        self.assertIsNotNone(panels["storage"].context_factory)
         self.assertIn("plugin_registry.system_label(active_system)", base)
         self.assertEqual(registry.system_label("selection"), "本科选课")
 

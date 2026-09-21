@@ -17,6 +17,16 @@ def build_routes(context: PluginContext):
     return build_router(context)
 
 
+def build_network_settings_context(services, request):
+    from .settings_context import build_network_settings_context as build
+    return build(services, request)
+
+
+def build_storage_settings_context(services, request):
+    from .settings_context import build_storage_settings_context as build
+    return build(services, request)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="core_ui",
@@ -43,9 +53,9 @@ def build_plugin() -> PluginSpec:
         ),
         settings_panels=(
             SettingsPanel(key="appearance", label="外观", template="core_settings_appearance.html", order=10),
-            SettingsPanel(key="network", label="账号与网络", template="core_settings_network.html", order=40, checkbox_fields=("hy2_enabled",)),
+            SettingsPanel(key="network", label="账号与网络", template="core_settings_network.html", order=40, checkbox_fields=("hy2_enabled",), context_factory=build_network_settings_context),
             SettingsPanel(key="settings-actions", label="设置操作", template="core_settings_actions.html", order=80, in_form=False, show_in_nav=False),
-            SettingsPanel(key="storage", label="缓存与存储", template="core_settings_storage.html", order=90, in_form=False),
+            SettingsPanel(key="storage", label="缓存与存储", template="core_settings_storage.html", order=90, in_form=False, context_factory=build_storage_settings_context),
         ),
         system_labels=(("common", "通用"), ("accounts", "账户")),
     )

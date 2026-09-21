@@ -17,22 +17,28 @@
   {% if cache_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>缓存清除失败：{{ cache_error }}</span></div>{% endif %}
   {% if credential_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ credential_error }}</span></div>{% endif %}
   {% if login_state_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>登录状态清除失败：{{ login_state_error }}</span></div>{% endif %}
-  {% if error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>{% endif %}
+  {% for item in settings_panels %}
+    {% for notice in item.context.get("notices", ()) %}
+      <div class="notice {{ notice.kind }}"><svg class="icon"><use href="/static/icons.svg#{{ notice.icon }}"></use></svg><span>{{ notice.message }}</span></div>
+    {% endfor %}
+  {% endfor %}
 
   <div class="settings-layout">
     <nav class="settings-nav">
-      {% for panel in plugin_registry.settings_panels if panel.show_in_nav %}
-        <a{% if loop.first %} class="active"{% endif %} href="#{{ panel.key }}">{{ panel.label }}</a>
+      {% for item in settings_panels if item.panel.show_in_nav %}
+        <a{% if loop.first %} class="active"{% endif %} href="#{{ item.panel.key }}">{{ item.panel.label }}</a>
       {% endfor %}
     </nav>
     <div>
       <form class="settings-main" id="settings-form" method="post" action="/settings">
-        {% for panel in plugin_registry.settings_panels if panel.in_form %}
-          {% include panel.template %}
+        {% for item in settings_panels if item.panel.in_form %}
+          {% set panel_context = item.context %}
+          {% include item.panel.template %}
         {% endfor %}
       </form>
-      {% for panel in plugin_registry.settings_panels if not panel.in_form %}
-        {% include panel.template %}
+      {% for item in settings_panels if not item.panel.in_form %}
+        {% set panel_context = item.context %}
+        {% include item.panel.template %}
       {% endfor %}
     </div>
   </div>

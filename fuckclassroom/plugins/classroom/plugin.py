@@ -26,6 +26,11 @@ def build_account_context(services, request):
     return build(services, request)
 
 
+def build_course_settings_context(services, request):
+    from .settings_context import build_course_settings_context as build
+    return build(services, request)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="classroom",
@@ -71,6 +76,7 @@ def build_plugin() -> PluginSpec:
                 label="课程与资源",
                 template="classroom_settings_courses.html",
                 order=20,
+                context_factory=build_course_settings_context,
             ),
         ),
         sidebar_templates=("classroom_sidebar_session.html",),
