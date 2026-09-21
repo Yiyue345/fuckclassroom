@@ -112,7 +112,7 @@ class SidebarNavigationTests(unittest.TestCase):
         template = Path(
             "fuckclassroom/plugins/core_ui/templates/core/plugin_manager.html"
         ).read_text(encoding="utf-8")
-        styles = Path("static/app.css").read_text(encoding="utf-8")
+        styles = Path("fuckclassroom/plugins/core_ui/static/core_ui.css").read_text(encoding="utf-8")
         base = Path("templates/base.html").read_text(encoding="utf-8")
 
         self.assertIn("account-session-panel plugin-manager-card", template)
@@ -137,13 +137,21 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertNotIn("account-session-actions plugin-manager-actions", template)
         self.assertNotIn(">停用</button>", template)
         self.assertNotIn(">启用</button>", template)
-        self.assertIn("/static/app.css?v=20260921-3", base)
+        self.assertIn("/static/app.css?v=20260921-4", base)
 
     def test_plugin_ui_assets_are_registered_by_enabled_plugins(self) -> None:
         registry = build_plugin_registry()
 
         self.assertIn(
+            "/plugins/core_ui/static/core_ui.css?v=20260921-1",
+            registry.stylesheets,
+        )
+        self.assertIn(
             "/plugins/classroom/static/classroom.css?v=20260921-1",
+            registry.stylesheets,
+        )
+        self.assertIn(
+            "/plugins/attendance/static/attendance.css?v=20260921-1",
             registry.stylesheets,
         )
         self.assertIn(

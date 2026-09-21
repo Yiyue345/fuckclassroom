@@ -15,7 +15,7 @@
         document.documentElement.dataset.theme = mode === "auto" ? (dark ? "dark" : "light") : mode;
       })();
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=20260921-3">
+    <link rel="stylesheet" href="/static/app.css?v=20260921-4">
     {% for stylesheet in plugin_registry.stylesheets %}<link rel="stylesheet" href="{{ stylesheet }}">{% endfor %}
     {% block head_extra %}{% endblock %}
   </head>

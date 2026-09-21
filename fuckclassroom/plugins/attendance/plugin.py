@@ -45,6 +45,7 @@ def build_plugin() -> PluginSpec:
             ),
         ),
         static_dir=PLUGIN_DIR / "static",
+        stylesheets=("/plugins/attendance/static/attendance.css?v=20260921-1",),
     )
 
 

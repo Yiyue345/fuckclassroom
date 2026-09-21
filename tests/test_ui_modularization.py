@@ -98,13 +98,26 @@ class UiModularizationTests(unittest.TestCase):
         selection = Path(
             "fuckclassroom/plugins/course_selection/static/selection.css"
         ).read_text(encoding="utf-8")
+        core_ui = Path(
+            "fuckclassroom/plugins/core_ui/static/core_ui.css"
+        ).read_text(encoding="utf-8")
+        attendance = Path(
+            "fuckclassroom/plugins/attendance/static/attendance.css"
+        ).read_text(encoding="utf-8")
 
         self.assertNotIn(".course-summary", core)
         self.assertNotIn(".output-actions", core)
         self.assertNotIn(".catalog-filters", core)
+        self.assertNotIn(".settings-layout", core)
+        self.assertNotIn(".plugin-manager-grid", core)
+        self.assertNotIn(".ketangpai-overview", core)
         self.assertIn(".course-summary", classroom)
         self.assertIn(".output-actions", processing)
         self.assertIn(".catalog-filters", selection)
+        self.assertIn(".settings-layout", core_ui)
+        self.assertIn(".plugin-manager-grid", core_ui)
+        self.assertNotIn(".ketangpai-overview", core_ui)
+        self.assertIn(".ketangpai-overview", attendance)
 
     def test_task_detail_assets_belong_to_core_ui_plugin(self) -> None:
         template = Path(
