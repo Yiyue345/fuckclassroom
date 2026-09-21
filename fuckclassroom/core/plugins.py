@@ -315,6 +315,7 @@ class PluginRuntime:
 
 
 __all__ = [
+    "PLUGIN_API_VERSION",
     "NavigationGroup",
     "NavigationItem",
     "PluginContext",

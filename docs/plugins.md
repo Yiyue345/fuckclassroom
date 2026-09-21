@@ -1,5 +1,7 @@
 # 插件架构
 
+第三方插件作者需要查看可调用接口、Hook、ServiceContainer、后台任务和完整示例时，请阅读 [`docs/plugin-api.md`](plugin-api.md)。
+
 `pluginization` 分支把应用拆成一个始终启用的核心壳层，以及按需启用的功能插件。
 
 ## 当前内置插件
