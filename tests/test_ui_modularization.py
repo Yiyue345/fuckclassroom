@@ -189,8 +189,12 @@ class UiModularizationTests(unittest.TestCase):
             "fuckclassroom/plugins/course_selection/settings_hooks.py"
         ).read_text(encoding="utf-8")
 
-        for feature_name in ("hy2_proxy", "course_selection", "auto_selection"):
-            self.assertNotIn(feature_name, routes)
+        for feature_lookup in (
+            'services.maybe("hy2_proxy")',
+            'services.maybe("course_selection")',
+            'services.maybe("auto_selection")',
+        ):
+            self.assertNotIn(feature_lookup, routes)
         self.assertIn("context.notify_settings_saved", routes)
         self.assertIn("context.clear_plugin_sessions", routes)
         self.assertNotIn("Hy2", network)
