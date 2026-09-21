@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,7 +59,7 @@ class SessionClearTests(unittest.TestCase):
                 if getattr(item, "path", "") == "/settings/login-state/clear"
             )
 
-            response = route.endpoint()
+            response = asyncio.run(route.endpoint())
 
             self.assertEqual(response.status_code, 303)
             self.assertEqual(response.headers["location"], "/settings?login_state_cleared=1")
