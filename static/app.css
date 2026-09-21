@@ -577,10 +577,8 @@ a.resource-chip:hover { border-color: var(--primary); color: var(--primary); }
 .plugin-manager-card-header .account-session-name > div > span { max-width: 300px; }
 .plugin-manager-controls { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .plugin-toggle-form { display: inline-flex; }
-.plugin-toggle-control { min-height: 28px; gap: 8px; }
+.plugin-toggle-control { min-height: 28px; }
 .plugin-toggle-control input:disabled + .toggle-track { opacity: .55; }
-.plugin-toggle-control input:disabled ~ .plugin-toggle-state { color: var(--text-muted); }
-.plugin-toggle-state { min-width: 38px; color: var(--text-soft); font-size: 10px; font-weight: 680; }
 .plugin-manager-card-body { display: flex; flex: 1 1 auto; flex-direction: column; padding-top: 18px; }
 .plugin-manager-description { min-height: 40px; margin: 0 0 4px; color: var(--text-soft); font-size: 11px; line-height: 1.65; }
 .plugin-manager-inline-notice { margin: 14px 0 0; padding: 10px 12px; font-size: 10px; }

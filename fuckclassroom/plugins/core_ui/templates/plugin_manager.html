@@ -126,7 +126,6 @@
                     {% if plugin.locked or not plugin_config_mutable or (not plugin.desired_enabled and not plugin.compatible) %}disabled{% endif %}
                     onchange="this.form.requestSubmit()">
                   <span class="toggle-track" aria-hidden="true"><span></span></span>
-                  <span class="plugin-toggle-state">{{ "已启用" if plugin.desired_enabled else "已停用" }}</span>
                 </label>
               </form>
 

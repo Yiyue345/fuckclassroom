@@ -109,6 +109,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn('class="toggle-control plugin-toggle-control"', template)
         self.assertIn('role="switch"', template)
         self.assertIn('onchange="this.form.requestSubmit()"', template)
+        self.assertNotIn("plugin-toggle-state", template)
         self.assertNotIn("account-session-actions plugin-manager-actions", template)
         self.assertNotIn(">停用</button>", template)
         self.assertNotIn(">启用</button>", template)
