@@ -112,16 +112,26 @@
               </div>
             </div>
 
-            <div class="plugin-manager-statuses">
+            <div class="plugin-manager-controls">
               <span class="status {{ 'blue' if plugin.builtin else 'gray' }}">{{ plugin.source_label }}</span>
-              {% if plugin.current_enabled and plugin.desired_enabled %}
-                <span class="status green"><span class="tiny-dot"></span>已启用</span>
-              {% elif plugin.current_enabled and not plugin.desired_enabled %}
-                <span class="status amber"><span class="tiny-dot"></span>待停用</span>
-              {% elif not plugin.current_enabled and plugin.desired_enabled %}
-                <span class="status blue"><span class="tiny-dot"></span>待启用</span>
-              {% else %}
-                <span class="status gray"><span class="tiny-dot"></span>已停用</span>
+
+              <form class="plugin-toggle-form" method="post" action="/plugins/{{ plugin.id }}/{{ 'disable' if plugin.desired_enabled else 'enable' }}">
+                <label class="toggle-control plugin-toggle-control"
+                  title="{% if plugin.locked %}基础插件始终启用{% elif not plugin_config_mutable %}当前插件配置为只读{% elif not plugin.compatible and not plugin.desired_enabled %}插件不兼容，无法启用{% else %}切换后重启应用生效{% endif %}">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    aria-label="{{ '停用' if plugin.desired_enabled else '启用' }} {{ plugin.name }}"
+                    {% if plugin.desired_enabled %}checked{% endif %}
+                    {% if plugin.locked or not plugin_config_mutable or (not plugin.desired_enabled and not plugin.compatible) %}disabled{% endif %}
+                    onchange="this.form.requestSubmit()">
+                  <span class="toggle-track" aria-hidden="true"><span></span></span>
+                  <span class="plugin-toggle-state">{{ "已启用" if plugin.desired_enabled else "已停用" }}</span>
+                </label>
+              </form>
+
+              {% if plugin.restart_required %}
+                <span class="status amber">重启后生效</span>
               {% endif %}
             </div>
           </header>
@@ -194,33 +204,17 @@
             {% endif %}
           </div>
 
-          <div class="account-session-actions plugin-manager-actions">
-            {% if plugin.locked %}
-              <button class="btn" type="button" disabled>基础插件</button>
-            {% elif plugin.desired_enabled %}
-              <form method="post" action="/plugins/{{ plugin.id }}/disable">
-                <button class="btn danger" type="submit" {% if not plugin_config_mutable %}disabled{% endif %}>
-                  <svg class="icon small"><use href="/static/icons.svg#log-out"></use></svg>停用
-                </button>
-              </form>
-            {% else %}
-              <form method="post" action="/plugins/{{ plugin.id }}/enable">
-                <button class="btn primary" type="submit" {% if not plugin_config_mutable or not plugin.compatible %}disabled{% endif %}>
-                  <svg class="icon small"><use href="/static/icons.svg#circle-check"></use></svg>启用
-                </button>
-              </form>
-            {% endif %}
-
-            {% if not plugin.builtin %}
+          {% if not plugin.builtin %}
+            <div class="plugin-manager-footer">
               <form method="post" action="/plugins/{{ plugin.id }}/remove">
-                <button class="btn" type="submit"
+                <button class="btn small danger" type="submit"
                   {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
                   title="{% if plugin.current_enabled %}请先停用并重启应用{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
-                  <svg class="icon small"><use href="/static/icons.svg#trash-2"></use></svg>删除
+                  <svg class="icon small"><use href="/static/icons.svg#trash-2"></use></svg>删除外部插件
                 </button>
               </form>
-            {% endif %}
-          </div>
+            </div>
+          {% endif %}
         </article>
       {% else %}
         <div class="surface empty-state"><div><svg class="icon"><use href="/static/icons.svg#settings"></use></svg><p>没有发现可用插件</p></div></div>

@@ -106,7 +106,13 @@ class SidebarNavigationTests(unittest.TestCase):
             ".plugin-manager-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: stretch; }",
             styles,
         )
-        self.assertIn("/static/app.css?v=20260921-1", base)
+        self.assertIn('class="toggle-control plugin-toggle-control"', template)
+        self.assertIn('role="switch"', template)
+        self.assertIn('onchange="this.form.requestSubmit()"', template)
+        self.assertNotIn("account-session-actions plugin-manager-actions", template)
+        self.assertNotIn(">停用</button>", template)
+        self.assertNotIn(">启用</button>", template)
+        self.assertIn("/static/app.css?v=20260921-2", base)
 
     def test_plugin_static_mounts_are_isolated(self) -> None:
         registry = build_plugin_registry()

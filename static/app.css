@@ -575,7 +575,12 @@ a.resource-chip:hover { border-color: var(--primary); color: var(--primary); }
 .plugin-manager-card-header { min-height: 58px; }
 .plugin-manager-card-header .account-session-name > div { min-width: 0; }
 .plugin-manager-card-header .account-session-name > div > span { max-width: 300px; }
-.plugin-manager-statuses { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.plugin-manager-controls { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.plugin-toggle-form { display: inline-flex; }
+.plugin-toggle-control { min-height: 28px; gap: 8px; }
+.plugin-toggle-control input:disabled + .toggle-track { opacity: .55; }
+.plugin-toggle-control input:disabled ~ .plugin-toggle-state { color: var(--text-muted); }
+.plugin-toggle-state { min-width: 38px; color: var(--text-soft); font-size: 10px; font-weight: 680; }
 .plugin-manager-card-body { display: flex; flex: 1 1 auto; flex-direction: column; padding-top: 18px; }
 .plugin-manager-description { min-height: 40px; margin: 0 0 4px; color: var(--text-soft); font-size: 11px; line-height: 1.65; }
 .plugin-manager-inline-notice { margin: 14px 0 0; padding: 10px 12px; font-size: 10px; }
@@ -593,9 +598,8 @@ a.resource-chip:hover { border-color: var(--primary); color: var(--primary); }
 .plugin-manager-dependency-row > div > strong { display: block; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-manager-dependency-row > div > span { display: block; overflow: hidden; margin-top: 2px; color: var(--text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-manager-dependencies > form { display: flex; justify-content: flex-end; }
-.plugin-manager-actions { grid-template-columns: repeat(2, minmax(0, max-content)); justify-content: flex-start; padding-top: 18px; margin-top: 18px; border-top: 1px solid var(--border); }
-.plugin-manager-actions .btn { min-width: 112px; }
-.plugin-manager-actions form { display: contents; }
+.plugin-manager-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 16px; margin-top: 18px; }
+.plugin-manager-footer form { display: inline-flex; }
 
 .plugin-package-guide { overflow: hidden; margin-top: 28px; }
 .plugin-package-guide > summary { display: flex; min-height: 74px; align-items: center; justify-content: space-between; gap: 18px; list-style: none; padding: 18px 22px; cursor: pointer; }
