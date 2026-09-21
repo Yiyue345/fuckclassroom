@@ -9,7 +9,7 @@ from fuckclassroom.course_selection.catalog import (
     _normalize_catalog_course,
 )
 from fuckclassroom.course_selection.models import CourseSelectionApiError
-from fuckclassroom.web.app import _resolve_catalog_queue_batch
+from fuckclassroom.plugins.course_selection.routes import _resolve_catalog_queue_batch
 
 
 class CatalogParsingTests(unittest.TestCase):

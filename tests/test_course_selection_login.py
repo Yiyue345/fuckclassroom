@@ -16,7 +16,7 @@ from fuckclassroom.course_selection.session import (
     _interactive_login_timeout_ms,
 )
 from fuckclassroom.auth.credentials import SelectionCredentials
-from fuckclassroom.web.app import _login_and_refresh_selection_info
+from fuckclassroom.plugins.course_selection.routes import _login_and_refresh_selection_info
 
 
 class _SavedCredentialStore:

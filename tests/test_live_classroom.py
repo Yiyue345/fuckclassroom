@@ -16,7 +16,7 @@ from fuckclassroom.classroom.client import (
     rewrite_live_playlist,
 )
 from fuckclassroom.core.config import AppConfig
-from fuckclassroom.web.app import _reconcile_live_status
+from fuckclassroom.plugins.classroom.routes import _reconcile_live_status
 
 
 class LiveClassroomTests(unittest.TestCase):
