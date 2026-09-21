@@ -33,6 +33,17 @@ $env:FUCKCLASSROOM_PORT="8766"
 .\.venv\Scripts\python.exe main.py
 ```
 
+## 插件模式
+
+当前 `pluginization` 分支支持按需启用功能插件。默认启动全部功能；也可以通过 `FUCKCLASSROOM_PLUGINS` 只加载需要的 Route、Service 和 Lifecycle：
+
+```powershell
+$env:FUCKCLASSROOM_PLUGINS="classroom"
+.\.venv\Scripts\python.exe main.py
+```
+
+可用内置插件 ID 为 `classroom` 和 `course_selection`，`core_ui` 始终启用。详细架构和新增插件方式见 `docs/plugins.md`。
+
 ## 首次配置与登录
 
 1. 打开左下角的“设置”。
