@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from ...classroom.ketangpai import KetangpaiClient, KetangpaiCredentialStore
+from .ketangpai import KetangpaiClient, KetangpaiCredentialStore
 from ...core.plugins import PluginContext
 
 

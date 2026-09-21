@@ -10,7 +10,7 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from fuckclassroom.classroom.ketangpai import (
+from fuckclassroom.plugins.attendance.ketangpai import (
     KetangpaiAuthenticationError,
     KetangpaiClient,
     KetangpaiCredentialStore,
@@ -93,7 +93,7 @@ class KetangpaiTests(unittest.TestCase):
                 self.assertEqual(timeout, 30)
                 return _Response({"status": 1, "data": {"token": "session-token"}})
 
-            with patch("fuckclassroom.classroom.ketangpai.urlopen", side_effect=fake_open):
+            with patch("fuckclassroom.plugins.attendance.ketangpai.urlopen", side_effect=fake_open):
                 status = client.login_password("student-id", "secret-password")
 
             self.assertTrue(status.is_valid)
@@ -121,7 +121,7 @@ class KetangpaiTests(unittest.TestCase):
                 captured["token"] = request.headers.get("Token")
                 return _Response({"status": 1, "data": {"state": 8, "info": "签到成功"}})
 
-            with patch("fuckclassroom.classroom.ketangpai.urlopen", side_effect=fake_open):
+            with patch("fuckclassroom.plugins.attendance.ketangpai.urlopen", side_effect=fake_open):
                 result = client.submit_scan(
                     "https://www.ketangpai.com/sign/scan?ticketid=t1&expire=e1&sign=s1"
                 )

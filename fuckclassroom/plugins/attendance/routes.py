@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from ...auth.credentials import CredentialStoreError
-from ...classroom.ketangpai import KetangpaiError
+from .ketangpai import KetangpaiError
 from .qr import register_qr_assistant_routes
 
 

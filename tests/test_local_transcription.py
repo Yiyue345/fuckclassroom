@@ -14,8 +14,8 @@ from fuckclassroom.classroom.client import (
     Lesson,
     LessonResource,
 )
-from fuckclassroom.classroom.extraction import LessonExtractionService
-from fuckclassroom.classroom.transcription import LocalTranscriptionService
+from fuckclassroom.plugins.processing.extraction import LessonExtractionService
+from fuckclassroom.plugins.transcription.engine import LocalTranscriptionService
 from fuckclassroom.core.config import AppConfig
 
 

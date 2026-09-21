@@ -9,16 +9,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fuckclassroom.classroom import extraction
-from fuckclassroom.classroom.extraction import LessonExtractionService, _rapidocr_ocr
+from fuckclassroom.plugins.ocr import engine
+from fuckclassroom.plugins.ocr.engine import rapidocr_ocr
+from fuckclassroom.plugins.ocr.services import OcrService
 from fuckclassroom.core.config import AppConfig
 
 
 class OcrRuntimeOptimizationTests(unittest.TestCase):
     def tearDown(self) -> None:
         for name in ("engine", "engine_key"):
-            if hasattr(extraction._RAPID_OCR_LOCAL, name):
-                delattr(extraction._RAPID_OCR_LOCAL, name)
+            if hasattr(engine._RAPID_OCR_LOCAL, name):
+                delattr(engine._RAPID_OCR_LOCAL, name)
 
     def test_rapidocr_receives_bounded_onnx_threads_and_disables_angle_cls(self) -> None:
         observed: dict[str, object] = {}
@@ -33,7 +34,7 @@ class OcrRuntimeOptimizationTests(unittest.TestCase):
 
         fake_module = SimpleNamespace(RapidOCR=FakeRapidOCR)
         with patch.dict(sys.modules, {"rapidocr_onnxruntime": fake_module}):
-            text = _rapidocr_ocr(
+            text = rapidocr_ocr(
                 b"image",
                 onnx_threads=1,
                 max_side=1600,
@@ -66,21 +67,21 @@ class OcrRuntimeOptimizationTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            service = LessonExtractionService(AppConfig(data_dir=data_dir))
+            service = OcrService(AppConfig(data_dir=data_dir))
             stats = {"cache_hits": 0, "inferences": 0}
             stats_lock = threading.Lock()
 
             with patch(
-                "fuckclassroom.classroom.extraction._rapidocr_ocr",
+                "fuckclassroom.plugins.ocr.services.rapidocr_ocr",
                 return_value="缓存课堂文字",
             ) as mocked:
-                first = service._ocr_image(
+                first = service.ocr_image(
                     b"same-image",
                     "first.jpg",
                     stats=stats,
                     stats_lock=stats_lock,
                 )
-                second = service._ocr_image(
+                second = service.ocr_image(
                     b"same-image",
                     "renamed.jpg",
                     stats=stats,

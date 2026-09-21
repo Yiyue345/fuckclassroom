@@ -133,6 +133,24 @@ PluginSpec(
 - `course_selection` 的教务会话验证、缓存刷新、自动选课启动属于 startup；
 - 自动选课停止和 Hy2 停止属于 shutdown。
 
+## 源码归属与兼容路径
+
+功能实现现在以插件目录为唯一主路径：
+
+```text
+processing/extraction.py     课次处理与 PPT 文本编排
+transcription/engine.py      faster-whisper
+ocr/engine.py                RapidOCR / Tesseract 后端
+ocr/compat.py                RapidOCR 兼容补丁
+ai_summary/client.py         AI API client
+attendance/scanner.py        二维码识别
+attendance/ketangpai.py      课堂派 client
+```
+
+旧的 `fuckclassroom/classroom/extraction.py`、`transcription.py`、`ai.py`、`qr_scan.py`、`ketangpai.py` 和 `rapidocr_compat.py` 仅保留兼容 re-export，仓库内部代码和测试不再把这些旧路径当作实现入口。
+
+`classroom/__init__.py` 也不会再无条件安装 OCR 兼容补丁或 failure guard，因此只启用 `classroom` 时不会初始化 OCR/ASR/AI/签到实现。
+
 ## 新增插件的最小流程
 
 1. 在 `fuckclassroom/plugins/<plugin_id>/` 创建插件目录。

@@ -7,7 +7,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from fuckclassroom.classroom.extraction import extract_pptx_text
+from fuckclassroom.plugins.processing.extraction import extract_pptx_text
 
 
 class OcrConcurrencyTests(unittest.TestCase):

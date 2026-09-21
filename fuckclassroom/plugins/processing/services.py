@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...classroom.extraction import LessonExtractionService
+from .extraction import LessonExtractionService
 from ...core.plugins import PluginContext
 
 

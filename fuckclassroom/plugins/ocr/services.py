@@ -8,14 +8,15 @@ import threading
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
-from ...classroom.ai import AIClient
-from ...classroom.extraction import (
-    ExtractionError,
-    _increment_ocr_stat,
-    _rapidocr_ocr,
-    _tesseract_ocr,
-    _write_cache_text,
+from ..ai_summary.client import AIClient
+from .compat import install_rapidocr_compat
+from .engine import (
+    increment_ocr_stat,
+    rapidocr_ocr,
+    tesseract_ocr,
+    write_cache_text,
 )
+from ..processing.extraction import ExtractionError
 from ...core.plugins import PluginContext
 
 
@@ -42,18 +43,18 @@ class OcrService:
                     except OSError:
                         pass
                     else:
-                        _increment_ocr_stat(stats, stats_lock, "cache_hits")
+                        increment_ocr_stat(stats, stats_lock, "cache_hits")
                         return text
 
-                text = _rapidocr_ocr(
+                text = rapidocr_ocr(
                     image_bytes,
                     onnx_threads=self.config.ocr_onnx_threads,
                     max_side=self.config.ocr_max_side,
                     use_angle_cls=self.config.ocr_use_angle_cls,
                 )
-                _increment_ocr_stat(stats, stats_lock, "inferences")
+                increment_ocr_stat(stats, stats_lock, "inferences")
                 if cache_path is not None:
-                    _write_cache_text(cache_path, text)
+                    write_cache_text(cache_path, text)
                 return text
             except ImportError:
                 if engine == "rapidocr":
@@ -62,12 +63,12 @@ class OcrService:
                     ) from None
 
         if engine in ("auto", "tesseract") and shutil.which("tesseract"):
-            _increment_ocr_stat(stats, stats_lock, "inferences")
-            return _tesseract_ocr(image_bytes, image_name)
+            increment_ocr_stat(stats, stats_lock, "inferences")
+            return tesseract_ocr(image_bytes, image_name)
 
         if engine in ("auto", "ai"):
             media_type = mimetypes.guess_type(image_name)[0] or "image/png"
-            _increment_ocr_stat(stats, stats_lock, "inferences")
+            increment_ocr_stat(stats, stats_lock, "inferences")
             return self.ai.ocr_image(image_bytes, media_type)
 
         raise ExtractionError("未找到可用 OCR 引擎。")
@@ -113,6 +114,7 @@ class OcrService:
 
 
 def setup_services(context: PluginContext) -> None:
+    install_rapidocr_compat()
     context.services.add("ocr_service", OcrService(context.config))
 
 

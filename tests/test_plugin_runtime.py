@@ -42,6 +42,24 @@ class PluginCompositionTests(unittest.TestCase):
         for plugin_id in ("classroom", "attendance", "course_selection"):
             self.assertTrue((Path("fuckclassroom/plugins") / plugin_id / "lifecycle.py").exists())
 
+        implementations = (
+            "fuckclassroom/plugins/processing/extraction.py",
+            "fuckclassroom/plugins/transcription/engine.py",
+            "fuckclassroom/plugins/ocr/engine.py",
+            "fuckclassroom/plugins/ocr/compat.py",
+            "fuckclassroom/plugins/ai_summary/client.py",
+            "fuckclassroom/plugins/attendance/scanner.py",
+            "fuckclassroom/plugins/attendance/ketangpai.py",
+        )
+        for implementation in implementations:
+            self.assertTrue(Path(implementation).exists())
+
+        classroom_init = Path("fuckclassroom/classroom/__init__.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("install_rapidocr_compat", classroom_init)
+        self.assertNotIn("install_ocr_failure_guard", classroom_init)
+
     def test_registry_can_enable_feature_plugins_independently(self) -> None:
         classroom = build_plugin_registry({"classroom"})
         selection = build_plugin_registry({"course_selection"})

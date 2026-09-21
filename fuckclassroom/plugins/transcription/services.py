@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...classroom.transcription import LocalTranscriptionService
+from .engine import LocalTranscriptionService
 from ...core.plugins import PluginContext
 
 

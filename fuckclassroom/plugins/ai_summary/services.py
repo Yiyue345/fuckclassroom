@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...classroom.ai import AIClient
+from .client import AIClient
 from ...core.plugins import PluginContext
 
 

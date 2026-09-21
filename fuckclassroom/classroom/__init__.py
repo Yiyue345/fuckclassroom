@@ -1,8 +1,4 @@
-"""Classroom platform client and lesson-processing services."""
-
-from .rapidocr_compat import install_rapidocr_compat
-
-install_rapidocr_compat()
+"""Classroom platform client and course playback services."""
 
 from .client import (
     ClassroomClient,
@@ -20,10 +16,8 @@ from .client import (
     is_allowed_live_media_url,
     rewrite_live_playlist,
 )
-from .ocr_integrity import install_ocr_failure_guard
 from .semester_sync import SemesterSnapshot, SemesterSyncService
 
-install_ocr_failure_guard()
 
 __all__ = [
     "ClassroomClient",

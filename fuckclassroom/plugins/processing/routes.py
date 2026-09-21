@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
 from ...classroom import ClassroomClientError
-from ...classroom.extraction import ExtractionError
+from .extraction import ExtractionError
 from ...web.responses import task_started_response
 
 

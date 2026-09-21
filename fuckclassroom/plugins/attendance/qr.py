@@ -6,13 +6,13 @@ from urllib.parse import urljoin
 from fastapi import APIRouter, HTTPException
 
 from ...classroom import ClassroomClient, ClassroomClientError
-from ...classroom.ketangpai import (
+from .ketangpai import (
     KetangpaiAuthenticationError,
     KetangpaiClient,
     KetangpaiCredentialStore,
     KetangpaiError,
 )
-from ...classroom.qr_scan import (
+from .scanner import (
     QRScannerError,
     QRScannerUnavailable,
     WxScanService,

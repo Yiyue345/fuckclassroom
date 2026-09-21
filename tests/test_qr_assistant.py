@@ -11,8 +11,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from fuckclassroom.classroom import LivePptSlide
-from fuckclassroom.classroom.ketangpai import KetangpaiAuthenticationError
-from fuckclassroom.classroom.qr_scan import (
+from fuckclassroom.plugins.attendance.ketangpai import KetangpaiAuthenticationError
+from fuckclassroom.plugins.attendance.scanner import (
     QRScannerUnavailable,
     WxScanService,
     analyze_qr_payload,
@@ -168,7 +168,7 @@ class QrAssistantTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             service = WxScanService(AppConfig(data_dir=Path(directory)))
             with patch(
-                "fuckclassroom.classroom.qr_scan.importlib.import_module",
+                "fuckclassroom.plugins.attendance.scanner.importlib.import_module",
                 side_effect=ImportError("wxscan is not installed"),
             ):
                 decoded = service.scan_image(png.tobytes())
@@ -265,7 +265,7 @@ class QrAssistantTests(unittest.TestCase):
                 scanner=WxScanService(AppConfig(data_dir=Path(directory))),
             )
             with patch(
-                "fuckclassroom.classroom.qr_scan.importlib.import_module",
+                "fuckclassroom.plugins.attendance.scanner.importlib.import_module",
                 side_effect=ImportError("wxscan is not installed"),
             ):
                 response = TestClient(app).post(
