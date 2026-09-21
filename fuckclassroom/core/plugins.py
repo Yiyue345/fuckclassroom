@@ -99,8 +99,19 @@ class PluginContext:
     def create_task(self, awaitable: Any) -> asyncio.Task[Any]:
         return self._runtime.create_background_task(self.plugin_id, awaitable)
 
+    async def notify_settings_saved(
+        self,
+        settings: object,
+        form: dict[str, str],
+    ) -> tuple[str, ...]:
+        return await self._runtime.notify_settings_saved(settings, form)
+
+    async def clear_plugin_sessions(self) -> tuple[str, ...]:
+        return await self._runtime.clear_plugin_sessions()
+
 
 PluginHook = Callable[[PluginContext], object]
+SettingsSavedHook = Callable[[PluginContext, object, dict[str, str]], object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +135,8 @@ class PluginSpec:
     route_factory: PluginHook | None = None
     startup: PluginHook | None = None
     shutdown: PluginHook | None = None
+    settings_saved: SettingsSavedHook | None = None
+    clear_session: PluginHook | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,6 +328,38 @@ class PluginRuntime:
         self._background_tasks.setdefault(plugin_id, []).append(task)
         return task
 
+    async def notify_settings_saved(
+        self,
+        settings: object,
+        form: dict[str, str],
+    ) -> tuple[str, ...]:
+        errors: list[str] = []
+        for plugin in self.registry.plugins:
+            if plugin.settings_saved is None:
+                continue
+            try:
+                result = plugin.settings_saved(self._context(plugin.id), settings, form)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:  # noqa: BLE001 - one plugin must not block persistence.
+                self.logger.warning("插件 %s 应用设置失败：%s", plugin.id, exc)
+                errors.append(f"{plugin.name}: {exc}")
+        return tuple(errors)
+
+    async def clear_plugin_sessions(self) -> tuple[str, ...]:
+        errors: list[str] = []
+        for plugin in self.registry.plugins:
+            if plugin.clear_session is None:
+                continue
+            try:
+                result = plugin.clear_session(self._context(plugin.id))
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:  # noqa: BLE001 - continue clearing other sessions.
+                self.logger.warning("插件 %s 清除会话失败：%s", plugin.id, exc)
+                errors.append(f"{plugin.name}: {exc}")
+        return tuple(errors)
+
     async def start(self) -> None:
         for plugin in self.registry.plugins:
             if plugin.startup is None:
@@ -362,5 +407,6 @@ __all__ = [
     "PluginSpec",
     "ServiceContainer",
     "SettingsPanel",
+    "SettingsSavedHook",
     "StaticMount",
 ]

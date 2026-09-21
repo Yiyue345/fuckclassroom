@@ -16,7 +16,6 @@ from ..manager import PluginManagerError
 
 def build_router(context: PluginContext) -> APIRouter:
     router = APIRouter()
-    app_config = context.config
     plugin_registry = context.registry
     services = context.services
 
@@ -27,12 +26,6 @@ def build_router(context: PluginContext) -> APIRouter:
     credential_store = services.get("credential_store")
     verification_broker = services.get("verification_broker")
     plugin_manager = services.get("plugin_manager")
-
-    auth_service = services.maybe("auth_service")
-
-    hy2_proxy = services.maybe("hy2_proxy")
-    course_selection = services.maybe("course_selection")
-    auto_selection = services.maybe("auto_selection")
 
     @router.get("/")
     def index() -> RedirectResponse:
@@ -239,7 +232,7 @@ def build_router(context: PluginContext) -> APIRouter:
                 "settings": settings_store.load().to_public_dict(),
                 "settings_panels": panels,
                 "saved": request.query_params.get("saved") == "1",
-                "hy2_built": request.query_params.get("hy2_built") == "1",
+                "settings_error": request.query_params.get("settings_error"),
                 "cache_cleared": request.query_params.get("cache_cleared") == "1",
                 "cache_error": request.query_params.get("cache_error"),
                 "credential_error": request.query_params.get("credential_error"),
@@ -259,23 +252,19 @@ def build_router(context: PluginContext) -> APIRouter:
         updated = settings_store.update_from_form(form)
         try:
             credential_store.update_from_form(
-                form.get("selection_username", ""), form.get("selection_password", "")
+                form.get("account_username", ""), form.get("account_password", "")
             )
         except CredentialStoreError as exc:
             return RedirectResponse(f"/settings?credential_error={quote(str(exc))}", status_code=303)
-        if course_selection is not None:
-            course_selection.invalidate_access_mode()
-        if auto_selection is not None:
-            auto_selection.configure_intervals(
-                retry_seconds=updated.auto_selection_retry_seconds,
-                session_retry_seconds=updated.auto_selection_session_retry_seconds,
-                capacity_retry_seconds=updated.auto_selection_capacity_retry_seconds,
+        hook_errors = await context.notify_settings_saved(updated, form)
+        if hook_errors:
+            return RedirectResponse(
+                f"/settings?saved=1&settings_error={quote('; '.join(hook_errors))}",
+                status_code=303,
             )
-        if hy2_proxy is not None and not updated.hy2_enabled:
-            hy2_proxy.stop()
         return RedirectResponse("/settings?saved=1", status_code=303)
 
-    @router.post("/settings/selection-credentials/clear")
+    @router.post("/settings/credentials/clear")
     def clear_selection_credentials() -> RedirectResponse:
         try:
             credential_store.clear()
@@ -284,18 +273,8 @@ def build_router(context: PluginContext) -> APIRouter:
         return RedirectResponse("/settings?credentials_cleared=1", status_code=303)
 
     @router.post("/settings/login-state/clear")
-    def clear_login_state() -> RedirectResponse:
-        errors: list[str] = []
-        clears = []
-        if auth_service is not None:
-            clears.append(auth_service.clear_session)
-        if course_selection is not None:
-            clears.append(course_selection.clear_session)
-        for clear in clears:
-            try:
-                clear()
-            except OSError as exc:
-                errors.append(str(exc))
+    async def clear_login_state() -> RedirectResponse:
+        errors = await context.clear_plugin_sessions()
         if errors:
             return RedirectResponse(
                 f"/settings?login_state_error={quote('; '.join(errors))}",
@@ -339,7 +318,6 @@ def build_router(context: PluginContext) -> APIRouter:
             "core/task_status.html",
             {
                 "task": task,
-                "auto_open_outputs": app_config.auto_open_outputs_after_extract and task.title == "提取文字",
             },
         )
 

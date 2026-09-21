@@ -11,9 +11,10 @@
   <div class="page-head"><div><h1>设置</h1><p class="page-description">设置项由已启用插件注册；关闭某个功能后，对应设置面板可独立移除。</p></div><div class="head-actions"><button class="btn primary" type="submit" form="settings-form">保存更改</button></div></div>
 
   {% if saved %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>设置已保存。</span></div>{% endif %}
+  {% if settings_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>部分插件未能立即应用设置：{{ settings_error }}</span></div>{% endif %}
   {% if cache_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>缓存已清除。</span></div>{% endif %}
   {% if credentials_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>统一桂电自动登录凭据已清除。</span></div>{% endif %}
-  {% if login_state_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>课程录播与本科教务登录状态已清除。</span></div>{% endif %}
+  {% if login_state_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>已启用插件的登录状态已清除。</span></div>{% endif %}
   {% if cache_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>缓存清除失败：{{ cache_error }}</span></div>{% endif %}
   {% if credential_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ credential_error }}</span></div>{% endif %}
   {% if login_state_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>登录状态清除失败：{{ login_state_error }}</span></div>{% endif %}
