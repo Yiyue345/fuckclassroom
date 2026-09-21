@@ -62,6 +62,7 @@ class PluginCompositionTests(unittest.TestCase):
                 "credential_store",
                 "verification_broker",
                 "login_lock",
+                "templates",
             },
         )
 
