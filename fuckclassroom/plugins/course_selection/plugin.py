@@ -30,6 +30,21 @@ def build_account_context(services, request):
     return build(services, request)
 
 
+def build_selection_network_context(services, request):
+    from .settings_hooks import build_selection_network_context as build
+    return build(services, request)
+
+
+def apply_settings(context: PluginContext, settings, form):
+    from .settings_hooks import apply_settings as apply
+    return apply(context, settings, form)
+
+
+def clear_session(context: PluginContext):
+    from .settings_hooks import clear_session as clear
+    return clear(context)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="course_selection",
@@ -39,6 +54,8 @@ def build_plugin() -> PluginSpec:
         route_factory=build_routes,
         startup=startup,
         shutdown=shutdown,
+        settings_saved=apply_settings,
+        clear_session=clear_session,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
         stylesheets=("/plugins/course_selection/static/selection.css?v=20260921-1",),
@@ -74,6 +91,14 @@ def build_plugin() -> PluginSpec:
         ),
         settings_panels=(
             SettingsPanel(key="auto-selection", label="定时选课", template="selection_settings_auto.html", order=30),
+            SettingsPanel(
+                key="selection-network",
+                label="教务访问",
+                template="selection_settings_network.html",
+                order=35,
+                checkbox_fields=("hy2_enabled",),
+                context_factory=build_selection_network_context,
+            ),
         ),
         sidebar_templates=("selection_sidebar_session.html",),
         topbar_status_templates=("selection_topbar_status.html",),

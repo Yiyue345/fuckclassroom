@@ -31,6 +31,10 @@ def build_course_settings_context(services, request):
     return build(services, request)
 
 
+def clear_session(context: PluginContext):
+    return context.services.get("auth_service").clear_session()
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="classroom",
@@ -39,6 +43,7 @@ def build_plugin() -> PluginSpec:
         service_factory=setup_services,
         route_factory=build_routes,
         startup=startup,
+        clear_session=clear_session,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
         stylesheets=("/plugins/classroom/static/classroom.css?v=20260921-1",),

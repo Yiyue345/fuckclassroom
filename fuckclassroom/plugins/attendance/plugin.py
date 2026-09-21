@@ -26,6 +26,10 @@ def build_account_context(services, request):
     return build(services, request)
 
 
+def clear_session(context: PluginContext):
+    return context.services.get("ketangpai_client").clear_session()
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="attendance",
@@ -35,6 +39,7 @@ def build_plugin() -> PluginSpec:
         service_factory=setup_services,
         route_factory=build_routes,
         startup=startup,
+        clear_session=clear_session,
         template_dir=PLUGIN_DIR / "templates",
         account_panels=(
             AccountPanel(
