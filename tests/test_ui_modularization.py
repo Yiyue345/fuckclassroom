@@ -177,5 +177,55 @@ class UiModularizationTests(unittest.TestCase):
         self.assertFalse(Path("static/task_status.css").exists())
 
 
+    def test_core_ui_settings_are_feature_agnostic(self) -> None:
+        routes = Path("fuckclassroom/plugins/core_ui/routes.py").read_text(encoding="utf-8")
+        network = Path(
+            "fuckclassroom/plugins/core_ui/templates/core_settings_network.html"
+        ).read_text(encoding="utf-8")
+        selection_network = Path(
+            "fuckclassroom/plugins/course_selection/templates/selection_settings_network.html"
+        ).read_text(encoding="utf-8")
+        selection_hooks = Path(
+            "fuckclassroom/plugins/course_selection/settings_hooks.py"
+        ).read_text(encoding="utf-8")
+
+        for feature_name in ("hy2_proxy", "course_selection", "auto_selection"):
+            self.assertNotIn(feature_name, routes)
+        self.assertIn("context.notify_settings_saved", routes)
+        self.assertIn("context.clear_plugin_sessions", routes)
+        self.assertNotIn("Hy2", network)
+        self.assertNotIn("本科教务", network)
+        self.assertNotIn("selection_username", network)
+        self.assertNotIn("selection_password", network)
+        self.assertIn("account_username", network)
+        self.assertIn("account_password", network)
+        self.assertIn("Hy2", selection_network)
+        self.assertIn("hy2_proxy", selection_hooks)
+        self.assertIn("auto_selection.configure_intervals", selection_hooks)
+
+    def test_task_behavior_is_declared_by_task_owner(self) -> None:
+        core_routes = Path(
+            "fuckclassroom/plugins/core_ui/routes.py"
+        ).read_text(encoding="utf-8")
+        task_template = Path(
+            "fuckclassroom/plugins/core_ui/templates/core/task_status.html"
+        ).read_text(encoding="utf-8")
+        task_script = Path(
+            "fuckclassroom/plugins/core_ui/static/task_status.js"
+        ).read_text(encoding="utf-8")
+        processing_routes = Path(
+            "fuckclassroom/plugins/processing/routes.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("auto_open_outputs_after_extract", core_routes)
+        self.assertNotIn('"提取文字"', core_routes)
+        self.assertNotIn("data-auto-open", task_template)
+        self.assertIn("task.auto_open_result", task_script)
+        self.assertIn(
+            "auto_open_result=context.config.auto_open_outputs_after_extract",
+            processing_routes,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

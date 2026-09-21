@@ -193,6 +193,8 @@ def build_plugin() -> PluginSpec:
 | `route_factory` | 路由构建 hook |
 | `startup` | 应用启动 hook |
 | `shutdown` | 应用退出 hook |
+| `settings_saved` | 全局设置持久化后通知当前插件；适合刷新运行时配置 |
+| `clear_session` | Core 请求清除登录状态时，由插件自行清理自己的会话 |
 
 推荐让 `plugin.py` 保持轻量，只放元数据和 lazy wrapper：
 
@@ -513,6 +515,18 @@ task = task_manager.start(
 ```
 
 worker 返回值如果是字符串，会作为任务的 `result_url`。
+
+如果任务完成后允许任务中心自动打开结果页，可以由创建任务的插件显式声明：
+
+```python
+task = task_manager.start(
+    "My Plugin · 处理任务",
+    worker,
+    auto_open_result=True,
+)
+```
+
+`auto_open_result` 是任务元数据；Core 不会根据任务标题或插件类型猜测这个行为。
 
 ### `TaskProgressReporter`
 
@@ -930,6 +944,29 @@ async def shutdown(context: PluginContext):
 使用 `context.create_task()` 创建的 asyncio task 会在 shutdown hook **之前**由 runtime 统一取消。
 
 shutdown 按插件顺序反向执行，使高层插件先退出、底层依赖后退出。
+
+### settings_saved
+
+当 Core 设置页完成持久化后，会调用已启用插件注册的 `settings_saved`。插件可以在这里把新设置应用到已经创建的 service，而不需要 Core 知道具体 service：
+
+```python
+def settings_saved(context: PluginContext, settings, form):
+    service = context.services.get("my_plugin.service")
+    service.configure(settings)
+```
+
+该 hook 可以是同步或异步函数。异常会被 Core 记录并反馈到设置页，但不会回滚已经写入磁盘的设置。
+
+### clear_session
+
+如果插件持有登录会话，可以注册 `clear_session`：
+
+```python
+def clear_session(context: PluginContext):
+    context.services.get("my_plugin.client").clear_session()
+```
+
+用户执行“清除插件登录状态”时，Runtime 只遍历当前启用且声明了此 hook 的插件。Core 不应直接引用具体业务插件的登录 service。
 
 ---
 

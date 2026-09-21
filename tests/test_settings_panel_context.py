@@ -47,6 +47,8 @@ class SettingsPanelContextTests(unittest.TestCase):
             self.assertIn('id="network"', body)
             self.assertIn('id="storage"', body)
             self.assertNotIn('id="courses"', body)
+            self.assertNotIn('id="selection-network"', body)
+            self.assertNotIn("Hy2", body)
 
     def test_classroom_settings_context_supplies_terms_to_its_panel(self) -> None:
         term = SimpleNamespace(id="2026-1", year="2026", season="1", current=True)

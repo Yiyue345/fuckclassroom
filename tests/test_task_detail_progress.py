@@ -102,5 +102,19 @@ class TaskDetailProgressTests(unittest.TestCase):
         self.assertTrue(any(entry["level"] == "debug" and "Traceback" in entry["message"] for entry in logs))
 
 
+    def test_task_can_declare_auto_open_result_metadata(self) -> None:
+        manager = TaskManager()
+
+        def worker(progress):
+            progress(100, "完成")
+            return "/done"
+
+        task = manager.start("带结果行为的任务", worker, auto_open_result=True)
+        state = manager.as_dict(task.id)
+
+        self.assertIsNotNone(state)
+        self.assertTrue(state["auto_open_result"])
+
+
 if __name__ == "__main__":
     unittest.main()

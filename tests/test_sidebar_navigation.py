@@ -60,6 +60,7 @@ class SidebarNavigationTests(unittest.TestCase):
                 "courses",
                 "processing",
                 "auto-selection",
+                "selection-network",
                 "network",
                 "transcription",
                 "ocr",
@@ -89,6 +90,7 @@ class SidebarNavigationTests(unittest.TestCase):
 
         panels = {panel.key: panel for panel in registry.settings_panels}
         self.assertIsNotNone(panels["courses"].context_factory)
+        self.assertIsNotNone(panels["selection-network"].context_factory)
         self.assertIsNotNone(panels["network"].context_factory)
         self.assertIsNotNone(panels["storage"].context_factory)
         self.assertIn("plugin_registry.system_label(active_system)", base)
