@@ -236,8 +236,10 @@ class PluginRuntime:
     def include_routes(self, app: Any) -> None:
         for plugin in self.registry.plugins:
             router = self._routers.get(plugin.id)
-            if router is not None:
-                app.include_router(router)
+            if router is None:
+                continue
+            for route in tuple(getattr(router, "routes", ())):
+                app.router.routes.append(route)
 
     def create_background_task(self, plugin_id: str, awaitable: Any) -> asyncio.Task[Any]:
         task = asyncio.create_task(awaitable)
