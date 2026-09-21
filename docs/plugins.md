@@ -141,7 +141,7 @@ PluginSpec(
 
 UI 与后端使用相同的所有权边界。
 
-当前根目录 `templates/` 只保留应用壳层模板，例如 `base.html`。功能页面已经物理迁移到所属插件：
+当前根目录 `templates/` 只保留应用壳层 `base.html`；具体页面全部归所属插件。功能页面已经物理迁移到所属插件：
 
 ```text
 core_ui/templates/core/...

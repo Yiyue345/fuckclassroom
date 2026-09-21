@@ -23,7 +23,9 @@ class UiModularizationTests(unittest.TestCase):
             "selection_captures.html",
             "selection_capture_detail.html",
         }
-        self.assertFalse(forbidden.intersection(path.name for path in root.glob("*.html")))
+        root_templates = {path.name for path in root.glob("*.html")}
+        self.assertFalse(forbidden.intersection(root_templates))
+        self.assertEqual(root_templates, {"base.html"})
 
         expected = (
             Path("fuckclassroom/plugins/core_ui/templates/core/accounts.html"),
