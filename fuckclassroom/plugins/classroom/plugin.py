@@ -54,7 +54,6 @@ def build_plugin() -> PluginSpec:
                 items=(
                     NavigationItem(key="overview", label="概览", href="/classroom", icon="layout-dashboard", active_keys=("overview",)),
                     NavigationItem(key="courses", label="我的课程", href="/courses", icon="book-open", active_keys=("courses",), badge_template="classroom_badge_courses.html"),
-                    NavigationItem(key="tasks", label="提取与总结", href="/tasks", icon="list-todo", active_keys=("tasks",), badge_template="classroom_badge_tasks.html"),
                     NavigationItem(key="downloads", label="文件管理", href="/downloads", icon="folder", active_keys=("downloads",)),
                 ),
             ),

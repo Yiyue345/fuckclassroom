@@ -334,25 +334,11 @@ def build_router(context: PluginContext) -> APIRouter:
         task = task_manager.get(task_id)
         if task is None:
             raise HTTPException(status_code=404, detail="任务不存在")
-        selection_task = any(
-            marker in task.title
-            for marker in ("选课", "WebVPN", "本科教务", "Hy2", "缓存课程", "退选", "课程信息")
-        )
         return templates.TemplateResponse(
             request,
             "core/task_status.html",
             {
                 "task": task,
-                "active_system": "selection" if selection_task else "classroom",
-                "session": (
-                    course_selection.get_session_status()
-                    if selection_task and course_selection is not None
-                    else (
-                        auth_service.get_session_status()
-                        if auth_service is not None
-                        else {}
-                    )
-                ),
                 "auto_open_outputs": app_config.auto_open_outputs_after_extract and task.title == "提取文字",
             },
         )
@@ -363,11 +349,6 @@ def build_router(context: PluginContext) -> APIRouter:
             request,
             "core/tasks.html",
             {
-                "session": (
-                    auth_service.get_session_status()
-                    if auth_service is not None
-                    else {}
-                ),
                 "tasks": task_manager.list_recent(),
             },
         )

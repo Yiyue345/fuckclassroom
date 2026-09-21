@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% set active_system = "classroom" %}
+{% set active_system = "common" %}
 {% set active_nav = "tasks" %}
 
-{% block title %}提取与总结 · 学业助手{% endblock %}
-{% block page_title %}提取与总结{% endblock %}
+{% block title %}任务中心 · 学业助手{% endblock %}
+{% block page_title %}任务中心{% endblock %}
 
 {% block content %}
   <div class="page-head">
-    <div><h1>提取与总结</h1><p class="page-description">查看本次运行期间的 OCR、语音转写、AI 总结和选课数据刷新任务；点击任务可查看实时日志或取消。</p></div>
+    <div><h1>任务中心</h1><p class="page-description">查看当前运行期间由各插件创建的后台任务；点击任务可查看实时日志、结果或执行取消操作。</p></div>
   </div>
 
   <section class="surface task-stack">

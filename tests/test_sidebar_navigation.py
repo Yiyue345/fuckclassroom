@@ -40,6 +40,10 @@ class SidebarNavigationTests(unittest.TestCase):
             },
         )
 
+        by_key = {group.key: group for group in registry.navigation_groups}
+        self.assertIn("/tasks", {item.href for item in by_key["common"].items})
+        self.assertNotIn("/tasks", {item.href for item in by_key["classroom"].items})
+
         template = Path("templates/base.html").read_text(encoding="utf-8")
         self.assertIn("plugin_registry.navigation_groups", template)
         self.assertNotIn('aria-label="课程录播导航"', template)
@@ -143,13 +147,13 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertNotIn("account-session-actions plugin-manager-actions", template)
         self.assertNotIn(">停用</button>", template)
         self.assertNotIn(">启用</button>", template)
-        self.assertIn("/static/app.css?v=20260921-4", base)
+        self.assertIn("/static/app.css?v=20260921-5", base)
 
     def test_plugin_ui_assets_are_registered_by_enabled_plugins(self) -> None:
         registry = build_plugin_registry()
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260921-1",
+            "/plugins/core_ui/static/core_ui.css?v=20260921-2",
             registry.stylesheets,
         )
         self.assertIn(

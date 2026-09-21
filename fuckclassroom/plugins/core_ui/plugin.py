@@ -36,7 +36,7 @@ def build_plugin() -> PluginSpec:
         route_factory=build_routes,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
-        stylesheets=("/plugins/core_ui/static/core_ui.css?v=20260921-1",),
+        stylesheets=("/plugins/core_ui/static/core_ui.css?v=20260921-2",),
         navigation_groups=(
             NavigationGroup(
                 key="common",
@@ -45,6 +45,7 @@ def build_plugin() -> PluginSpec:
                 system="common",
                 order=90,
                 items=(
+                    NavigationItem(key="tasks", label="任务中心", href="/tasks", icon="list-todo", active_keys=("tasks",)),
                     NavigationItem(key="accounts", label="账户与认证", href="/accounts", icon="shield-check", active_keys=("accounts",)),
                     NavigationItem(key="plugins", label="插件管理", href="/plugins", icon="settings", active_keys=("plugins",)),
                     NavigationItem(key="settings", label="设置", href="/settings", icon="settings", active_keys=("settings",)),

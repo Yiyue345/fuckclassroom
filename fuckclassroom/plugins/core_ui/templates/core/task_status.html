@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% set active_nav = "tasks" if active_system == "classroom" else "" %}
+{% set active_system = "common" %}
+{% set active_nav = "tasks" %}
 
 {% block title %}{{ task.title }} · 学业助手{% endblock %}
 {% block page_title %}任务进度{% endblock %}
@@ -10,7 +11,7 @@
     <div><h1>{{ task.title }}</h1><p class="page-description">任务会在后台继续运行；可在安全取消点停止，并实时查看执行日志。</p></div>
     <div class="head-actions task-progress-actions">
       <button class="btn danger{% if task.status != 'running' %} hidden{% endif %}" type="button" id="cancel-task" {% if task.cancel_requested %}disabled{% endif %}><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{% if task.cancel_requested %}正在取消…{% else %}取消任务{% endif %}</span></button>
-      <a class="btn" href="{% if active_system == 'selection' %}/selection/info{% else %}/tasks{% endif %}"><svg class="icon"><use href="/static/icons.svg#arrow-left"></use></svg>返回</a>
+      <a class="btn" href="/tasks"><svg class="icon"><use href="/static/icons.svg#arrow-left"></use></svg>返回</a>
     </div>
   </div>
 

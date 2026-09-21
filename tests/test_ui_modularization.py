@@ -129,13 +129,36 @@ class UiModularizationTests(unittest.TestCase):
         self.assertNotIn(".settings-layout", core)
         self.assertNotIn(".plugin-manager-grid", core)
         self.assertNotIn(".ketangpai-overview", core)
+        self.assertNotIn(".task-stack", core)
         self.assertIn(".course-summary", classroom)
         self.assertIn(".output-actions", processing)
         self.assertIn(".catalog-filters", selection)
         self.assertIn(".settings-layout", core_ui)
         self.assertIn(".plugin-manager-grid", core_ui)
+        self.assertIn(".task-stack", core_ui)
         self.assertNotIn(".ketangpai-overview", core_ui)
         self.assertIn(".ketangpai-overview", attendance)
+
+    def test_core_shell_and_task_pages_are_feature_agnostic(self) -> None:
+        base = Path("templates/base.html").read_text(encoding="utf-8")
+        tasks = Path(
+            "fuckclassroom/plugins/core_ui/templates/core/tasks.html"
+        ).read_text(encoding="utf-8")
+        detail = Path(
+            "fuckclassroom/plugins/core_ui/templates/core/task_status.html"
+        ).read_text(encoding="utf-8")
+        routes = Path(
+            "fuckclassroom/plugins/core_ui/routes.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('<a class="brand" href="/">', base)
+        self.assertNotIn('<a class="brand" href="/classroom">', base)
+        self.assertIn("任务中心", tasks)
+        for phrase in ("OCR、语音转写", "AI 总结和选课"):
+            self.assertNotIn(phrase, tasks)
+        self.assertIn('href="/tasks"', detail)
+        self.assertNotIn("active_system == 'selection'", detail)
+        self.assertNotIn("selection_task = any(", routes)
 
     def test_task_detail_assets_belong_to_core_ui_plugin(self) -> None:
         template = Path(

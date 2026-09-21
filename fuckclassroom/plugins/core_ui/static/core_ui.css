@@ -114,3 +114,16 @@
 @media (max-width: 1320px) {
   .plugin-manager-grid { grid-template-columns: 1fr; }
 }
+
+/* Core task pages. */
+.task-stack { display: grid; }
+.task-item { border-bottom: 1px solid var(--border); padding: 16px 18px; }
+.task-item:last-child { border-bottom: 0; }
+.task-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.task-title { font-size: 12px; font-weight: 670; }
+.task-meta { margin-top: 5px; color: var(--text-muted); font-size: 10px; }
+.task-item .progress { margin-top: 11px; }
+.task-progress-card { max-width: 760px; padding: 24px; }
+.task-progress-card .progress { height: 8px; }
+.task-progress-meta { display: flex; justify-content: space-between; margin: 14px 0 8px; color: var(--text-soft); font-size: 11px; }
+

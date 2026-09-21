@@ -1,4 +1,4 @@
-{% set active_system = active_system|default("classroom") %}
+{% set active_system = active_system|default("common") %}
 {% set active_nav = active_nav|default("") %}
 {% set plugin_registry = request.app.state.plugin_registry %}
 <!doctype html>
@@ -15,14 +15,14 @@
         document.documentElement.dataset.theme = mode === "auto" ? (dark ? "dark" : "light") : mode;
       })();
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=20260921-4">
+    <link rel="stylesheet" href="/static/app.css?v=20260921-5">
     {% for stylesheet in plugin_registry.stylesheets %}<link rel="stylesheet" href="{{ stylesheet }}">{% endfor %}
     {% block head_extra %}{% endblock %}
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <a class="brand" href="/classroom">
+        <a class="brand" href="/">
           <span class="brand-mark">GA</span>
           <span><span class="brand-name">学业助手</span><span class="brand-subtitle">GUET Academic</span></span>
         </a>
