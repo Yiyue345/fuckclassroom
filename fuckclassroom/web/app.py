@@ -609,24 +609,80 @@ def create_app(
 
     @core_router.get("/accounts", response_class=HTMLResponse)
     def accounts(request: Request) -> HTMLResponse:
+        classroom_enabled = plugin_registry.is_enabled("classroom")
+        selection_enabled = plugin_registry.is_enabled("course_selection")
         sms_session_id = request.query_params.get("ketangpai_sms_session", "")
-        with ketangpai_sms_lock:
-            now = time.time()
-            for key in list(ketangpai_sms_sessions):
-                if now - float(ketangpai_sms_sessions[key].get("created_at") or 0) > 600:
-                    ketangpai_sms_sessions.pop(key, None)
-            sms_session = ketangpai_sms_sessions.get(sms_session_id)
+        sms_session = None
+        if classroom_enabled and ketangpai_sms_lock is not None:
+            with ketangpai_sms_lock:
+                now = time.time()
+                for key in list(ketangpai_sms_sessions):
+                    if now - float(ketangpai_sms_sessions[key].get("created_at") or 0) > 600:
+                        ketangpai_sms_sessions.pop(key, None)
+                sms_session = ketangpai_sms_sessions.get(sms_session_id)
+
+        classroom_session = (
+            auth_service.get_session_status()
+            if auth_service is not None
+            else {
+                "is_logged_in": False,
+                "message": "课程录播插件未启用",
+                "saved_at": "",
+                "cookie_count": 0,
+                "final_url": "",
+            }
+        )
+        classroom_login_run = (
+            auth_service.get_login_run_status()
+            if auth_service is not None
+            else {"message": "插件未启用"}
+        )
+        selection_session = (
+            course_selection.get_session_status()
+            if course_selection is not None
+            else {
+                "is_saved": False,
+                "is_valid": False,
+                "message": "本科选课插件未启用",
+                "saved_at": "",
+                "checked_at": "",
+                "final_url": "",
+            }
+        )
+        selection_access = (
+            course_selection.get_access_info()
+            if course_selection is not None
+            else {"label": "未启用"}
+        )
+        selection_credentials = (
+            course_selection.get_credential_status()
+            if course_selection is not None
+            else credential_store.public_status()
+        )
+        ketangpai_session = (
+            ketangpai_client.get_session_status()
+            if ketangpai_client is not None
+            else {
+                "is_valid": False,
+                "is_saved": False,
+                "message": "课程录播插件未启用",
+                "account": "",
+                "login_method": "",
+            }
+        )
         return templates.TemplateResponse(
             request,
             "accounts.html",
             {
-                "classroom_session": auth_service.get_session_status(),
-                "classroom_login_run": auth_service.get_login_run_status(),
-                "selection_session": course_selection.get_session_status(),
-                "selection_access": course_selection.get_access_info(),
-                "credentials": course_selection.get_credential_status(),
+                "classroom_enabled": classroom_enabled,
+                "selection_enabled": selection_enabled,
+                "classroom_session": classroom_session,
+                "classroom_login_run": classroom_login_run,
+                "selection_session": selection_session,
+                "selection_access": selection_access,
+                "credentials": selection_credentials,
                 "select_error": request.query_params.get("select_error"),
-                "ketangpai_session": ketangpai_client.get_session_status(),
+                "ketangpai_session": ketangpai_session,
                 "ketangpai_notice": request.query_params.get("ketangpai_notice"),
                 "ketangpai_error": request.query_params.get("ketangpai_error"),
                 "ketangpai_sms_sent": request.query_params.get("ketangpai_sms_sent") == "1",
@@ -1296,8 +1352,12 @@ def create_app(
                 "active_system": "selection" if selection_task else "classroom",
                 "session": (
                     course_selection.get_session_status()
-                    if selection_task
-                    else auth_service.get_session_status()
+                    if selection_task and course_selection is not None
+                    else (
+                        auth_service.get_session_status()
+                        if auth_service is not None
+                        else {}
+                    )
                 ),
                 "auto_open_outputs": app_config.auto_open_outputs_after_extract and task.title == "提取文字",
             },
@@ -1309,7 +1369,11 @@ def create_app(
             request,
             "tasks.html",
             {
-                "session": auth_service.get_session_status(),
+                "session": (
+                    auth_service.get_session_status()
+                    if auth_service is not None
+                    else {}
+                ),
                 "tasks": task_manager.list_recent(),
             },
         )
