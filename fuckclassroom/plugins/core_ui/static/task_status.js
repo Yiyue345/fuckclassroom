@@ -2,7 +2,6 @@
   const page = document.querySelector("[data-task-page]");
       if (!page) return;
       const taskId = page.dataset.taskId || "";
-      const autoOpen = page.dataset.autoOpen === "true";
       let opened = false;
       let currentLogs = [];
       let logSignature = "";
@@ -105,7 +104,7 @@
           const link = document.getElementById("result-link");
           link.href = task.result_url;
           actions.classList.remove("hidden");
-          if (autoOpen && task.status === "succeeded" && !opened) {
+          if (task.auto_open_result && task.status === "succeeded" && !opened) {
             opened = true;
             window.location.href = task.result_url;
           }

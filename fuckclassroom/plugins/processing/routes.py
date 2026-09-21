@@ -29,7 +29,11 @@ def build_router(context) -> APIRouter:
             )
             return result_url
 
-        task = task_manager.start("提取文字", worker)
+        task = task_manager.start(
+            "提取文字",
+            worker,
+            auto_open_result=context.config.auto_open_outputs_after_extract,
+        )
         return task_started_response(request, task, result_url)
 
     @router.get(

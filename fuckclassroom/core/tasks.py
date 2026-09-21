@@ -30,6 +30,7 @@ class TaskState:
     error: str | None
     created_at: str
     updated_at: str
+    auto_open_result: bool = False
     detail_progress: int | None = None
     detail_message: str | None = None
     cancel_requested: bool = False
@@ -88,6 +89,8 @@ class TaskManager:
         self,
         title: str,
         worker: Callable[[Callable[[int, str], None]], str | None],
+        *,
+        auto_open_result: bool = False,
     ) -> TaskState:
         task_id = uuid.uuid4().hex
         now = _now()
@@ -101,6 +104,7 @@ class TaskManager:
             error=None,
             created_at=now,
             updated_at=now,
+            auto_open_result=bool(auto_open_result),
             logs=[TaskLogEntry(now, "info", "任务已创建")],
         )
         with self._lock:
