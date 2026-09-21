@@ -7,12 +7,18 @@ from pathlib import Path
 
 class LoginStatusIndicatorTests(unittest.TestCase):
     def test_sidebar_and_topbar_expose_each_session_indicator(self) -> None:
-        template = Path("templates/base.html").read_text(encoding="utf-8")
+        base = Path("templates/base.html").read_text(encoding="utf-8")
+        plugin_templates = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in Path("fuckclassroom/plugins").rglob("*.html")
+        )
 
-        self.assertEqual(template.count('data-session-indicator="classroom"'), 3)
-        self.assertEqual(template.count('data-session-indicator="selection"'), 3)
-        self.assertIn('data-session-label="classroom"', template)
-        self.assertIn('data-session-label="selection"', template)
+        self.assertIn("plugin_registry.sidebar_templates", base)
+        self.assertIn("plugin_registry.topbar_status_templates", base)
+        self.assertEqual(plugin_templates.count('data-session-indicator="classroom"'), 3)
+        self.assertEqual(plugin_templates.count('data-session-indicator="selection"'), 3)
+        self.assertIn('data-session-label="classroom"', plugin_templates)
+        self.assertIn('data-session-label="selection"', plugin_templates)
 
     def test_only_login_actions_activate_the_transient_state(self) -> None:
         template = Path("templates/accounts.html").read_text(encoding="utf-8")
