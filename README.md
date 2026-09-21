@@ -42,7 +42,7 @@ $env:FUCKCLASSROOM_PLUGINS="classroom"
 .\.venv\Scripts\python.exe main.py
 ```
 
-可用内置插件 ID 为 `classroom` 和 `course_selection`，`core_ui` 始终启用。详细架构和新增插件方式见 `docs/plugins.md`。
+可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。详细架构和新增插件方式见 `docs/plugins.md`。
 
 ## 首次配置与登录
 

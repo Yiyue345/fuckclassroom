@@ -147,4 +147,4 @@
   {% endif %}
 {% endblock %}
 
-{% block scripts %}<script src="/static/vendor/hls.min.js?v=1.7.3"></script><script src="/plugins/classroom/static/course_media.js?v=20260918-3"></script><script src="/plugins/classroom/static/course_media_fit.js?v=20260918-2"></script>{% if request.app.state.plugin_registry.is_enabled("attendance") %}<script src="/plugins/attendance/static/qr_assistant.js?v=20260918-3"></script>{% endif %}{% if request.app.state.plugin_registry.is_enabled("processing") %}<script src="/plugins/classroom/static/task_detail_progress.js?v=20260916-1"></script>{% endif %}{% endblock %}
+{% block scripts %}<script src="/static/vendor/hls.min.js?v=1.7.3"></script><script src="/plugins/classroom/static/course_media.js?v=20260918-3"></script><script src="/plugins/classroom/static/course_media_fit.js?v=20260918-2"></script>{% if request.app.state.plugin_registry.is_enabled("attendance") %}<script src="/plugins/attendance/static/qr_assistant.js?v=20260918-3"></script>{% endif %}{% if request.app.state.plugin_registry.is_enabled("processing") %}<script src="/plugins/processing/static/task_detail_progress.js?v=20260916-1"></script>{% endif %}{% endblock %}

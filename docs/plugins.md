@@ -7,7 +7,12 @@
 | 插件 ID | 功能 | 主要 Service | Lifecycle |
 | --- | --- | --- | --- |
 | `core_ui` | 通用 UI、设置、任务、共享认证基础设施 | settings/cache/task/credential/verification | 始终启用 |
-| `classroom` | 课程录播、课件、OCR/ASR/AI、课堂派、直播/PPT/二维码 | classroom/auth/extraction/download/ketangpai | 启动时同步学期并验证会话 |
+| `classroom` | 课程、直播、回放、PPT 与下载基础能力 | classroom/auth/download | 启动时同步学期并验证录播会话 |
+| `processing` | 课次文字处理编排与输出页面 | extraction | 无 |
+| `transcription` | faster-whisper 本地语音转写 | transcription | 无 |
+| `ocr` | PPT 图片 OCR | ocr | 无 |
+| `ai_summary` | AI 课程总结 | ai_summary | 无 |
+| `attendance` | 畅课/课堂派二维码签到 | ketangpai/QR scanner | 启动时验证课堂派会话 |
 | `course_selection` | 本科选课、全校开课、定时选课、Hy2 | course_selection/auto_selection/hy2 | 启动时验证会话并启动自动选课；退出时停止后台服务 |
 
 ## 启用插件
@@ -36,6 +41,8 @@ python main.py
 ```
 
 设置为空字符串时只启动 `core_ui`。`core_ui` 无论如何都会启用，因为它提供共享设置、任务和认证基础设施。
+
+插件依赖会自动补齐。例如只指定 `transcription` 时，会自动启用 `processing` 和 `classroom`；只指定 `attendance` 时会自动启用 `classroom`，但不会加载文字提取、Whisper、OCR 或 AI 总结。
 
 测试或嵌入运行时也可以直接调用：
 
@@ -121,7 +128,8 @@ PluginSpec(
 
 当前：
 
-- `classroom` 的学期同步、录播会话验证、课堂派会话验证属于 startup；
+- `classroom` 的学期同步与录播会话验证属于 startup；
+- `attendance` 的课堂派会话验证属于 startup；
 - `course_selection` 的教务会话验证、缓存刷新、自动选课启动属于 startup；
 - 自动选课停止和 Hy2 停止属于 shutdown。
 
