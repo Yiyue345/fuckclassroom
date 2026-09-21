@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
 
@@ -10,6 +11,28 @@ from fuckclassroom.web import create_app
 
 
 class PluginCompositionTests(unittest.TestCase):
+    def test_web_app_is_only_the_plugin_composition_root(self) -> None:
+        source = Path("fuckclassroom/web/app.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("APIRouter", source)
+        self.assertNotIn("@app.get(", source)
+        self.assertNotIn("@app.post(", source)
+        self.assertNotIn("plugins.classroom.routes", source)
+        self.assertNotIn("plugins.course_selection.routes", source)
+
+        for plugin_id in ("core_ui", "classroom", "course_selection"):
+            root = Path("fuckclassroom/plugins") / plugin_id
+            self.assertTrue((root / "plugin.py").exists())
+            self.assertTrue((root / "routes.py").exists())
+            self.assertTrue((root / "services.py").exists())
+
+        self.assertTrue(
+            (Path("fuckclassroom/plugins/classroom") / "lifecycle.py").exists()
+        )
+        self.assertTrue(
+            (Path("fuckclassroom/plugins/course_selection") / "lifecycle.py").exists()
+        )
+
     def test_registry_can_enable_feature_plugins_independently(self) -> None:
         classroom = build_plugin_registry({"classroom"})
         selection = build_plugin_registry({"course_selection"})

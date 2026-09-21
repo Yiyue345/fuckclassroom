@@ -43,6 +43,31 @@ python main.py
 app = create_app(enabled_plugins={"classroom"})
 ```
 
+## 插件目录约定
+
+每个功能插件使用相同的物理结构：
+
+```text
+fuckclassroom/plugins/<plugin_id>/
+├── __init__.py
+├── plugin.py
+├── services.py
+├── routes.py
+├── lifecycle.py      # 只有需要启停逻辑的插件才需要
+├── templates/
+└── static/
+```
+
+职责固定为：
+
+- `plugin.py`：只描述 `PluginSpec`、导航、设置面板以及 Route/Service/Lifecycle hook；
+- `services.py`：创建并注册该插件自己的服务；
+- `routes.py`：创建该插件自己的 `APIRouter` 和 HTTP handler；
+- `lifecycle.py`：只处理 startup/shutdown 与后台任务；
+- `templates/`、`static/`：只放插件自己的 UI 资源。
+
+`fuckclassroom/web/app.py` 现在只是 composition root：创建 registry/runtime、模板环境、挂载静态资源并启动 lifecycle，不包含具体功能路由。
+
 ## Route 插件化
 
 每个功能拥有独立 `APIRouter`。路由先注册到所属 router，最后由 `PluginRuntime` 根据已启用插件决定是否挂载到 FastAPI。
@@ -84,6 +109,7 @@ dependency = context.services.get("task_manager")
 PluginSpec(
     ...,
     service_factory=setup_services,
+    route_factory=build_routes,
     startup=startup,
     shutdown=shutdown,
 )
