@@ -3,11 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from ...core.plugins import PluginContext, PluginSpec
-from .lifecycle import startup
-from .services import setup_services
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
+
+def setup_services(context: PluginContext):
+    from .services import setup_services as setup
+    return setup(context)
+
+def startup(context: PluginContext):
+    from .lifecycle import startup as hook
+    return hook(context)
 
 
 def build_routes(context: PluginContext):

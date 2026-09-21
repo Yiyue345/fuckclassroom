@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...core.plugins import PluginSpec, SettingsPanel
-from .services import setup_services
+from ...core.plugins import PluginContext, PluginSpec, SettingsPanel
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
+
+def setup_services(context: PluginContext):
+    from .services import setup_services as setup
+    return setup(context)
 
 
 def build_plugin() -> PluginSpec:

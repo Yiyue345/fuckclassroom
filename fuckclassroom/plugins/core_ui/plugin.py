@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from ...core.plugins import NavigationGroup, NavigationItem, PluginContext, PluginSpec, SettingsPanel
-from .services import setup_services
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
+
+def setup_services(context: PluginContext):
+    from .services import setup_services as setup
+    return setup(context)
 
 
 def build_routes(context: PluginContext):

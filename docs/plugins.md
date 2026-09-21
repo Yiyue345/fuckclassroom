@@ -133,6 +133,12 @@ PluginSpec(
 - `course_selection` 的教务会话验证、缓存刷新、自动选课启动属于 startup；
 - 自动选课停止和 Hy2 停止属于 shutdown。
 
+## Manifest 懒加载
+
+`plugin.py` 只保留插件元数据以及轻量 hook。Service/Lifecycle/Route 实现都在 hook 被 runtime 调用时再 import，因此禁用插件不会仅仅因为 registry 枚举了全部内置插件就加载其实现模块。
+
+这意味着例如只启用 `classroom` 时，Whisper、OCR、AI 总结、课堂派签到和选课实现不会因为 import `fuckclassroom.plugins` 而被提前加载。
+
 ## 源码归属与兼容路径
 
 功能实现现在以插件目录为唯一主路径：

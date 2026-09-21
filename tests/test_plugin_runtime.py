@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import unittest
 from pathlib import Path
 
@@ -59,6 +60,29 @@ class PluginCompositionTests(unittest.TestCase):
         )
         self.assertNotIn("install_rapidocr_compat", classroom_init)
         self.assertNotIn("install_ocr_failure_guard", classroom_init)
+
+    def test_plugin_manifests_lazy_load_services_and_lifecycle(self) -> None:
+        for plugin_id in (
+            "core_ui",
+            "classroom",
+            "processing",
+            "transcription",
+            "ocr",
+            "ai_summary",
+            "attendance",
+            "course_selection",
+        ):
+            source = (Path("fuckclassroom/plugins") / plugin_id / "plugin.py").read_text(
+                encoding="utf-8"
+            )
+            tree = ast.parse(source)
+            top_level_modules = {
+                node.module
+                for node in tree.body
+                if isinstance(node, ast.ImportFrom)
+            }
+            self.assertNotIn("services", top_level_modules, plugin_id)
+            self.assertNotIn("lifecycle", top_level_modules, plugin_id)
 
     def test_registry_can_enable_feature_plugins_independently(self) -> None:
         classroom = build_plugin_registry({"classroom"})
