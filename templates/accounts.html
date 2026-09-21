@@ -9,8 +9,8 @@
   <div class="page-head">
     <div><h1>账户与认证</h1></div>
     <div class="head-actions">
-      <a class="btn" href="/courses"><svg class="icon"><use href="/static/icons.svg#book-open"></use></svg>课程录播</a>
-      <a class="btn primary" href="/selection/info"><svg class="icon"><use href="/static/icons.svg#check-square"></use></svg>本科选课</a>
+      {% if classroom_enabled %}<a class="btn" href="/courses"><svg class="icon"><use href="/static/icons.svg#book-open"></use></svg>课程录播</a>{% endif %}
+      {% if selection_enabled %}<a class="btn primary" href="/selection/info"><svg class="icon"><use href="/static/icons.svg#check-square"></use></svg>本科选课</a>{% endif %}
     </div>
   </div>
 
@@ -27,6 +27,7 @@
   </div>
 
   <section class="account-session-grid">
+    {% if classroom_enabled %}
     <article class="surface account-session-panel" id="classroom-session">
       <header class="account-session-header">
         <div class="account-session-name">
@@ -54,6 +55,9 @@
       </div>
     </article>
 
+    {% endif %}
+
+    {% if selection_enabled %}
     <article class="surface account-session-panel" id="selection-session">
       <header class="account-session-header">
         <div class="account-session-name">
@@ -82,6 +86,9 @@
       </div>
     </article>
 
+    {% endif %}
+
+    {% if classroom_enabled %}
     <article class="surface account-session-panel ketangpai-panel" id="ketangpai-session">
       <header class="account-session-header">
         <div class="account-session-name">
@@ -158,5 +165,6 @@
         </div>
       </footer>
     </article>
+    {% endif %}
   </section>
 {% endblock %}
