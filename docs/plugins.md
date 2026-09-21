@@ -139,6 +139,8 @@ PluginSpec(
 
 这意味着例如只启用 `classroom` 时，Whisper、OCR、AI 总结、课堂派签到和选课实现不会因为 import `fuckclassroom.plugins` 而被提前加载。
 
+`processing` 也只在顶层依赖 `transcription/errors.py` 与 `ai_summary/errors.py` 这类轻量异常契约；Whisper engine 和 AI client 不会因为只启用课次处理而被连带 import。OCR 的 AI client 同样只在实际选择 AI OCR 时懒加载。
+
 ## 源码归属与兼容路径
 
 功能实现现在以插件目录为唯一主路径：

@@ -14,9 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from ..ai_summary.client import AIClient, AIClientError
+from ..ai_summary.errors import AIClientError
 from ...classroom.client import ClassroomClient, ClassroomClientError, CourseDetail, Lesson, LessonResource
-from ..transcription.engine import LocalTranscriptionError, LocalTranscriptionService
+from ..transcription.errors import LocalTranscriptionError
 from ...core.config import AppConfig
 
 
@@ -64,17 +64,17 @@ class LessonExtractionService:
         self.classroom = classroom or ClassroomClient(self.config)
         self._service_lookup = service_lookup
         # Keep legacy direct construction for unit tests and standalone use.
-        self.ai = AIClient(self.config) if service_lookup is None else None
-        self.transcription = (
-            LocalTranscriptionService(self.config)
-            if service_lookup is None
-            else None
-        )
         if service_lookup is None:
+            from ..ai_summary.client import AIClient
             from ..ocr.services import OcrService
+            from ..transcription.engine import LocalTranscriptionService
 
+            self.ai = AIClient(self.config)
+            self.transcription = LocalTranscriptionService(self.config)
             self._legacy_ocr = OcrService(self.config)
         else:
+            self.ai = None
+            self.transcription = None
             self._legacy_ocr = None
 
     def _optional_service(self, key: str, legacy: object | None = None):

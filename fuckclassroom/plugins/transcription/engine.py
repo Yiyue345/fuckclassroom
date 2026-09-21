@@ -11,10 +11,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from ...core.config import AppConfig
-
-
-class LocalTranscriptionError(RuntimeError):
-    pass
+from .errors import LocalTranscriptionError
 
 
 class _ChunkedDecodeError(RuntimeError):

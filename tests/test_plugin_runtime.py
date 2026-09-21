@@ -84,6 +84,30 @@ class PluginCompositionTests(unittest.TestCase):
             self.assertNotIn("services", top_level_modules, plugin_id)
             self.assertNotIn("lifecycle", top_level_modules, plugin_id)
 
+    def test_processing_does_not_eagerly_import_optional_engines(self) -> None:
+        processing_source = Path(
+            "fuckclassroom/plugins/processing/extraction.py"
+        ).read_text(encoding="utf-8")
+        processing_tree = ast.parse(processing_source)
+        processing_imports = {
+            node.module
+            for node in processing_tree.body
+            if isinstance(node, ast.ImportFrom)
+        }
+        self.assertNotIn("ai_summary.client", processing_imports)
+        self.assertNotIn("transcription.engine", processing_imports)
+
+        ocr_source = Path("fuckclassroom/plugins/ocr/services.py").read_text(
+            encoding="utf-8"
+        )
+        ocr_tree = ast.parse(ocr_source)
+        ocr_imports = {
+            node.module
+            for node in ocr_tree.body
+            if isinstance(node, ast.ImportFrom)
+        }
+        self.assertNotIn("ai_summary.client", ocr_imports)
+
     def test_registry_can_enable_feature_plugins_independently(self) -> None:
         classroom = build_plugin_registry({"classroom"})
         selection = build_plugin_registry({"course_selection"})

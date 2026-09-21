@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fuckclassroom.plugins.ai_summary.client import AIClientError
+from fuckclassroom.plugins.ai_summary.errors import AIClientError
 from fuckclassroom.classroom.client import Course, CourseDetail, Lesson, LessonResource
 from fuckclassroom.plugins.processing.extraction import LessonExtractionService
 from fuckclassroom.core.config import AppConfig

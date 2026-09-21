@@ -8,10 +8,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from ...core.config import AppConfig
-
-
-class AIClientError(RuntimeError):
-    pass
+from .errors import AIClientError
 
 
 @dataclass(frozen=True)

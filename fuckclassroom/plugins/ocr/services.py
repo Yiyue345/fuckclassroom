@@ -8,7 +8,6 @@ import threading
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
-from ..ai_summary.client import AIClient
 from .compat import install_rapidocr_compat
 from .engine import (
     increment_ocr_stat,
@@ -23,7 +22,7 @@ from ...core.plugins import PluginContext
 class OcrService:
     def __init__(self, config) -> None:
         self.config = config
-        self.ai = AIClient(config)
+        self.ai = None
 
     def ocr_image(
         self,
@@ -67,6 +66,10 @@ class OcrService:
             return tesseract_ocr(image_bytes, image_name)
 
         if engine in ("auto", "ai"):
+            if self.ai is None:
+                from ..ai_summary.client import AIClient
+
+                self.ai = AIClient(self.config)
             media_type = mimetypes.guess_type(image_name)[0] or "image/png"
             increment_ocr_stat(stats, stats_lock, "inferences")
             return self.ai.ocr_image(image_bytes, media_type)
