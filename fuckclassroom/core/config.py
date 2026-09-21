@@ -172,6 +172,13 @@ class AppConfig:
         return self._settings().auto_open_outputs_after_extract
 
     @property
+    def auto_summarize_after_extract(self) -> bool:
+        return self._env_bool(
+            "FUCKCLASSROOM_AUTO_SUMMARIZE_AFTER_EXTRACT",
+            self._settings().auto_summarize_after_extract,
+        )
+
+    @property
     def default_term_id(self) -> str:
         return os.getenv("FUCKCLASSROOM_DEFAULT_TERM_ID", self._settings().default_term_id)
 
