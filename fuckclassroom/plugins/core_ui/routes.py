@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import tempfile
-import time
 from urllib.parse import parse_qs, quote
 
 from fastapi import APIRouter, HTTPException, Request
@@ -31,9 +30,6 @@ def build_router(context: PluginContext) -> APIRouter:
 
     semester_sync = services.maybe("semester_sync")
     auth_service = services.maybe("auth_service")
-    ketangpai_client = services.maybe("ketangpai_client")
-    ketangpai_sms_sessions = services.maybe("ketangpai_sms_sessions", {})
-    ketangpai_sms_lock = services.maybe("ketangpai_sms_lock")
 
     hy2_proxy = services.maybe("hy2_proxy")
     course_selection = services.maybe("course_selection")
@@ -329,90 +325,19 @@ def build_router(context: PluginContext) -> APIRouter:
 
     @router.get("/accounts", response_class=HTMLResponse)
     def accounts(request: Request) -> HTMLResponse:
-        classroom_enabled = plugin_registry.is_enabled("classroom")
-        attendance_enabled = plugin_registry.is_enabled("attendance")
-        selection_enabled = plugin_registry.is_enabled("course_selection")
-        sms_session_id = request.query_params.get("ketangpai_sms_session", "")
-        sms_session = None
-        if attendance_enabled and ketangpai_sms_lock is not None:
-            with ketangpai_sms_lock:
-                now = time.time()
-                for key in list(ketangpai_sms_sessions):
-                    if now - float(ketangpai_sms_sessions[key].get("created_at") or 0) > 600:
-                        ketangpai_sms_sessions.pop(key, None)
-                sms_session = ketangpai_sms_sessions.get(sms_session_id)
-
-        classroom_session = (
-            auth_service.get_session_status()
-            if auth_service is not None
-            else {
-                "is_logged_in": False,
-                "message": "课程录播插件未启用",
-                "saved_at": "",
-                "cookie_count": 0,
-                "final_url": "",
-            }
-        )
-        classroom_login_run = (
-            auth_service.get_login_run_status()
-            if auth_service is not None
-            else {"message": "插件未启用"}
-        )
-        selection_session = (
-            course_selection.get_session_status()
-            if course_selection is not None
-            else {
-                "is_saved": False,
-                "is_valid": False,
-                "message": "本科选课插件未启用",
-                "saved_at": "",
-                "checked_at": "",
-                "final_url": "",
-            }
-        )
-        selection_access = (
-            course_selection.get_access_info()
-            if course_selection is not None
-            else {"label": "未启用"}
-        )
-        selection_credentials = (
-            course_selection.get_credential_status()
-            if course_selection is not None
-            else credential_store.public_status()
-        )
-        ketangpai_session = (
-            ketangpai_client.get_session_status()
-            if ketangpai_client is not None
-            else {
-                "is_valid": False,
-                "is_saved": False,
-                "message": "签到插件未启用",
-                "account": "",
-                "login_method": "",
-            }
-        )
+        panels = []
+        for panel in plugin_registry.account_panels:
+            panel_context = (
+                panel.context_factory(services, request)
+                if panel.context_factory is not None
+                else {}
+            )
+            panels.append({"panel": panel, "context": panel_context})
         return templates.TemplateResponse(
             request,
             "core/accounts.html",
             {
-                "classroom_enabled": classroom_enabled,
-                "attendance_enabled": attendance_enabled,
-                "selection_enabled": selection_enabled,
-                "classroom_session": classroom_session,
-                "classroom_login_run": classroom_login_run,
-                "selection_session": selection_session,
-                "selection_access": selection_access,
-                "credentials": selection_credentials,
-                "select_error": request.query_params.get("select_error"),
-                "ketangpai_session": ketangpai_session,
-                "ketangpai_notice": request.query_params.get("ketangpai_notice"),
-                "ketangpai_error": request.query_params.get("ketangpai_error"),
-                "ketangpai_sms_sent": request.query_params.get("ketangpai_sms_sent") == "1",
-                "ketangpai_sms": (
-                    {"session_id": sms_session_id, **sms_session}
-                    if sms_session is not None
-                    else None
-                ),
+                "account_panels": panels,
             },
         )
 

@@ -42,6 +42,18 @@ class SettingsPanel:
     checkbox_fields: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class AccountPanel:
+    key: str
+    template: str
+    order: int
+    context_factory: Callable[["ServiceContainer", Any], dict[str, object]] | None = None
+    shortcut_label: str = ""
+    shortcut_href: str = ""
+    shortcut_icon: str = "shield-check"
+    shortcut_primary: bool = False
+
+
 class ServiceContainer:
     """Small explicit service container shared by enabled plugins."""
 
@@ -99,6 +111,7 @@ class PluginSpec:
     requires: tuple[str, ...] = ()
     navigation_groups: tuple[NavigationGroup, ...] = ()
     settings_panels: tuple[SettingsPanel, ...] = ()
+    account_panels: tuple[AccountPanel, ...] = ()
     sidebar_templates: tuple[str, ...] = ()
     topbar_status_templates: tuple[str, ...] = ()
     system_labels: tuple[tuple[str, str], ...] = ()
@@ -170,6 +183,11 @@ class PluginRegistry:
     @property
     def settings_panels(self) -> tuple[SettingsPanel, ...]:
         panels = [panel for plugin in self.plugins for panel in plugin.settings_panels]
+        return tuple(sorted(panels, key=lambda item: (item.order, item.key)))
+
+    @property
+    def account_panels(self) -> tuple[AccountPanel, ...]:
+        panels = [panel for plugin in self.plugins for panel in plugin.account_panels]
         return tuple(sorted(panels, key=lambda item: (item.order, item.key)))
 
     @property
@@ -334,6 +352,7 @@ class PluginRuntime:
 
 __all__ = [
     "PLUGIN_API_VERSION",
+    "AccountPanel",
     "NavigationGroup",
     "NavigationItem",
     "PluginContext",

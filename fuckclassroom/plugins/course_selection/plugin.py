@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...core.plugins import NavigationGroup, NavigationItem, PluginContext, PluginSpec, SettingsPanel
+from ...core.plugins import AccountPanel, NavigationGroup, NavigationItem, PluginContext, PluginSpec, SettingsPanel
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -23,6 +23,11 @@ def shutdown(context: PluginContext):
 def build_routes(context: PluginContext):
     from .routes import build_router
     return build_router(context)
+
+
+def build_account_context(services, request):
+    from .accounts import build_account_context as build
+    return build(services, request)
 
 
 def build_plugin() -> PluginSpec:
@@ -53,6 +58,18 @@ def build_plugin() -> PluginSpec:
                     NavigationItem(key="selection_auto", label="定时选课", href="/selection/auto", icon="clock-3", active_keys=("selection_auto",)),
                     NavigationItem(key="selection_captures", label="接口记录", href="/selection/captures", icon="activity", active_keys=("selection_captures",)),
                 ),
+            ),
+        ),
+        account_panels=(
+            AccountPanel(
+                key="course_selection",
+                template="selection/account_panel.html",
+                order=20,
+                context_factory=build_account_context,
+                shortcut_label="本科选课",
+                shortcut_href="/selection/info",
+                shortcut_icon="check-square",
+                shortcut_primary=True,
             ),
         ),
         settings_panels=(

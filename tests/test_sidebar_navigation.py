@@ -84,6 +84,30 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("plugin_registry.system_label(active_system)", base)
         self.assertEqual(registry.system_label("selection"), "本科选课")
 
+    def test_account_panels_are_registered_by_plugins(self) -> None:
+        registry = build_plugin_registry()
+        panels = {panel.key: panel for panel in registry.account_panels}
+
+        self.assertEqual(
+            list(panels),
+            ["classroom", "course_selection", "attendance"],
+        )
+        self.assertEqual(panels["classroom"].template, "classroom/account_panel.html")
+        self.assertEqual(panels["course_selection"].template, "selection/account_panel.html")
+        self.assertEqual(panels["attendance"].template, "attendance/account_panel.html")
+
+        environment = Environment(
+            loader=FileSystemLoader(registry.template_directories(Path("templates")))
+        )
+        for panel in registry.account_panels:
+            environment.get_template(panel.template)
+
+        classroom_only = build_plugin_registry({"classroom"})
+        self.assertEqual(
+            [panel.key for panel in classroom_only.account_panels],
+            ["classroom"],
+        )
+
     def test_plugin_manager_reuses_existing_card_spacing(self) -> None:
         template = Path(
             "fuckclassroom/plugins/core_ui/templates/core/plugin_manager.html"

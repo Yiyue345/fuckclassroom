@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...core.plugins import NavigationGroup, NavigationItem, PluginContext, PluginSpec, SettingsPanel
+from ...core.plugins import AccountPanel, NavigationGroup, NavigationItem, PluginContext, PluginSpec, SettingsPanel
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -19,6 +19,11 @@ def startup(context: PluginContext):
 def build_routes(context: PluginContext):
     from .routes import build_router
     return build_router(context)
+
+
+def build_account_context(services, request):
+    from .accounts import build_account_context as build
+    return build(services, request)
 
 
 def build_plugin() -> PluginSpec:
@@ -47,6 +52,17 @@ def build_plugin() -> PluginSpec:
                     NavigationItem(key="tasks", label="提取与总结", href="/tasks", icon="list-todo", active_keys=("tasks",), badge_template="classroom_badge_tasks.html"),
                     NavigationItem(key="downloads", label="文件管理", href="/downloads", icon="folder", active_keys=("downloads",)),
                 ),
+            ),
+        ),
+        account_panels=(
+            AccountPanel(
+                key="classroom",
+                template="classroom/account_panel.html",
+                order=10,
+                context_factory=build_account_context,
+                shortcut_label="课程录播",
+                shortcut_href="/courses",
+                shortcut_icon="book-open",
             ),
         ),
         settings_panels=(

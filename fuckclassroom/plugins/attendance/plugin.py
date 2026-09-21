@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...core.plugins import PluginContext, PluginSpec
+from ...core.plugins import AccountPanel, PluginContext, PluginSpec
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -21,6 +21,11 @@ def build_routes(context: PluginContext):
     return build_router(context)
 
 
+def build_account_context(services, request):
+    from .accounts import build_account_context as build
+    return build(services, request)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="attendance",
@@ -30,6 +35,15 @@ def build_plugin() -> PluginSpec:
         service_factory=setup_services,
         route_factory=build_routes,
         startup=startup,
+        template_dir=PLUGIN_DIR / "templates",
+        account_panels=(
+            AccountPanel(
+                key="attendance",
+                template="attendance/account_panel.html",
+                order=30,
+                context_factory=build_account_context,
+            ),
+        ),
         static_dir=PLUGIN_DIR / "static",
     )
 

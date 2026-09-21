@@ -1,0 +1,76 @@
+<article class="surface account-session-panel ketangpai-panel" id="ketangpai-session">
+      <header class="account-session-header">
+        <div class="account-session-name">
+          <span class="workspace-icon"><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg></span>
+          <div><h2>课堂派</h2><span>独立账号 · 用于课堂派二维码签到</span></div>
+        </div>
+        <span class="status {% if account.session.is_valid is sameas true %}green{% else %}red{% endif %}"><span class="tiny-dot"></span>{% if account.session.is_valid is sameas true %}有效{% elif account.session.is_saved %}待验证{% else %}未登录{% endif %}</span>
+      </header>
+
+      <div class="ketangpai-overview">
+        <div class="session-state">
+          <span class="session-dot {% if account.session.is_valid is sameas true %}valid{% else %}invalid{% endif %}"></span>
+          <div><strong>{{ account.session.message }}</strong><span>课堂派独立认证，不会使用统一桂电账号</span></div>
+        </div>
+        <div class="ketangpai-account-meta">
+          <div><span>当前账号</span><strong>{{ account.session.account or "尚未登录" }}</strong></div>
+          <div><span>登录方式</span><strong>{% if account.session.login_method == "password" %}账号密码{% elif account.session.login_method == "sms" %}手机验证码{% else %}—{% endif %}</strong></div>
+          <div><span>本地保护</span><strong>Windows DPAPI</strong></div>
+        </div>
+      </div>
+
+      <div class="ketangpai-auth-grid">
+        <section class="ketangpai-auth-option">
+          <header class="ketangpai-method-head">
+            <span class="ketangpai-method-icon"><svg class="icon"><use href="/static/icons.svg#key-round"></use></svg></span>
+            <div><h3>账号密码登录</h3><p>使用课堂派自己的账号，登录后可自动完成二维码签到。</p></div>
+          </header>
+          <form class="ketangpai-method-form" method="post" action="/accounts/ketangpai/login">
+            <div class="field-row">
+              <div class="field"><label for="ketangpai-account">课堂派账号</label><input class="input mono" id="ketangpai-account" name="account" autocomplete="username" value="{{ account.session.account }}" required></div>
+              <div class="field"><label for="ketangpai-password">课堂派密码</label><input class="input mono" id="ketangpai-password" name="password" type="password" autocomplete="current-password" required></div>
+            </div>
+            <button class="btn primary ketangpai-method-action" type="submit"><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>登录并保存会话</button>
+          </form>
+        </section>
+
+        <details class="ketangpai-auth-option ketangpai-sms-option" {% if account.sms %}open{% endif %}>
+          <summary class="ketangpai-method-head">
+            <span class="ketangpai-method-icon"><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg></span>
+            <div><h3>手机验证码登录</h3><p>不保存密码，通过课堂派绑定手机号获取验证码。</p></div>
+            <svg class="icon ketangpai-method-chevron"><use href="/static/icons.svg#chevron-down"></use></svg>
+          </summary>
+          <div class="ketangpai-sms-content">
+            {% if not account.sms %}
+              <form class="ketangpai-method-form" method="post" action="/accounts/ketangpai/sms/start">
+                <div class="field"><label for="ketangpai-mobile">课堂派绑定手机号</label><input class="input mono" id="ketangpai-mobile" name="mobile" inputmode="numeric" pattern="1[0-9]{10}" maxlength="11" required></div>
+                <button class="btn ketangpai-method-action" type="submit">获取图形验证码</button>
+              </form>
+            {% elif not account.sms_sent and not account.sms.sent %}
+              <form class="ketangpai-method-form" method="post" action="/accounts/ketangpai/sms/send">
+                <input type="hidden" name="session_id" value="{{ account.sms.session_id }}">
+                <div class="ketangpai-captcha-row">
+                  <div class="field"><label>图形验证码</label><img class="ketangpai-captcha" src="/accounts/ketangpai/sms/captcha?session_id={{ account.sms.session_id|urlencode }}" alt="课堂派图形验证码"></div>
+                  <div class="field"><label for="ketangpai-captcha-answer">计算结果</label><input class="input mono" id="ketangpai-captcha-answer" name="captcha" autocomplete="off" required></div>
+                </div>
+                <button class="btn ketangpai-method-action" type="submit">发送短信验证码</button>
+              </form>
+            {% else %}
+              <form class="ketangpai-method-form" method="post" action="/accounts/ketangpai/sms/login">
+                <input type="hidden" name="session_id" value="{{ account.sms.session_id }}">
+                <div class="field"><label for="ketangpai-sms-code">短信验证码</label><input class="input mono" id="ketangpai-sms-code" name="code" inputmode="numeric" autocomplete="one-time-code" required></div>
+                <button class="btn primary ketangpai-method-action" type="submit">验证并登录</button>
+              </form>
+            {% endif %}
+          </div>
+        </details>
+      </div>
+
+      <footer class="ketangpai-footer">
+        <p><svg class="icon small"><use href="/static/icons.svg#shield-check"></use></svg>凭据和令牌仅加密保存在本机，不会与统一桂电账号混用。</p>
+        <div class="ketangpai-session-actions">
+          <form method="post" action="/accounts/ketangpai/verify"><button class="btn" type="submit"><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>验证会话</button></form>
+          <form method="post" action="/accounts/ketangpai/logout" data-confirm="确认清除课堂派独立登录会话？"><button class="btn danger" type="submit"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除会话</button></form>
+        </div>
+      </footer>
+    </article>

@@ -77,6 +77,7 @@ Plugin API v1 的核心类型位于：
 ```python
 from fuckclassroom.core.plugins import (
     PLUGIN_API_VERSION,
+    AccountPanel,
     NavigationGroup,
     NavigationItem,
     PluginContext,
@@ -180,6 +181,7 @@ def build_plugin() -> PluginSpec:
 | `requires` | 依赖插件，必须与 `plugin.json.requires` 一致 |
 | `navigation_groups` | 向左侧导航注册分组与入口 |
 | `settings_panels` | 向设置页注册模板面板 |
+| `account_panels` | 向“账户与认证”页注册账户卡片 |
 | `sidebar_templates` | 向侧栏底部注入状态模板 |
 | `topbar_status_templates` | 向顶栏会话状态区域注入模板 |
 | `system_labels` | 面包屑中的 system 名称映射 |
@@ -785,7 +787,73 @@ SettingsPanel(
 
 ---
 
-## 14. Sidebar / Topbar 模板
+## 14. 账户面板接口
+
+插件可以把自己的登录、令牌或连接状态卡片注册到统一的“账户与认证”页面，而不需要修改 core 模板：
+
+```python
+from fuckclassroom.core.plugins import AccountPanel
+
+
+def build_account_context(services, request):
+    client = services.get("my_plugin.client")
+    return {
+        "session": client.get_session_status(),
+        "notices": (),
+    }
+
+
+AccountPanel(
+    key="my_plugin",
+    template="my_plugin/account_panel.html",
+    order=70,
+    context_factory=build_account_context,
+    shortcut_label="My Plugin",
+    shortcut_href="/my-plugin",
+    shortcut_icon="shield-check",
+)
+```
+
+字段说明：
+
+| 字段 | 说明 |
+| --- | --- |
+| `key` | 面板唯一 key |
+| `template` | Jinja 模板名，建议使用插件命名空间 |
+| `order` | 页面中的排序 |
+| `context_factory` | 页面请求时调用，参数为 `ServiceContainer` 与当前 request，返回该面板上下文字典 |
+| `shortcut_label` | 可选，账户页顶部快捷入口文案 |
+| `shortcut_href` | 可选，账户页顶部快捷入口地址；为空时不显示 |
+| `shortcut_icon` | 可选，core SVG sprite 中的 icon ID |
+| `shortcut_primary` | 是否使用主按钮样式 |
+
+面板模板会拿到统一变量 `account`，值就是 `context_factory` 返回的字典。例如：
+
+```jinja2
+<article class="surface account-session-panel">
+  <strong>{{ account.session.message }}</strong>
+</article>
+```
+
+如果需要在账户页顶部显示成功或错误提示，可以在返回值中提供 `notices`：
+
+```python
+{
+    "notices": (
+        {
+            "kind": "error",
+            "icon": "circle-alert",
+            "message": "登录已过期",
+        },
+    ),
+}
+```
+
+`context_factory` 只会为当前已启用插件的面板执行，因此停用插件后，它的账户 UI 和账户数据读取都会一起退出页面。不要在 factory 中执行长时间阻塞操作；昂贵登录或网络动作应由插件路由或后台任务处理。
+
+---
+
+## 15. Sidebar / Topbar 模板
 
 `PluginSpec` 还可以提供：
 
@@ -813,7 +881,7 @@ topbar_status_templates=("my_plugin/topbar_status.html",),
 
 ---
 
-## 15. Lifecycle
+## 16. Lifecycle
 
 插件可以同时提供同步或异步 hook：
 
@@ -850,7 +918,7 @@ shutdown 按插件顺序反向执行，使高层插件先退出、底层依赖�
 
 ---
 
-## 16. 依赖其他插件
+## 17. 依赖其他插件
 
 如果需要另一个插件的能力，必须在两处声明相同的 `requires`。
 
@@ -886,7 +954,7 @@ if context.registry.is_enabled("classroom"):
 
 ---
 
-## 17. 当前内置功能插件暴露的 service
+## 18. 当前内置功能插件暴露的 service
 
 下面这些 service 当前可以通过 `context.services` 获取，但它们属于**具体功能插件接口**，稳定性低于 core Plugin API。
 
@@ -927,7 +995,7 @@ if classroom is not None:
 
 ---
 
-## 18. 兼容性规则
+## 19. 兼容性规则
 
 Plugin API v1 使用两层兼容检查。
 
@@ -974,7 +1042,7 @@ PluginSpec(
 
 ---
 
-## 19. API v1 中不要做的事情
+## 20. API v1 中不要做的事情
 
 为了让插件可以跨 FuckClassroom 版本工作，应避免：
 
@@ -1039,7 +1107,7 @@ from fuckclassroom.plugins.processing.extraction import _some_private_helper
 
 ---
 
-## 20. 一个较完整的插件骨架
+## 21. 一个较完整的插件骨架
 
 ```text
 demo_plugin/
@@ -1212,7 +1280,7 @@ async def shutdown(context: PluginContext) -> None:
 
 ---
 
-## 21. 发布插件前检查清单
+## 22. 发布插件前检查清单
 
 发布 ZIP 或目录前至少确认：
 
@@ -1235,7 +1303,7 @@ async def shutdown(context: PluginContext) -> None:
 
 ---
 
-## 22. 当前 API v1 的已知限制
+## 23. 当前 API v1 的已知限制
 
 Plugin API v1 目前有几个明确限制：
 
@@ -1250,7 +1318,7 @@ Plugin API v1 目前有几个明确限制：
 
 ---
 
-## 23. 如何判断一个接口能不能依赖
+## 24. 如何判断一个接口能不能依赖
 
 可以按下面的优先级判断：
 
