@@ -88,6 +88,36 @@
 
           <p class="plugin-description">{{ plugin.description or "该插件未提供描述。" }}</p>
 
+          {% if plugin.dependencies %}
+            <div class="plugin-dependencies">
+              <div class="plugin-dependencies-head">
+                <span>运行依赖</span>
+                {% if plugin.dependency_issue %}
+                  <span class="status red">缺少必需依赖</span>
+                {% elif plugin.missing_optional_dependencies %}
+                  <span class="status amber">缺少可选增强</span>
+                {% else %}
+                  <span class="status green">已就绪</span>
+                {% endif %}
+              </div>
+              <div class="plugin-dependency-list">
+                {% for dependency in plugin.dependencies %}
+                  <div class="plugin-dependency-item">
+                    <span class="tiny-dot {% if dependency.installed %}dep-ok{% else %}dep-missing{% endif %}"></span>
+                    <span class="plugin-dependency-name">{{ dependency.label }}</span>
+                    {% if dependency.version %}<span class="plugin-dependency-version mono">{{ dependency.version }}</span>{% endif %}
+                    {% if dependency.optional %}<span class="plugin-dependency-optional">可选</span>{% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+              <form method="post" action="/plugins/{{ plugin.id }}/dependencies/install">
+                <button class="btn small" type="submit">
+                  {{ "安装/修复依赖" if plugin.dependency_issue or plugin.missing_optional_dependencies else "重新安装依赖" }}
+                </button>
+              </form>
+            </div>
+          {% endif %}
+
           <div class="plugin-meta-grid">
             <div>
               <span>依赖</span>

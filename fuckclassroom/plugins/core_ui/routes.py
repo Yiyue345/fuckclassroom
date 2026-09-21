@@ -5,12 +5,13 @@ import time
 from urllib.parse import parse_qs, quote
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from ...auth.cas import LoginVerificationError
 from ...auth.credentials import CredentialStoreError
 from ...core.plugins import PluginContext
 from ...core.tasks import cancel_registered_task
+from ...web.responses import task_started_response
 from ..manager import PluginManagerError
 
 
@@ -181,6 +182,31 @@ def build_router(context: PluginContext) -> APIRouter:
                 "message": f"插件 {descriptor.name} 已添加，默认保持停用",
             }
         )
+
+    @router.post("/plugins/{plugin_id}/dependencies/install")
+    def install_plugin_dependencies(
+        request: Request,
+        plugin_id: str,
+    ) -> Response:
+        try:
+            descriptor = plugin_manager.descriptor_map().get(plugin_id)
+        except PluginManagerError as exc:
+            return RedirectResponse(
+                f"/plugins?error={quote(str(exc))}",
+                status_code=303,
+            )
+        if descriptor is None:
+            return RedirectResponse(
+                f"/plugins?error={quote(f'插件不存在：{plugin_id}')}",
+                status_code=303,
+            )
+
+        def worker(progress):
+            plugin_manager.install_dependencies(plugin_id, progress)
+            return f"/plugins?notice={quote(f'{descriptor.name} 的依赖安装完成')}"
+
+        task = task_manager.start(f"安装插件依赖 · {descriptor.name}", worker)
+        return task_started_response(request, task, "/plugins")
 
     @router.post("/plugins/{plugin_id}/remove")
     def remove_plugin(plugin_id: str) -> RedirectResponse:

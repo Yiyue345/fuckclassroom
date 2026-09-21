@@ -131,6 +131,147 @@ def build_plugin():
             self.assertIn("demo_plugin", registry.plugin_ids)
             self.assertIn("classroom", registry.plugin_ids)
 
+    def test_builtin_dependency_status_is_exposed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+
+            transcription = manager.dependency_status("transcription")
+            labels = {str(item["label"]) for item in transcription}
+
+            self.assertEqual(
+                labels,
+                {"faster-whisper", "Hugging Face Hub", "OpenCC"},
+            )
+            self.assertTrue(all(bool(item["installed"]) for item in transcription))
+
+            attendance = manager.dependency_status("attendance")
+            wxscan = next(
+                item for item in attendance if item["label"] == "wxscan 原生扩展"
+            )
+            self.assertTrue(wxscan["optional"])
+
+    def test_external_plugin_with_missing_python_dependency_cannot_be_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "needs_dep"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "needs_dep",
+                        "name": "Needs Dep",
+                        "requires": [],
+                        "entry": "plugin.py",
+                        "python_requires": [
+                            {
+                                "requirement": "definitely-missing-fuckclassroom-package>=1",
+                                "import": "definitely_missing_fuckclassroom_package",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='needs_dep', name='Needs Dep')\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+
+            with self.assertRaisesRegex(PluginManagerError, "请先安装依赖"):
+                manager.enable("needs_dep")
+
+    def test_missing_external_dependency_is_skipped_during_boot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            plugin_root = data_dir / "plugins" / "needs_dep"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "needs_dep",
+                        "name": "Needs Dep",
+                        "requires": [],
+                        "entry": "plugin.py",
+                        "python_requires": [
+                            {
+                                "requirement": "definitely-missing-fuckclassroom-package>=1",
+                                "import": "definitely_missing_fuckclassroom_package",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "import definitely_missing_fuckclassroom_package\n"
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='needs_dep', name='Needs Dep')\n",
+                encoding="utf-8",
+            )
+            (data_dir / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui", "needs_dep"]}),
+                encoding="utf-8",
+            )
+
+            manager = PluginManager(AppConfig(data_dir=data_dir))
+            registry = build_plugin_registry(
+                config=manager.config,
+                manager=manager,
+            )
+
+            self.assertEqual(registry.plugin_ids, ("core_ui",))
+            rows = {row["id"]: row for row in manager.status_rows(registry.plugin_ids)}
+            self.assertTrue(rows["needs_dep"]["desired_enabled"])
+            self.assertFalse(rows["needs_dep"]["current_enabled"])
+            self.assertTrue(rows["needs_dep"]["dependency_issue"])
+
+    def test_external_dependency_manifest_rejects_direct_url(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source_plugin"
+            source.mkdir()
+            (source / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "unsafe_dep",
+                        "name": "Unsafe Dep",
+                        "requires": [],
+                        "entry": "plugin.py",
+                        "python_requires": [
+                            "demo-package @ https://example.com/demo.whl"
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (source / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='unsafe_dep', name='Unsafe Dep')\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+
+            with self.assertRaisesRegex(PluginManagerError, "不允许 URL"):
+                manager.install_from_path(str(source))
+
+    def test_requirements_are_split_between_core_and_plugins(self) -> None:
+        root = Path("requirements.txt").read_text(encoding="utf-8")
+        all_requirements = Path("requirements/all.txt").read_text(encoding="utf-8")
+
+        self.assertEqual(root.strip(), "-r requirements/core.txt")
+        self.assertIn("packaging>=24.0", Path("requirements/core.txt").read_text(encoding="utf-8"))
+        self.assertIn("faster-whisper>=1.1", Path("requirements/transcription.txt").read_text(encoding="utf-8"))
+        self.assertIn("rapidocr-onnxruntime>=1.2", Path("requirements/ocr.txt").read_text(encoding="utf-8"))
+        self.assertIn("opencv-python>=4.8", Path("requirements/attendance.txt").read_text(encoding="utf-8"))
+        self.assertIn("-r transcription.txt", all_requirements)
+        self.assertIn("-r attendance.txt", all_requirements)
+
     def test_external_plugin_is_not_removable_while_configured_or_running(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

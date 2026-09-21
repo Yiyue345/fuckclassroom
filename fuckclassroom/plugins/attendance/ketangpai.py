@@ -11,9 +11,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-
 from ...auth.credentials import (
     CredentialStoreError,
     _protect_with_dpapi,
@@ -352,6 +349,14 @@ class KetangpaiClient:
 
 
 def _encrypt_password(password: str) -> str:
+    try:
+        from cryptography.hazmat.primitives import padding
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except ImportError as exc:
+        raise KetangpaiError(
+            "缺少 cryptography 依赖，请在插件管理中安装签到插件依赖"
+        ) from exc
+
     padder = padding.PKCS7(algorithms.AES.block_size).padder()
     padded = padder.update(password.encode("utf-8")) + padder.finalize()
     encryptor = Cipher(algorithms.AES(_LOGIN_KEY), modes.CBC(_LOGIN_KEY)).encryptor()

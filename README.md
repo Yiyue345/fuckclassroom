@@ -4,15 +4,21 @@ FuckClassroom 是一个面向桂电课程录播、本科教务与选课场景的
 
 ## 安装
 
-请先安装 Python 3.10 或更高版本，然后在项目目录打开 PowerShell：
+请先安装 Python 3.10 或更高版本，然后在项目目录打开 PowerShell。默认安装现在只包含 core 依赖：
 
 ```powershell
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+启动后可以直接在“插件管理”页面为需要的插件安装依赖。想一次装齐全部 Python 插件依赖，用：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements/all.txt
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-普通使用不需要安装 Rust 工具链，也不需要手工构建 Hy2 组件。只有在 Windows Smart App Control 拦截预编译 Hy2、且希望启用本地构建兜底时，才需要额外安装 rustup/Cargo。
+普通使用不需要安装 Rust 工具链。签到插件会优先使用可选的 wxscan 原生扩展，未安装或编译失败时可回退 OpenCV；Hy2 正常也使用预编译 runner。只有需要编译 wxscan，或 Windows Smart App Control 拦截 Hy2 预编译组件且希望启用本地构建兜底时，才需要额外安装 rustup/Cargo。
 
 ## 启动
 
@@ -42,7 +48,7 @@ $env:FUCKCLASSROOM_PLUGINS="classroom"
 .\.venv\Scripts\python.exe main.py
 ```
 
-可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。详细架构和新增插件方式见 `docs/plugins.md`。 应用启动后可访问 `/plugins` 管理页面启停插件，并可从本机目录或 ZIP 包添加外部插件；网页配置保存在 `data/plugin_state.json`，启停变更在重启后生效。
+可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。应用启动后可访问 `/plugins` 管理页面启停插件、查看运行依赖、安装/修复依赖，并可从本机目录或 ZIP 包添加外部插件；网页配置保存在 `data/plugin_state.json`，启停变更在重启后生效。详细架构见 `docs/plugins.md`。
 
 ## 首次配置与登录
 

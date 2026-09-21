@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import importlib
 import importlib.util
+import importlib.metadata
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -15,7 +17,10 @@ from pathlib import Path
 from types import ModuleType
 from typing import Iterable
 
-from ..core.config import AppConfig
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.version import InvalidVersion, Version
+
+from ..core.config import PROJECT_ROOT, AppConfig
 from ..core.plugins import PluginSpec
 
 
@@ -24,6 +29,28 @@ _PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 
 class PluginManagerError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class DependencySpec:
+    requirement: str
+    import_name: str
+    label: str = ""
+    optional: bool = False
+    install_target: str = ""
+    post_install: tuple[tuple[str, ...], ...] = ()
+    probe: str = ""
+
+    @property
+    def display_name(self) -> str:
+        if self.label:
+            return self.label
+        if self.requirement:
+            try:
+                return Requirement(self.requirement).name
+            except InvalidRequirement:
+                return self.requirement
+        return self.import_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,21 +65,79 @@ class PluginDescriptor:
     module: str = ""
     root: Path | None = None
     entry: str = "plugin.py"
+    python_requirements: tuple[DependencySpec, ...] = ()
 
     @property
     def source_label(self) -> str:
         return "内置" if self.builtin else "外部"
 
 
+_PLAYWRIGHT = DependencySpec(
+    "playwright>=1.45",
+    "playwright",
+    "Playwright + Chromium",
+    post_install=(("{python}", "-m", "playwright", "install", "chromium"),),
+    probe="playwright_chromium",
+)
+
 _BUILTINS: tuple[PluginDescriptor, ...] = (
-    PluginDescriptor("core_ui", "通用", "应用基础 UI、设置、任务与认证入口。", "builtin", 0, (), True, "fuckclassroom.plugins.core_ui"),
-    PluginDescriptor("classroom", "课程录播", "课程、直播、回放、PPT 与下载基础能力。", "builtin", 10, (), True, "fuckclassroom.plugins.classroom"),
-    PluginDescriptor("processing", "课次处理", "课次文字处理编排与结果页面。", "builtin", 20, ("classroom",), True, "fuckclassroom.plugins.processing"),
-    PluginDescriptor("transcription", "本地语音转写", "使用 faster-whisper 从课程录像生成本地转写。", "builtin", 30, ("processing",), True, "fuckclassroom.plugins.transcription"),
-    PluginDescriptor("ocr", "PPT OCR", "使用 RapidOCR、Tesseract 或视觉模型识别课件图片文字。", "builtin", 40, ("processing",), True, "fuckclassroom.plugins.ocr"),
-    PluginDescriptor("ai_summary", "AI 总结", "将转写与 PPT 文本整理为结构化课程总结。", "builtin", 50, ("processing",), True, "fuckclassroom.plugins.ai_summary"),
-    PluginDescriptor("attendance", "二维码签到", "识别畅课/课堂派二维码并处理签到。", "builtin", 60, ("classroom",), True, "fuckclassroom.plugins.attendance"),
-    PluginDescriptor("course_selection", "本科选课", "本科选课、全校开课、定时选课与 Hy2。", "builtin", 20, (), True, "fuckclassroom.plugins.course_selection"),
+    PluginDescriptor(
+        "core_ui", "通用", "应用基础 UI、设置、任务与认证入口。", "builtin", 0, (), True,
+        "fuckclassroom.plugins.core_ui",
+        python_requirements=(),
+    ),
+    PluginDescriptor(
+        "classroom", "课程录播", "课程、直播、回放、PPT 与下载基础能力。", "builtin", 10, (), True,
+        "fuckclassroom.plugins.classroom",
+        python_requirements=(_PLAYWRIGHT,),
+    ),
+    PluginDescriptor(
+        "processing", "课次处理", "课次文字处理编排与结果页面。", "builtin", 20, ("classroom",), True,
+        "fuckclassroom.plugins.processing",
+        python_requirements=(DependencySpec("Pillow>=10.0", "PIL", "Pillow"),),
+    ),
+    PluginDescriptor(
+        "transcription", "本地语音转写", "使用 faster-whisper 从课程录像生成本地转写。", "builtin", 30, ("processing",), True,
+        "fuckclassroom.plugins.transcription",
+        python_requirements=(
+            DependencySpec("faster-whisper>=1.1", "faster_whisper", "faster-whisper"),
+            DependencySpec("huggingface-hub>=0.32", "huggingface_hub", "Hugging Face Hub"),
+            DependencySpec("opencc-python-reimplemented>=0.1.7", "opencc", "OpenCC"),
+        ),
+    ),
+    PluginDescriptor(
+        "ocr", "PPT OCR", "使用 RapidOCR、Tesseract 或视觉模型识别课件图片文字。", "builtin", 40, ("processing",), True,
+        "fuckclassroom.plugins.ocr",
+        python_requirements=(
+            DependencySpec("rapidocr-onnxruntime>=1.2", "rapidocr_onnxruntime", "RapidOCR"),
+        ),
+    ),
+    PluginDescriptor(
+        "ai_summary", "AI 总结", "将转写与 PPT 文本整理为结构化课程总结。", "builtin", 50, ("processing",), True,
+        "fuckclassroom.plugins.ai_summary",
+        python_requirements=(),
+    ),
+    PluginDescriptor(
+        "attendance", "二维码签到", "识别畅课/课堂派二维码并处理签到。", "builtin", 60, ("classroom",), True,
+        "fuckclassroom.plugins.attendance",
+        python_requirements=(
+            DependencySpec("cryptography>=43.0", "cryptography", "cryptography"),
+            DependencySpec("numpy>=1.24", "numpy", "NumPy"),
+            DependencySpec("opencv-python>=4.8", "cv2", "OpenCV"),
+            DependencySpec(
+                "",
+                "fuckclassroom_wxscan",
+                "wxscan 原生扩展",
+                optional=True,
+                install_target=str(PROJECT_ROOT / "rust_module" / "wxscan_py"),
+            ),
+        ),
+    ),
+    PluginDescriptor(
+        "course_selection", "本科选课", "本科选课、全校开课、定时选课与 Hy2。", "builtin", 20, (), True,
+        "fuckclassroom.plugins.course_selection",
+        python_requirements=(_PLAYWRIGHT,),
+    ),
 )
 
 
@@ -132,6 +217,17 @@ class PluginManager:
         for enabled_id in sorted(desired):
             descriptor = descriptors[enabled_id]
             if not descriptor.builtin:
+                missing = [
+                    item["label"]
+                    for item in self.dependency_status(enabled_id)
+                    if not item["installed"] and not item["optional"]
+                ]
+                if missing:
+                    raise PluginManagerError(
+                        f"插件 {descriptor.name} 缺少依赖："
+                        + "、".join(str(item) for item in missing)
+                        + "；请先安装依赖"
+                    )
                 self.load_spec(descriptor)
         self._save_selected(selected)
         return desired
@@ -220,6 +316,198 @@ class PluginManager:
             )
         return spec
 
+    def dependency_status(self, plugin_id: str) -> list[dict[str, object]]:
+        descriptor = self.descriptor_map().get(plugin_id)
+        if descriptor is None:
+            raise PluginManagerError(f"插件不存在：{plugin_id}")
+        return [self._dependency_status(item) for item in descriptor.python_requirements]
+
+    def install_dependencies(self, plugin_id: str, progress=None) -> None:
+        descriptor = self.descriptor_map().get(plugin_id)
+        if descriptor is None:
+            raise PluginManagerError(f"插件不存在：{plugin_id}")
+        dependencies = descriptor.python_requirements
+        if not dependencies:
+            if progress:
+                progress(100, "该插件没有额外依赖")
+            return
+
+        required_targets = [
+            item.install_target or item.requirement
+            for item in dependencies
+            if not item.optional and (item.install_target or item.requirement)
+        ]
+        optional_targets = [
+            item.install_target or item.requirement
+            for item in dependencies
+            if item.optional and (item.install_target or item.requirement)
+        ]
+        if required_targets:
+            self._run_install_command(
+                [sys.executable, "-m", "pip", "install", *required_targets],
+                progress,
+                5,
+                68,
+                "正在安装必需依赖",
+            )
+
+        for index, target in enumerate(optional_targets):
+            try:
+                self._run_install_command(
+                    [sys.executable, "-m", "pip", "install", target],
+                    progress,
+                    69 + index * 4,
+                    min(80, 72 + index * 4),
+                    "正在安装可选增强",
+                )
+            except PluginManagerError as exc:
+                if progress:
+                    logger = getattr(progress, "log", None)
+                    if callable(logger):
+                        logger(f"可选依赖安装失败，可稍后重试：{exc}", "warning")
+
+        post_commands: list[tuple[str, ...]] = []
+        seen_commands: set[tuple[str, ...]] = set()
+        for dependency in dependencies:
+            for command in dependency.post_install:
+                resolved = tuple(
+                    sys.executable if part == "{python}" else part
+                    for part in command
+                )
+                if resolved not in seen_commands:
+                    seen_commands.add(resolved)
+                    post_commands.append(resolved)
+
+        if post_commands:
+            span = max(1, 20 // len(post_commands))
+            for index, command in enumerate(post_commands):
+                self._run_install_command(
+                    list(command),
+                    progress,
+                    81 + index * span,
+                    min(99, 81 + (index + 1) * span),
+                    "正在安装运行时组件",
+                )
+
+        remaining = [
+            item["label"]
+            for item in self.dependency_status(plugin_id)
+            if not item["installed"] and not item["optional"]
+        ]
+        if remaining:
+            raise PluginManagerError(
+                "依赖安装完成后仍缺少：" + "、".join(str(item) for item in remaining)
+            )
+        if progress:
+            progress(100, "插件依赖安装完成")
+
+    def _run_install_command(
+        self,
+        command: list[str],
+        progress,
+        start_percent: int,
+        end_percent: int,
+        message: str,
+    ) -> None:
+        if progress:
+            progress(start_percent, message)
+            logger = getattr(progress, "log", None)
+            if callable(logger):
+                logger("$ " + " ".join(command), "info")
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(PROJECT_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except OSError as exc:
+            raise PluginManagerError(f"无法启动依赖安装命令：{exc}") from exc
+
+        while True:
+            try:
+                output, _ = process.communicate(timeout=0.5)
+                break
+            except subprocess.TimeoutExpired:
+                if progress:
+                    raise_if_cancelled = getattr(progress, "raise_if_cancelled", None)
+                    if callable(raise_if_cancelled):
+                        try:
+                            raise_if_cancelled()
+                        except BaseException:
+                            process.terminate()
+                            try:
+                                process.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                            raise
+                    current = min(end_percent - 1, start_percent + 1)
+                    progress(current, message)
+
+        if progress:
+            logger = getattr(progress, "log", None)
+            if callable(logger) and output:
+                for line in output.splitlines():
+                    if line.strip():
+                        logger(line, "info")
+        if process.returncode != 0:
+            tail = "\n".join(output.splitlines()[-12:]) if output else ""
+            raise PluginManagerError(
+                f"依赖安装命令失败（exit {process.returncode}）"
+                + (f"：{tail}" if tail else "")
+            )
+        if progress:
+            progress(end_percent, message + "完成")
+
+    def _dependency_status(self, dependency: DependencySpec) -> dict[str, object]:
+        try:
+            installed = importlib.util.find_spec(dependency.import_name) is not None
+        except (ImportError, ModuleNotFoundError, ValueError):
+            installed = False
+        version = ""
+        requirement_name = ""
+        version_ok = True
+        if dependency.requirement:
+            try:
+                parsed = Requirement(dependency.requirement)
+                requirement_name = parsed.name
+                if parsed.marker is not None and not parsed.marker.evaluate():
+                    return {
+                        "label": dependency.display_name,
+                        "requirement": dependency.requirement,
+                        "import_name": dependency.import_name,
+                        "installed": True,
+                        "version": "",
+                        "optional": dependency.optional,
+                        "skipped": True,
+                    }
+                try:
+                    version = importlib.metadata.version(parsed.name)
+                except importlib.metadata.PackageNotFoundError:
+                    installed = False
+                if installed and version and parsed.specifier:
+                    try:
+                        version_ok = Version(version) in parsed.specifier
+                    except InvalidVersion:
+                        version_ok = False
+            except InvalidRequirement:
+                installed = False
+        installed = bool(installed and version_ok)
+        if installed and dependency.probe:
+            installed = self._probe_dependency(dependency.probe)
+        return {
+            "label": dependency.display_name,
+            "requirement": dependency.requirement or dependency.install_target,
+            "import_name": dependency.import_name,
+            "installed": installed,
+            "version": version,
+            "optional": dependency.optional,
+            "skipped": False,
+        }
+
     def status_rows(self, current_enabled: Iterable[str]) -> list[dict[str, object]]:
         current = set(current_enabled)
         desired = self.desired_enabled()
@@ -229,6 +517,15 @@ class PluginManager:
             dependents = sorted(
                 other.id for other in descriptor_map.values() if item.id in other.requires
             )
+            dependencies = self.dependency_status(item.id)
+            missing_required = [
+                dependency for dependency in dependencies
+                if not dependency["installed"] and not dependency["optional"]
+            ]
+            missing_optional = [
+                dependency for dependency in dependencies
+                if not dependency["installed"] and dependency["optional"]
+            ]
             rows.append(
                 {
                     "id": item.id,
@@ -243,9 +540,19 @@ class PluginManager:
                     "desired_enabled": item.id in desired,
                     "restart_required": (item.id in current) != (item.id in desired),
                     "locked": item.id == "core_ui",
+                    "dependencies": dependencies,
+                    "missing_required_dependencies": missing_required,
+                    "missing_optional_dependencies": missing_optional,
+                    "dependency_issue": bool(missing_required),
                 }
             )
-        return sorted(rows, key=lambda item: (descriptor_map[str(item["id"])].order, str(item["id"])))
+        return sorted(
+            rows,
+            key=lambda item: (
+                descriptor_map[str(item["id"])].order,
+                str(item["id"]),
+            ),
+        )
 
     def _load_selected(self) -> set[str]:
         if not self.state_path.exists():
@@ -362,6 +669,10 @@ class PluginManager:
             order = int(payload.get("order", 100))
         except (TypeError, ValueError):
             order = 100
+
+        python_requirements = self._parse_external_requirements(
+            payload.get("python_requires", [])
+        )
         return PluginDescriptor(
             id=plugin_id,
             name=name,
@@ -372,7 +683,64 @@ class PluginManager:
             builtin=False,
             root=root,
             entry=entry,
+            python_requirements=python_requirements,
         )
+
+    @staticmethod
+    def _probe_dependency(probe: str) -> bool:
+        if probe == "playwright_chromium":
+            try:
+                from playwright.sync_api import sync_playwright
+
+                with sync_playwright() as playwright:
+                    return Path(playwright.chromium.executable_path).is_file()
+            except Exception:
+                return False
+        return True
+
+    @staticmethod
+    def _parse_external_requirements(payload) -> tuple[DependencySpec, ...]:
+        if payload in (None, []):
+            return ()
+        if not isinstance(payload, list):
+            raise PluginManagerError("plugin.json 的 python_requires 必须是数组")
+
+        items: list[DependencySpec] = []
+        for raw in payload:
+            if isinstance(raw, str):
+                requirement_text = raw.strip()
+                import_name = ""
+                label = ""
+                optional = False
+            elif isinstance(raw, dict):
+                requirement_text = str(raw.get("requirement") or "").strip()
+                import_name = str(raw.get("import") or "").strip()
+                label = str(raw.get("label") or "").strip()
+                optional = bool(raw.get("optional", False))
+            else:
+                raise PluginManagerError("python_requires 项必须是字符串或对象")
+
+            try:
+                parsed = Requirement(requirement_text)
+            except InvalidRequirement as exc:
+                raise PluginManagerError(
+                    f"非法 Python 依赖：{requirement_text or raw}"
+                ) from exc
+            if parsed.url is not None:
+                raise PluginManagerError("外部插件 python_requires 不允许 URL/本地路径依赖")
+            guessed_import = parsed.name.replace("-", "_").replace(".", "_")
+            import_value = import_name or guessed_import
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", import_value):
+                raise PluginManagerError(f"非法依赖 import 名称：{import_value}")
+            items.append(
+                DependencySpec(
+                    requirement=requirement_text,
+                    import_name=import_value,
+                    label=label or parsed.name,
+                    optional=optional,
+                )
+            )
+        return tuple(items)
 
     @staticmethod
     def _locate_manifest_root(source: Path) -> Path:
@@ -440,13 +808,35 @@ def build_registry(
         manager.set_runtime_override(enabled)
     desired = manager.desired_enabled()
     descriptors = manager.descriptor_map()
-    specs = [manager.load_spec(descriptors[plugin_id]) for plugin_id in desired]
+
+    blocked = {
+        plugin_id
+        for plugin_id in desired
+        if not descriptors[plugin_id].builtin
+        and any(
+            not item["installed"] and not item["optional"]
+            for item in manager.dependency_status(plugin_id)
+        )
+    }
+    changed = True
+    while changed:
+        changed = False
+        for plugin_id in desired:
+            if plugin_id in blocked:
+                continue
+            if any(dependency in blocked for dependency in descriptors[plugin_id].requires):
+                blocked.add(plugin_id)
+                changed = True
+
+    active = desired.difference(blocked)
+    specs = [manager.load_spec(descriptors[plugin_id]) for plugin_id in active]
     from ..core.plugins import PluginRegistry
 
     return PluginRegistry(specs)
 
 
 __all__ = [
+    "DependencySpec",
     "PluginDescriptor",
     "PluginManager",
     "PluginManagerError",

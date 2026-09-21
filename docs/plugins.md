@@ -162,11 +162,64 @@ my_plugin/
   "version": "0.1.0",
   "description": "插件说明",
   "requires": ["classroom"],
+  "python_requires": ["httpx>=0.27"],
   "entry": "plugin.py"
 }
 ```
 
 `plugin.py` 需要导出 `build_plugin() -> PluginSpec`，并且 `PluginSpec.id`、`PluginSpec.requires` 必须与 `plugin.json` 一致。外部插件会执行 Python 代码，只应安装可信来源的插件。
+
+## 插件运行依赖
+
+Python 依赖已经按插件拆分：
+
+```text
+requirements/
+├── core.txt
+├── classroom.txt
+├── processing.txt
+├── transcription.txt
+├── ocr.txt
+├── attendance.txt
+├── course_selection.txt
+└── all.txt
+```
+
+根目录 `requirements.txt` 只安装 core 依赖。完整开发/测试环境使用：
+
+```powershell
+python -m pip install -r requirements/all.txt
+```
+
+插件管理页会读取每个插件的依赖声明并显示已安装版本、缺失的必需依赖和缺失的可选增强。点击“安装/修复依赖”会创建后台任务，使用当前 Python 解释器执行 pip 安装；Playwright 安装完成后还会自动执行 `python -m playwright install chromium`。签到插件的 wxscan PyO3 扩展属于可选增强，编译失败只会记录 warning，仍可使用 OpenCV fallback。
+
+内置插件当前依赖关系：
+
+- `classroom`：Playwright + Chromium
+- `processing`：Pillow
+- `transcription`：faster-whisper、huggingface-hub、OpenCC
+- `ocr`：rapidocr-onnxruntime
+- `attendance`：cryptography、NumPy、OpenCV；wxscan 原生扩展为可选
+- `course_selection`：Playwright + Chromium
+- `ai_summary`：无额外 Python 包
+
+外部插件可在 `plugin.json` 中声明：
+
+```json
+{
+  "python_requires": [
+    "httpx>=0.27",
+    {
+      "requirement": "orjson>=3.10",
+      "import": "orjson",
+      "label": "orjson",
+      "optional": true
+    }
+  ]
+}
+```
+
+外部插件依赖仅接受正常 PyPI requirement，不接受 URL、本地路径或 pip 参数。缺少必需依赖时外部插件不能启用；如果状态文件中残留了这种配置，启动时会跳过该插件及依赖它的插件，而不会阻止 core UI 启动。
 
 ## Manifest 懒加载
 
