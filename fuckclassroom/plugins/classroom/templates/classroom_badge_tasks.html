@@ -1,0 +1,1 @@
+{% if tasks is defined and tasks %}<span class="nav-badge">{{ tasks|selectattr('status', 'equalto', 'running')|list|length }}</span>{% endif %}

@@ -1,0 +1,15 @@
+<section class="settings-section" id="network">
+  <div><h2>账号与网络</h2><p>统一账号同时用于课程录播与本科教务，校外教务访问可使用内置 Hy2 通道。</p></div>
+  <div class="fields">
+    <label class="check-row"><input type="checkbox" name="hy2_enabled" {% if settings.hy2_enabled %}checked{% endif %}><span>启用 Hy2 教务代理</span></label>
+    <div class="detail-grid"><div class="detail-item"><label>运行状态</label><strong>{{ hy2_status.message }}</strong></div><div class="detail-item"><label>启动策略</label><strong>仅在教务访问需要时启动</strong></div></div>
+    <p class="field-hint">应用启动和账户状态检查不会再运行 Hy2；只有直接入口和公网入口都不可用、且你启用了 Hy2 时才会尝试启动。</p>
+    {% if settings.hy2_enabled %}<div class="notice warning hy2-security-note"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>Hy2 默认使用经过源码指纹和 SHA-256 校验的预编译 runner。若 Windows Smart App Control 以 4551 拦截它，程序会自动尝试本机 Cargo 构建一次；只有此兜底路径需要 Rust。若未安装 Cargo或本地构建仍被拦截，请关闭 Hy2，系统会继续尝试公网教务或 WebVPN。</span></div>{% endif %}
+    <div class="field-row"><div class="field"><label for="selection_username">统一桂电账号</label><input class="input mono" id="selection_username" name="selection_username" autocomplete="username" value="{{ selection_credentials.username }}"></div><div class="field"><label for="selection_password">统一桂电密码</label><input class="input mono" id="selection_password" name="selection_password" type="password" autocomplete="new-password" placeholder="{% if selection_credentials.is_saved %}已加密保存，留空保持不变{% else %}未保存{% endif %}"></div></div>
+    <div class="detail-grid"><div class="detail-item"><label>自动登录</label><strong>{{ selection_credentials.message }}</strong></div><div class="detail-item"><label>保护方式</label><strong>Windows DPAPI</strong></div></div>
+    <button class="btn danger" type="submit" form="login-state-clear-form"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除登录状态</button>
+    {% if selection_credentials.is_saved %}
+      <button class="btn danger" type="submit" form="credential-clear-form"><svg class="icon"><use href="/static/icons.svg#trash-2"></use></svg>清除自动登录凭据</button>
+    {% endif %}
+  </div>
+</section>
