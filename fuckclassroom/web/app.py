@@ -46,9 +46,9 @@ from ..course_selection import (
 from ..course_selection.automation import AutoSelectionService
 from ..course_selection.helpers import _group_plan_courses
 from ..course_selection.proxy import Hy2ProxyManager
+from ..plugins import build_plugin_registry
 
 
-templates = Jinja2Templates(directory=str(PROJECT_ROOT / "templates"))
 logger = logging.getLogger(__name__)
 
 
@@ -141,6 +141,10 @@ def _reconcile_live_status(detail: CourseDetail, live_ids: set[str]) -> CourseDe
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
     app_config = config or AppConfig()
+    plugin_registry = build_plugin_registry()
+    templates = Jinja2Templates(
+        directory=plugin_registry.template_directories(PROJECT_ROOT / "templates")
+    )
     classroom_client = ClassroomClient(app_config)
     semester_sync = SemesterSyncService(
         classroom_client,
@@ -267,7 +271,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.state.get_classroom_session_status = auth_service.get_session_status
     app.state.get_selection_session_status = course_selection.get_session_status
     app.state.semester_sync = semester_sync
+    app.state.plugin_registry = plugin_registry
     app.mount("/static", StaticFiles(directory=str(PROJECT_ROOT / "static")), name="static")
+    for mount in plugin_registry.static_mounts:
+        app.mount(mount.path, StaticFiles(directory=str(mount.directory)), name=mount.name)
     def task_started_response(request: Request, task, result_url: str | None = None) -> Response:
         if "application/json" in request.headers.get("accept", ""):
             payload = {
@@ -451,6 +458,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         body = (await request.body()).decode("utf-8", errors="replace")
         parsed = parse_qs(body, keep_blank_values=True)
         form = {key: values[-1] if values else "" for key, values in parsed.items()}
+        for field in plugin_registry.active_checkbox_fields:
+            form.setdefault(field, "")
         updated = settings_store.update_from_form(form)
         try:
             credential_store.update_from_form(

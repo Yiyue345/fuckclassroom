@@ -154,8 +154,8 @@ class SettingsStore:
                 "ocr_workers": form.get("ocr_workers", current.ocr_workers),
                 "ocr_onnx_threads": form.get("ocr_onnx_threads", current.ocr_onnx_threads),
                 "ocr_max_side": form.get("ocr_max_side", current.ocr_max_side),
-                "ocr_use_angle_cls": form.get("ocr_use_angle_cls", ""),
-                "ocr_cache_enabled": form.get("ocr_cache_enabled", ""),
+                "ocr_use_angle_cls": form.get("ocr_use_angle_cls", current.ocr_use_angle_cls),
+                "ocr_cache_enabled": form.get("ocr_cache_enabled", current.ocr_cache_enabled),
                 "asr_model": form.get("asr_model", current.asr_model),
                 "asr_device": form.get("asr_device", current.asr_device),
                 "asr_compute_type": form.get("asr_compute_type", current.asr_compute_type),
@@ -168,12 +168,16 @@ class SettingsStore:
                     "audio_prefetch_queue_size", current.audio_prefetch_queue_size
                 ),
                 "asr_batch_size": form.get("asr_batch_size", current.asr_batch_size),
-                "asr_use_batched": form.get("asr_use_batched", ""),
-                "asr_simplified_chinese": form.get("asr_simplified_chinese", ""),
-                "auto_open_outputs_after_extract": form.get("auto_open_outputs_after_extract"),
-                "auto_summarize_after_extract": form.get("auto_summarize_after_extract", ""),
+                "asr_use_batched": form.get("asr_use_batched", current.asr_use_batched),
+                "asr_simplified_chinese": form.get("asr_simplified_chinese", current.asr_simplified_chinese),
+                "auto_open_outputs_after_extract": form.get(
+                    "auto_open_outputs_after_extract", current.auto_open_outputs_after_extract
+                ),
+                "auto_summarize_after_extract": form.get(
+                    "auto_summarize_after_extract", current.auto_summarize_after_extract
+                ),
                 "default_term_id": form.get("default_term_id", current.default_term_id),
-                "hy2_enabled": form.get("hy2_enabled"),
+                "hy2_enabled": form.get("hy2_enabled", current.hy2_enabled),
                 "auto_selection_retry_seconds": form.get(
                     "auto_selection_retry_seconds", current.auto_selection_retry_seconds
                 ),
