@@ -79,7 +79,7 @@
   });
 
   document.querySelectorAll("form[data-confirm]").forEach((form) => {
-    if (form.matches("form[data-selection-action]")) return;
+    if (form.hasAttribute("data-confirm-handled")) return;
     form.addEventListener("submit", (event) => {
       if (!window.confirm(form.dataset.confirm || "确认执行此操作？")) {
         event.preventDefault();
