@@ -579,4 +579,22 @@ def register_routes(
 
 
 
-__all__ = ["register_routes"]
+def build_router(context) -> APIRouter:
+    from ...web.responses import task_started_response
+
+    services = context.services
+    router = APIRouter()
+    register_routes(
+        router,
+        templates=services.get("templates"),
+        course_selection=services.get("course_selection"),
+        auto_selection=services.get("auto_selection"),
+        settings_store=services.get("settings_store"),
+        task_manager=services.get("task_manager"),
+        hy2_proxy=services.get("hy2_proxy"),
+        task_started_response=task_started_response,
+    )
+    return router
+
+
+__all__ = ["build_router", "register_routes"]

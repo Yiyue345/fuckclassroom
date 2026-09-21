@@ -615,4 +615,27 @@ def register_routes(
     )
 
 
-__all__ = ["register_routes"]
+def build_router(context) -> APIRouter:
+    from ...web.responses import task_started_response
+
+    services = context.services
+    router = APIRouter()
+    register_routes(
+        router,
+        config=context.config,
+        templates=services.get("templates"),
+        classroom_client=services.get("classroom_client"),
+        semester_sync=services.get("semester_sync"),
+        auth_service=services.get("auth_service"),
+        ketangpai_client=services.get("ketangpai_client"),
+        extraction_service=services.get("extraction_service"),
+        download_library=services.get("download_library"),
+        task_manager=services.get("task_manager"),
+        ketangpai_sms_sessions=services.get("ketangpai_sms_sessions"),
+        ketangpai_sms_lock=services.get("ketangpai_sms_lock"),
+        task_started_response=task_started_response,
+    )
+    return router
+
+
+__all__ = ["build_router", "register_routes"]

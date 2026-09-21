@@ -85,12 +85,19 @@ async def startup(context: PluginContext) -> None:
     context.create_task(verify_sessions())
 
 
+def build_routes(context: PluginContext):
+    from .routes import build_router
+
+    return build_router(context)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="classroom",
         name="课程录播",
         order=10,
         service_factory=setup_services,
+        route_factory=build_routes,
         startup=startup,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
@@ -170,4 +177,4 @@ def build_plugin() -> PluginSpec:
     )
 
 
-__all__ = ["build_plugin", "setup_services", "startup"]
+__all__ = ["build_plugin", "build_routes", "setup_services", "startup"]

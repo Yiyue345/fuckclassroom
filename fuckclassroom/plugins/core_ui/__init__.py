@@ -46,12 +46,19 @@ def setup_services(context: PluginContext) -> None:
     context.services.add("login_lock", threading.Lock())
 
 
+def build_routes(context: PluginContext):
+    from .routes import build_router
+
+    return build_router(context)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="core_ui",
         name="通用",
         order=0,
         service_factory=setup_services,
+        route_factory=build_routes,
         template_dir=PLUGIN_DIR / "templates",
         navigation_groups=(
             NavigationGroup(
@@ -112,4 +119,4 @@ def build_plugin() -> PluginSpec:
     )
 
 
-__all__ = ["build_plugin", "setup_services"]
+__all__ = ["build_plugin", "build_routes", "setup_services"]

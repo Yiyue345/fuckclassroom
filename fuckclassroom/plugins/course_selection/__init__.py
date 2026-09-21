@@ -82,12 +82,19 @@ def shutdown(context: PluginContext) -> None:
     context.services.get("hy2_proxy").stop()
 
 
+def build_routes(context: PluginContext):
+    from .routes import build_router
+
+    return build_router(context)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="course_selection",
         name="本科选课",
         order=20,
         service_factory=setup_services,
+        route_factory=build_routes,
         startup=startup,
         shutdown=shutdown,
         template_dir=PLUGIN_DIR / "templates",
@@ -154,4 +161,4 @@ def build_plugin() -> PluginSpec:
     )
 
 
-__all__ = ["build_plugin", "setup_services", "shutdown", "startup"]
+__all__ = ["build_plugin", "build_routes", "setup_services", "shutdown", "startup"]

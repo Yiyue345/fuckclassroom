@@ -76,6 +76,10 @@ class PluginContext:
     logger: Any
     _runtime: "PluginRuntime"
 
+    @property
+    def registry(self) -> "PluginRegistry":
+        return self._runtime.registry
+
     def create_task(self, awaitable: Any) -> asyncio.Task[Any]:
         return self._runtime.create_background_task(self.plugin_id, awaitable)
 
@@ -96,6 +100,7 @@ class PluginSpec:
     template_dir: Path | None = None
     static_dir: Path | None = None
     service_factory: PluginHook | None = None
+    route_factory: PluginHook | None = None
     startup: PluginHook | None = None
     shutdown: PluginHook | None = None
 
@@ -225,6 +230,14 @@ class PluginRuntime:
         for plugin in self.registry.plugins:
             if plugin.service_factory is not None:
                 plugin.service_factory(self._context(plugin.id))
+
+    def initialize_routes(self) -> None:
+        for plugin in self.registry.plugins:
+            if plugin.route_factory is None:
+                continue
+            router = plugin.route_factory(self._context(plugin.id))
+            if router is not None:
+                self.attach_router(plugin.id, router)
 
     def attach_router(self, plugin_id: str, router: object) -> None:
         if not self.registry.is_enabled(plugin_id):
