@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% set active_system = "common" %}
+{% set active_nav = "plugins" %}
+
+{% block title %}插件管理 · Fuck Classroom{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>插件管理</h1>
+      <p class="page-description">启用、停用或添加功能插件。插件状态修改会保存到本机，涉及路由、服务或静态资源的变化需要重启应用后生效。</p>
+    </div>
+  </div>
+
+  {% if error %}
+    <div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>
+  {% endif %}
+  {% if notice %}
+    <div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>{{ notice }}</span></div>
+  {% endif %}
+  {% if restart_required %}
+    <div class="notice warning"><svg class="icon"><use href="/static/icons.svg#rotate-ccw"></use></svg><span>当前运行状态与保存的插件配置不同。请重启 Fuck Classroom 使变更完全生效。</span></div>
+  {% endif %}
+  {% if not plugin_config_mutable %}
+    <div class="notice warning">
+      <svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg>
+      <span>
+        当前插件列表由
+        <strong>{{ "FUCKCLASSROOM_PLUGINS 环境变量" if selection_source == "environment" else "create_app(enabled_plugins=...) 参数" }}</strong>
+        控制，网页中的启用/停用操作已锁定。
+      </span>
+    </div>
+  {% endif %}
+
+  <section class="plugin-install surface">
+    <div class="plugin-install-copy">
+      <h2>添加外部插件</h2>
+      <p>输入本机插件目录或 ZIP 包路径。插件包需要包含 <code>plugin.json</code> 和入口 Python 文件；添加后默认保持停用。</p>
+      <p class="plugin-security-note">外部插件会在启用后执行 Python 代码，只添加你信任的插件。</p>
+    </div>
+    <form class="plugin-install-form" method="post" action="/plugins/install">
+      <label for="plugin-source-path">插件目录 / ZIP 路径</label>
+      <div class="plugin-install-row">
+        <input class="input mono" id="plugin-source-path" name="source_path" placeholder="D:\plugins\my_plugin 或 /home/me/my_plugin.zip" {% if not plugin_config_mutable %}disabled{% endif %}>
+        <button class="btn primary" type="submit" {% if not plugin_config_mutable %}disabled{% endif %}>添加插件</button>
+      </div>
+      <span class="field-hint">安装目录：<span class="mono">{{ plugin_dir }}</span></span>
+      <div class="plugin-upload-divider"><span>或</span></div>
+      <div class="plugin-upload-row">
+        <input id="plugin-zip-file" type="file" accept=".zip,application/zip" hidden {% if not plugin_config_mutable %}disabled{% endif %}>
+        <button class="btn" id="plugin-zip-button" type="button" {% if not plugin_config_mutable %}disabled{% endif %}>选择 ZIP 插件包</button>
+        <span class="plugin-upload-status" id="plugin-upload-status">选择后会直接安装，最大 50 MB</span>
+      </div>
+    </form>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <h2>已发现插件</h2>
+      <span class="section-meta">{{ plugins|length }} 个</span>
+    </div>
+    <div class="plugin-grid">
+      {% for plugin in plugins %}
+        <article class="surface plugin-card">
+          <div class="plugin-card-head">
+            <div class="plugin-title-group">
+              <div class="plugin-title-line">
+                <h3>{{ plugin.name }}</h3>
+                <span class="status {{ 'blue' if plugin.builtin else 'gray' }}">{{ plugin.source_label }}</span>
+                {% if plugin.version and plugin.version != "builtin" %}
+                  <span class="plugin-version mono">v{{ plugin.version }}</span>
+                {% endif %}
+              </div>
+              <div class="plugin-id mono">{{ plugin.id }}</div>
+            </div>
+            <div class="plugin-state">
+              {% if plugin.current_enabled and plugin.desired_enabled %}
+                <span class="status green"><span class="tiny-dot"></span>已启用</span>
+              {% elif plugin.current_enabled and not plugin.desired_enabled %}
+                <span class="status amber"><span class="tiny-dot"></span>待停用</span>
+              {% elif not plugin.current_enabled and plugin.desired_enabled %}
+                <span class="status blue"><span class="tiny-dot"></span>待启用</span>
+              {% else %}
+                <span class="status gray"><span class="tiny-dot"></span>已停用</span>
+              {% endif %}
+            </div>
+          </div>
+
+          <p class="plugin-description">{{ plugin.description or "该插件未提供描述。" }}</p>
+
+          <div class="plugin-meta-grid">
+            <div>
+              <span>依赖</span>
+              <strong>
+                {% if plugin.requires %}
+                  {{ plugin.requires|join(", ") }}
+                {% else %}
+                  无
+                {% endif %}
+              </strong>
+            </div>
+            <div>
+              <span>被依赖</span>
+              <strong>
+                {% if plugin.dependents %}
+                  {{ plugin.dependents|join(", ") }}
+                {% else %}
+                  无
+                {% endif %}
+              </strong>
+            </div>
+          </div>
+
+          <div class="plugin-actions">
+            {% if plugin.locked %}
+              <button class="btn small" type="button" disabled>基础插件</button>
+            {% elif plugin.desired_enabled %}
+              <form method="post" action="/plugins/{{ plugin.id }}/disable">
+                <button class="btn small danger" type="submit" {% if not plugin_config_mutable %}disabled{% endif %}>停用</button>
+              </form>
+            {% else %}
+              <form method="post" action="/plugins/{{ plugin.id }}/enable">
+                <button class="btn small primary" type="submit" {% if not plugin_config_mutable %}disabled{% endif %}>启用</button>
+              </form>
+            {% endif %}
+
+            {% if not plugin.builtin %}
+              <form method="post" action="/plugins/{{ plugin.id }}/remove">
+                <button class="btn small" type="submit"
+                  {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
+                  title="{% if plugin.current_enabled %}请先停用并重启应用{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
+                  删除
+                </button>
+              </form>
+            {% endif %}
+          </div>
+        </article>
+      {% else %}
+        <div class="surface empty-state">没有发现可用插件。</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="section surface plugin-format">
+    <h2>外部插件包格式</h2>
+    <p>最小插件包可以只包含 <code>plugin.json</code> 与 <code>plugin.py</code>。依赖必须写在清单中，并与 <code>PluginSpec.requires</code> 保持一致。</p>
+<pre class="plugin-manifest-example">{
+  "id": "my_plugin",
+  "name": "示例插件",
+  "version": "0.1.0",
+  "description": "插件说明",
+  "requires": ["classroom"],
+  "entry": "plugin.py"
+}</pre>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const input = document.getElementById('plugin-zip-file');
+  const button = document.getElementById('plugin-zip-button');
+  const status = document.getElementById('plugin-upload-status');
+  if (!input || !button || !status) return;
+
+  button.addEventListener('click', () => input.click());
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    button.disabled = true;
+    status.textContent = `正在安装 ${file.name}…`;
+    try {
+      const response = await fetch('/plugins/install-upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/zip',
+          'X-Plugin-Filename': file.name,
+        },
+        body: file,
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || '插件安装失败');
+      window.location.href = '/plugins?notice=' + encodeURIComponent(payload.message || '插件已添加');
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : String(error);
+      button.disabled = false;
+      input.value = '';
+    }
+  });
+})();
+</script>
+{% endblock %}

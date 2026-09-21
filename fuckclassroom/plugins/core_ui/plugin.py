@@ -34,6 +34,7 @@ def build_plugin() -> PluginSpec:
                 order=90,
                 items=(
                     NavigationItem(key="accounts", label="账户与认证", href="/accounts", icon="shield-check", active_keys=("accounts",)),
+                    NavigationItem(key="plugins", label="插件管理", href="/plugins", icon="settings", active_keys=("plugins",)),
                     NavigationItem(key="settings", label="设置", href="/settings", icon="settings", active_keys=("settings",)),
                 ),
             ),

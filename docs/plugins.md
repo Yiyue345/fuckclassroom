@@ -133,6 +133,41 @@ PluginSpec(
 - `course_selection` 的教务会话验证、缓存刷新、自动选课启动属于 startup；
 - 自动选课停止和 Hy2 停止属于 shutdown。
 
+## 插件管理页面
+
+应用内置 `/plugins` 插件管理页，统一管理内置和外部插件。
+
+- 启用插件时会自动补齐 `requires` 依赖。
+- 停用基础依赖时，会同时停用所有依赖它的插件。
+- 插件配置保存到 `data/plugin_state.json`。
+- 插件路由、服务、静态挂载和 lifecycle 在应用启动时完成，因此启停变更保存后需要重启应用。
+- 若设置了 `FUCKCLASSROOM_PLUGINS`，或代码通过 `create_app(enabled_plugins=...)` 显式指定插件，管理页会进入只读模式，避免网页配置与启动参数互相覆盖。
+
+外部插件安装到 `data/plugins/<plugin_id>/`。管理页既支持填写本机插件目录/ZIP 路径，也支持直接选择 ZIP 文件上传安装。新安装的外部插件默认保持停用。
+
+最小外部插件包：
+
+```text
+my_plugin/
+├── plugin.json
+└── plugin.py
+```
+
+`plugin.json` 示例：
+
+```json
+{
+  "id": "my_plugin",
+  "name": "示例插件",
+  "version": "0.1.0",
+  "description": "插件说明",
+  "requires": ["classroom"],
+  "entry": "plugin.py"
+}
+```
+
+`plugin.py` 需要导出 `build_plugin() -> PluginSpec`，并且 `PluginSpec.id`、`PluginSpec.requires` 必须与 `plugin.json` 一致。外部插件会执行 Python 代码，只应安装可信来源的插件。
+
 ## Manifest 懒加载
 
 `plugin.py` 只保留插件元数据以及轻量 hook。Service/Lifecycle/Route 实现都在 hook 被 runtime 调用时再 import，因此禁用插件不会仅仅因为 registry 枚举了全部内置插件就加载其实现模块。

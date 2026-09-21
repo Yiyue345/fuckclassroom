@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from ..core.config import PROJECT_ROOT, AppConfig
 from ..core.plugins import PluginRuntime
-from ..plugins import build_plugin_registry
+from ..plugins import PluginManager, build_plugin_registry
 
 
 logger = logging.getLogger(__name__)
@@ -35,8 +35,14 @@ def create_app(
     enabled_plugins: Iterable[str] | None = None,
 ) -> FastAPI:
     app_config = config or AppConfig()
-    plugin_registry = build_plugin_registry(enabled_plugins)
+    plugin_manager = PluginManager(app_config)
+    plugin_registry = build_plugin_registry(
+        enabled_plugins,
+        config=app_config,
+        manager=plugin_manager,
+    )
     plugin_runtime = PluginRuntime(plugin_registry, app_config, logger)
+    plugin_runtime.services.add("plugin_manager", plugin_manager)
     plugin_runtime.initialize_services()
 
     templates = Jinja2Templates(
@@ -75,6 +81,7 @@ def create_app(
     app.state.semester_sync = services.maybe("semester_sync")
     app.state.plugin_registry = plugin_registry
     app.state.plugin_runtime = plugin_runtime
+    app.state.plugin_manager = plugin_manager
 
     app.mount("/static", StaticFiles(directory=str(PROJECT_ROOT / "static")), name="static")
     for mount in plugin_registry.static_mounts:

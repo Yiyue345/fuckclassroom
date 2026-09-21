@@ -187,6 +187,7 @@ class PluginCompositionTests(unittest.TestCase):
 
         self.assertIn("/health", paths)
         self.assertIn("/settings", paths)
+        self.assertIn("/plugins", paths)
         self.assertNotIn("/classroom", paths)
         self.assertNotIn("/selection/info", paths)
         self.assertEqual(
@@ -198,6 +199,7 @@ class PluginCompositionTests(unittest.TestCase):
                 "credential_store",
                 "verification_broker",
                 "login_lock",
+                "plugin_manager",
                 "templates",
             },
         )

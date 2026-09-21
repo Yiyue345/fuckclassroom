@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import time
 from urllib.parse import parse_qs, quote
 
@@ -10,6 +11,7 @@ from ...auth.cas import LoginVerificationError
 from ...auth.credentials import CredentialStoreError
 from ...core.plugins import PluginContext
 from ...core.tasks import cancel_registered_task
+from ..manager import PluginManagerError
 
 
 def build_router(context: PluginContext) -> APIRouter:
@@ -24,6 +26,7 @@ def build_router(context: PluginContext) -> APIRouter:
     task_manager = services.get("task_manager")
     credential_store = services.get("credential_store")
     verification_broker = services.get("verification_broker")
+    plugin_manager = services.get("plugin_manager")
 
     semester_sync = services.maybe("semester_sync")
     auth_service = services.maybe("auth_service")
@@ -71,6 +74,131 @@ def build_router(context: PluginContext) -> APIRouter:
         except LoginVerificationError as exc:
             return JSONResponse({"detail": str(exc)}, status_code=409)
         return JSONResponse({"ok": True})
+    @router.get("/plugins", response_class=HTMLResponse)
+    def plugins_page(request: Request) -> HTMLResponse:
+        error = request.query_params.get("error")
+        rows = []
+        try:
+            rows = plugin_manager.status_rows(plugin_registry.plugin_ids)
+        except PluginManagerError as exc:
+            error = str(exc)
+        return templates.TemplateResponse(
+            request,
+            "plugin_manager.html",
+            {
+                "plugins": rows,
+                "selection_source": plugin_manager.selection_source,
+                "plugin_config_mutable": plugin_manager.mutable,
+                "plugin_dir": plugin_manager.plugin_dir,
+                "notice": request.query_params.get("notice"),
+                "error": error,
+                "restart_required": request.query_params.get("restart") == "1"
+                    or any(bool(item.get("restart_required")) for item in rows),
+            },
+        )
+
+    @router.post("/plugins/{plugin_id}/enable")
+    def enable_plugin(plugin_id: str) -> RedirectResponse:
+        try:
+            plugin_manager.enable(plugin_id)
+        except PluginManagerError as exc:
+            return RedirectResponse(
+                f"/plugins?error={quote(str(exc))}",
+                status_code=303,
+            )
+        return RedirectResponse(
+            f"/plugins?restart=1&notice={quote('已保存启用配置，重启应用后生效')}",
+            status_code=303,
+        )
+
+    @router.post("/plugins/{plugin_id}/disable")
+    def disable_plugin(plugin_id: str) -> RedirectResponse:
+        try:
+            plugin_manager.disable(plugin_id)
+        except PluginManagerError as exc:
+            return RedirectResponse(
+                f"/plugins?error={quote(str(exc))}",
+                status_code=303,
+            )
+        return RedirectResponse(
+            f"/plugins?restart=1&notice={quote('已保存停用配置；依赖该插件的功能也会在重启后停用')}",
+            status_code=303,
+        )
+
+    @router.post("/plugins/install")
+    async def install_plugin(request: Request) -> RedirectResponse:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        parsed = parse_qs(body, keep_blank_values=True)
+        source_path = (parsed.get("source_path") or [""])[-1]
+        try:
+            descriptor = plugin_manager.install_from_path(source_path)
+        except PluginManagerError as exc:
+            return RedirectResponse(
+                f"/plugins?error={quote(str(exc))}",
+                status_code=303,
+            )
+        return RedirectResponse(
+            f"/plugins?notice={quote(f'插件 {descriptor.name} 已添加，默认保持停用')}",
+            status_code=303,
+        )
+
+    @router.post("/plugins/install-upload")
+    async def install_plugin_upload(request: Request) -> JSONResponse:
+        max_bytes = 50 * 1024 * 1024
+        try:
+            content_length = int(request.headers.get("content-length") or 0)
+        except ValueError:
+            content_length = 0
+        if content_length > max_bytes:
+            return JSONResponse({"detail": "插件包不能超过 50 MB"}, status_code=413)
+        payload = await request.body()
+        if not payload:
+            return JSONResponse({"detail": "插件包为空"}, status_code=400)
+        if len(payload) > max_bytes:
+            return JSONResponse({"detail": "插件包不能超过 50 MB"}, status_code=413)
+
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as temporary:
+                temporary.write(payload)
+                temporary_path = temporary.name
+            descriptor = plugin_manager.install_from_path(temporary_path)
+        except PluginManagerError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        finally:
+            if temporary_path:
+                try:
+                    from pathlib import Path
+
+                    Path(temporary_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return JSONResponse(
+            {
+                "ok": True,
+                "plugin_id": descriptor.id,
+                "name": descriptor.name,
+                "message": f"插件 {descriptor.name} 已添加，默认保持停用",
+            }
+        )
+
+    @router.post("/plugins/{plugin_id}/remove")
+    def remove_plugin(plugin_id: str) -> RedirectResponse:
+        try:
+            plugin_manager.remove(
+                plugin_id,
+                current_enabled=plugin_registry.plugin_ids,
+            )
+        except PluginManagerError as exc:
+            return RedirectResponse(
+                f"/plugins?error={quote(str(exc))}",
+                status_code=303,
+            )
+        return RedirectResponse(
+            f"/plugins?notice={quote('插件文件已删除')}",
+            status_code=303,
+        )
+
     @router.get("/settings", response_class=HTMLResponse)
     def settings(request: Request) -> HTMLResponse:
         error = None

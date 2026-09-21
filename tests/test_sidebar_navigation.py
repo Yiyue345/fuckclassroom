@@ -35,6 +35,7 @@ class SidebarNavigationTests(unittest.TestCase):
                 "/selection/auto",
                 "/selection/captures",
                 "/accounts",
+                "/plugins",
                 "/settings",
             },
         )
@@ -74,6 +75,7 @@ class SidebarNavigationTests(unittest.TestCase):
 
         environment.get_template("base.html")
         environment.get_template("settings.html")
+        environment.get_template("plugin_manager.html")
         for panel in registry.settings_panels:
             environment.get_template(panel.template)
 
