@@ -4,7 +4,7 @@
   if (!document.querySelector('link[data-task-detail-style]')) {
     const style = document.createElement('link');
     style.rel = 'stylesheet';
-    style.href = '/static/task_detail_progress.css?v=20260916-1';
+    style.href = '/plugins/classroom/static/task_detail_progress.css?v=20260916-1';
     style.dataset.taskDetailStyle = '';
     document.head.append(style);
   }

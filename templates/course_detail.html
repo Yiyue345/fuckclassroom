@@ -5,7 +5,7 @@
 {% block title %}{{ detail.course.title if detail else "课程资源" }} · 学业助手{% endblock %}
 {% block breadcrumb_parent %}<a href="/courses">我的课程</a>{% endblock %}
 {% block page_title %}{{ detail.course.title if detail else "课程资源" }}{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/course_media.css?v=20260917-2"><link rel="stylesheet" href="/static/course_media_fit.css?v=20260917-2">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/plugins/classroom/static/course_media.css?v=20260917-2"><link rel="stylesheet" href="/plugins/classroom/static/course_media_fit.css?v=20260917-2">{% endblock %}
 
 {% block content %}
   <div class="page-head">
@@ -143,4 +143,4 @@
   {% endif %}
 {% endblock %}
 
-{% block scripts %}<script src="/static/vendor/hls.min.js?v=1.7.3"></script><script src="/static/course_media.js?v=20260918-3"></script><script src="/static/course_media_fit.js?v=20260918-2"></script><script src="/static/task_detail_progress.js?v=20260916-1"></script>{% endblock %}
+{% block scripts %}<script src="/static/vendor/hls.min.js?v=1.7.3"></script><script src="/plugins/classroom/static/course_media.js?v=20260918-3"></script><script src="/plugins/classroom/static/course_media_fit.js?v=20260918-2"></script><script src="/plugins/classroom/static/task_detail_progress.js?v=20260916-1"></script>{% endblock %}

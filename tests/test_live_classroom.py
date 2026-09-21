@@ -225,8 +225,8 @@ class LiveClassroomTests(unittest.TestCase):
         overview = Path("templates/login.html").read_text(encoding="utf-8")
         detail = Path("templates/course_detail.html").read_text(encoding="utf-8")
         base = Path("templates/base.html").read_text(encoding="utf-8")
-        styles = Path("static/course_media.css").read_text(encoding="utf-8")
-        script = Path("static/course_media.js").read_text(encoding="utf-8")
+        styles = Path("fuckclassroom/plugins/classroom/static/course_media.css").read_text(encoding="utf-8")
+        script = Path("fuckclassroom/plugins/classroom/static/course_media.js").read_text(encoding="utf-8")
 
         self.assertIn("正在直播", overview)
         self.assertIn("live-now-icon", overview)

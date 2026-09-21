@@ -5,39 +5,93 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
+from fuckclassroom.plugins import build_plugin_registry
+
 
 class SidebarNavigationTests(unittest.TestCase):
-    def test_all_product_areas_are_visible_without_a_workspace_menu(self) -> None:
+    def test_navigation_is_registered_by_plugins(self) -> None:
+        registry = build_plugin_registry()
+        groups = {group.aria_label: group for group in registry.navigation_groups}
+
+        self.assertEqual(
+            set(groups),
+            {"课程录播导航", "本科选课导航", "通用导航"},
+        )
+        hrefs = {
+            item.href
+            for group in registry.navigation_groups
+            for item in group.items
+        }
+        self.assertEqual(
+            hrefs,
+            {
+                "/classroom",
+                "/courses",
+                "/tasks",
+                "/downloads",
+                "/selection/info",
+                "/selection/catalog",
+                "/selection/info/selected",
+                "/selection/auto",
+                "/selection/captures",
+                "/accounts",
+                "/settings",
+            },
+        )
+
         template = Path("templates/base.html").read_text(encoding="utf-8")
+        self.assertIn("plugin_registry.navigation_groups", template)
+        self.assertNotIn('aria-label="课程录播导航"', template)
+        self.assertNotIn('aria-label="本科选课导航"', template)
 
-        self.assertNotIn("data-workspace-switcher", template)
-        for label in ("课程录播导航", "本科选课导航", "通用导航"):
-            self.assertIn(f'aria-label="{label}"', template)
-        for href in (
-            "/classroom",
-            "/courses",
-            "/tasks",
-            "/downloads",
-            "/selection/info",
-            "/selection/catalog",
-            "/selection/info/selected",
-            "/selection/auto",
-            "/selection/captures",
-            "/accounts",
-            "/settings",
-        ):
-            self.assertIn(f'href="{href}"', template)
+    def test_settings_panels_and_plugin_templates_are_registered(self) -> None:
+        registry = build_plugin_registry()
+        panel_keys = [panel.key for panel in registry.settings_panels]
 
-    def test_settings_use_the_common_navigation_context(self) -> None:
+        self.assertEqual(
+            panel_keys,
+            [
+                "appearance",
+                "courses",
+                "auto-selection",
+                "network",
+                "extraction",
+                "ai",
+                "settings-actions",
+                "storage",
+            ],
+        )
+
         settings = Path("templates/settings.html").read_text(encoding="utf-8")
         base = Path("templates/base.html").read_text(encoding="utf-8")
-        environment = Environment(loader=FileSystemLoader("templates"))
+        environment = Environment(
+            loader=FileSystemLoader(
+                registry.template_directories(Path("templates"))
+            )
+        )
 
         environment.get_template("base.html")
         environment.get_template("settings.html")
+        for panel in registry.settings_panels:
+            environment.get_template(panel.template)
+
         self.assertIn('{% set active_system = "common" %}', settings)
-        self.assertIn('active_system == "common"', base)
-        self.assertIn("通用", base)
+        self.assertIn("plugin_registry.settings_panels", settings)
+        self.assertIn("plugin_registry.system_label(active_system)", base)
+        self.assertEqual(registry.system_label("selection"), "本科选课")
+
+    def test_plugin_static_mounts_are_isolated(self) -> None:
+        registry = build_plugin_registry()
+        mounts = {mount.plugin_id: mount for mount in registry.static_mounts}
+
+        self.assertEqual(
+            mounts["classroom"].path,
+            "/plugins/classroom/static",
+        )
+        self.assertEqual(
+            mounts["course_selection"].path,
+            "/plugins/course_selection/static",
+        )
 
     def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:
         template = Path("templates/base.html").read_text(encoding="utf-8")

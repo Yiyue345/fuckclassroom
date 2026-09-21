@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - pluginization
       - feat/course-media-viewer
       - feature/live-ppt-qr-assistant
   pull_request:
@@ -46,14 +47,16 @@ jobs:
           from jinja2 import Environment
 
           env = Environment()
-          for path in Path('templates').glob('*.html'):
-              env.parse(path.read_text(encoding='utf-8'))
-              print(f'OK {path}')
+          roots = (Path('templates'), Path('fuckclassroom/plugins'))
+          for root in roots:
+              for path in root.rglob('*.html'):
+                  env.parse(path.read_text(encoding='utf-8'))
+                  print(f'OK {path}')
           PY
 
       - name: JavaScript syntax check
         run: |
-          for file in static/*.js; do
+          find static fuckclassroom/plugins -name '*.js' -print0 | while IFS= read -r -d '' file; do
             echo "Checking $file"
             node --check "$file"
           done

@@ -88,7 +88,7 @@ class QrAssistantTests(unittest.TestCase):
 
     def test_frontend_wires_live_lessons_to_qr_endpoint(self) -> None:
         template = Path("templates/course_detail.html").read_text(encoding="utf-8")
-        script = Path("static/qr_assistant.js").read_text(encoding="utf-8")
+        script = Path("fuckclassroom/plugins/classroom/static/qr_assistant.js").read_text(encoding="utf-8")
 
         self.assertIn('data-live-ppt-url="/api/courses/', template)
         self.assertIn("row.dataset.livePptUrl", script)
