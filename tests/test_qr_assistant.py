@@ -20,7 +20,7 @@ from fuckclassroom.classroom.qr_scan import (
     parse_changke_sign_payload,
 )
 from fuckclassroom.core.config import AppConfig
-from fuckclassroom.web.qr_assistant import (
+from fuckclassroom.plugins.attendance.qr import (
     register_qr_assistant_routes,
     submit_changke_qr,
     submit_ketangpai_qr,
@@ -88,7 +88,7 @@ class QrAssistantTests(unittest.TestCase):
 
     def test_frontend_wires_live_lessons_to_qr_endpoint(self) -> None:
         template = Path("templates/course_detail.html").read_text(encoding="utf-8")
-        script = Path("fuckclassroom/plugins/classroom/static/qr_assistant.js").read_text(encoding="utf-8")
+        script = Path("fuckclassroom/plugins/attendance/static/qr_assistant.js").read_text(encoding="utf-8")
 
         self.assertIn('data-live-ppt-url="/api/courses/', template)
         self.assertIn("row.dataset.livePptUrl", script)

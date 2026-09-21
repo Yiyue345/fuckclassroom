@@ -92,6 +92,7 @@ class PluginSpec:
     id: str
     name: str
     order: int = 100
+    requires: tuple[str, ...] = ()
     navigation_groups: tuple[NavigationGroup, ...] = ()
     settings_panels: tuple[SettingsPanel, ...] = ()
     sidebar_templates: tuple[str, ...] = ()
@@ -118,11 +119,20 @@ class PluginRegistry:
         self._plugins: dict[str, PluginSpec] = {}
         for plugin in plugins:
             self.register(plugin)
+        self.validate_dependencies()
 
     def register(self, plugin: PluginSpec) -> None:
         if plugin.id in self._plugins:
             raise ValueError(f"duplicate plugin id: {plugin.id}")
         self._plugins[plugin.id] = plugin
+
+    def validate_dependencies(self) -> None:
+        for plugin in self.plugins:
+            missing = [item for item in plugin.requires if item not in self._plugins]
+            if missing:
+                raise ValueError(
+                    f"plugin {plugin.id} requires disabled plugins: {', '.join(missing)}"
+                )
 
     def is_enabled(self, plugin_id: str) -> bool:
         return plugin_id in self._plugins

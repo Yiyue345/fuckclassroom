@@ -174,10 +174,11 @@ def build_router(context: PluginContext) -> APIRouter:
     @router.get("/accounts", response_class=HTMLResponse)
     def accounts(request: Request) -> HTMLResponse:
         classroom_enabled = plugin_registry.is_enabled("classroom")
+        attendance_enabled = plugin_registry.is_enabled("attendance")
         selection_enabled = plugin_registry.is_enabled("course_selection")
         sms_session_id = request.query_params.get("ketangpai_sms_session", "")
         sms_session = None
-        if classroom_enabled and ketangpai_sms_lock is not None:
+        if attendance_enabled and ketangpai_sms_lock is not None:
             with ketangpai_sms_lock:
                 now = time.time()
                 for key in list(ketangpai_sms_sessions):
@@ -229,7 +230,7 @@ def build_router(context: PluginContext) -> APIRouter:
             else {
                 "is_valid": False,
                 "is_saved": False,
-                "message": "课程录播插件未启用",
+                "message": "签到插件未启用",
                 "account": "",
                 "login_method": "",
             }
@@ -239,6 +240,7 @@ def build_router(context: PluginContext) -> APIRouter:
             "accounts.html",
             {
                 "classroom_enabled": classroom_enabled,
+                "attendance_enabled": attendance_enabled,
                 "selection_enabled": selection_enabled,
                 "classroom_session": classroom_session,
                 "classroom_login_run": classroom_login_run,

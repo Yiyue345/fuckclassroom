@@ -58,11 +58,42 @@ class _PptImageCandidate:
 
 
 class LessonExtractionService:
-    def __init__(self, config: AppConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig | None = None,
+        *,
+        classroom: ClassroomClient | None = None,
+        service_lookup: Callable[[str, object | None], object | None] | None = None,
+    ) -> None:
         self.config = config or AppConfig()
-        self.classroom = ClassroomClient(self.config)
-        self.ai = AIClient(self.config)
-        self.transcription = LocalTranscriptionService(self.config)
+        self.classroom = classroom or ClassroomClient(self.config)
+        self._service_lookup = service_lookup
+        # Keep legacy direct construction for unit tests and standalone use.
+        self.ai = AIClient(self.config) if service_lookup is None else None
+        self.transcription = (
+            LocalTranscriptionService(self.config)
+            if service_lookup is None
+            else None
+        )
+
+    def _optional_service(self, key: str, legacy: object | None = None):
+        if self._service_lookup is None:
+            return legacy
+        return self._service_lookup(key, None)
+
+    def _transcription_service(self):
+        return self._optional_service("transcription_service", self.transcription)
+
+    def _ai_summary_service(self):
+        return self._optional_service("ai_summary_service", self.ai)
+
+    def _ocr_handlers(self):
+        if self._service_lookup is None:
+            return self._ocr_image, self._can_ocr
+        service = self._optional_service("ocr_service")
+        if service is None:
+            return None, None
+        return service.ocr_image, service.can_ocr
 
     def extract_lesson(
         self,
@@ -173,15 +204,25 @@ class LessonExtractionService:
                 ocr_stats = {"cache_hits": 0, "inferences": 0}
                 ocr_stats_lock = threading.Lock()
 
+                ocr_image, can_ocr_check = self._ocr_handlers()
+
                 def ocr_callback(image_bytes: bytes, image_name: str) -> str:
-                    return self._ocr_image(
+                    if ocr_image is None:
+                        return ""
+                    return ocr_image(
                         image_bytes,
                         image_name,
                         stats=ocr_stats,
                         stats_lock=ocr_stats_lock,
                     )
 
-                can_ocr = run_ocr and self._can_ocr(ppt_warnings)
+                if run_ocr and can_ocr_check is None:
+                    ppt_warnings.append("OCR 插件未启用，已跳过课件图片识别。")
+                can_ocr = bool(
+                    run_ocr
+                    and can_ocr_check is not None
+                    and can_ocr_check(ppt_warnings)
+                )
                 selected_ocr_callback = ocr_callback if can_ocr else None
 
                 def ppt_progress(done: int, total: int, image_name: str) -> None:
@@ -269,7 +310,8 @@ class LessonExtractionService:
         summary_path = output_dir / "summary.md"
         summary_path.unlink(missing_ok=True)
         has_source_text = bool(transcript_text.strip() or ppt_text.strip())
-        if self.config.auto_summarize_after_extract:
+        ai_summary = self._ai_summary_service()
+        if self.config.auto_summarize_after_extract and ai_summary is not None:
             if not has_source_text:
                 _task_log(
                     progress,
@@ -284,7 +326,7 @@ class LessonExtractionService:
                     "info",
                 )
                 try:
-                    summary = self.ai.summarize_course_text(combined_text)
+                    summary = ai_summary.summarize_course_text(combined_text)
                     summary_path.write_text(
                         _section("AI 课程总结", summary),
                         encoding="utf-8",
@@ -344,7 +386,10 @@ class LessonExtractionService:
         output_dir = self._lesson_dir(self.config.outputs_dir, detail, lesson)
         output_dir.mkdir(parents=True, exist_ok=True)
         cache_path = output_dir / "local_transcript.txt"
-        result = self.transcription.transcribe_url(
+        transcription = self._transcription_service()
+        if transcription is None:
+            raise LocalTranscriptionError("本地语音转写插件未启用")
+        result = transcription.transcribe_url(
             video_resource.url,
             cache_path,
             progress=progress,
@@ -372,8 +417,11 @@ class LessonExtractionService:
             raise ExtractionError("请先提取文字，再生成总结")
         _report(progress, 35, "正在读取合并文本")
         combined_text = combined_path.read_text(encoding="utf-8")
+        ai_summary = self._ai_summary_service()
+        if ai_summary is None:
+            raise ExtractionError("AI 总结插件未启用")
         _report(progress, 55, "正在请求 AI 生成总结")
-        summary = self.ai.summarize_course_text(combined_text)
+        summary = ai_summary.summarize_course_text(combined_text)
         summary_path = output_dir / "summary.md"
         _report(progress, 90, "正在写入总结")
         summary_path.write_text(_section("AI 课程总结", summary), encoding="utf-8")

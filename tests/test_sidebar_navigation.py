@@ -53,9 +53,11 @@ class SidebarNavigationTests(unittest.TestCase):
             [
                 "appearance",
                 "courses",
+                "processing",
                 "auto-selection",
                 "network",
-                "extraction",
+                "transcription",
+                "ocr",
                 "ai",
                 "settings-actions",
                 "storage",
@@ -91,6 +93,10 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertEqual(
             mounts["course_selection"].path,
             "/plugins/course_selection/static",
+        )
+        self.assertEqual(
+            mounts["attendance"].path,
+            "/plugins/attendance/static",
         )
 
     def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:

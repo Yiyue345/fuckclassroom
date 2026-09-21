@@ -8,6 +8,10 @@
 {% block head_extra %}<link rel="stylesheet" href="/plugins/classroom/static/course_media.css?v=20260917-2"><link rel="stylesheet" href="/plugins/classroom/static/course_media_fit.css?v=20260917-2">{% endblock %}
 
 {% block content %}
+  {% set plugin_registry = request.app.state.plugin_registry %}
+  {% set processing_enabled = plugin_registry.is_enabled("processing") %}
+  {% set transcription_enabled = plugin_registry.is_enabled("transcription") %}
+  {% set attendance_enabled = plugin_registry.is_enabled("attendance") %}
   <div class="page-head">
     <div>
       <h1>{{ detail.course.title if detail else "课程资源" }}</h1>
@@ -122,9 +126,9 @@
             <div class="resource-line">
               {% if lesson.is_live %}
                 <span class="resource-chip ready"><svg class="icon small"><use href="/static/icons.svg#presentation"></use></svg>实时 PPT</span>
-              {% elif media.video_url %}
-                <form method="post" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/extract" data-inline-task data-task-status="#course-task-status" data-task-group="course-extraction" data-task-starting="正在启动本地语音转写" data-task-fallback="本地语音转写失败" data-task-success="本地转写与文字提取已完成">
-                  <button class="resource-chip ready media-trigger" type="submit" data-task-submit title="使用 faster-whisper 从课堂录像流式识别语音；不会保存整段视频"><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>本地转写</button>
+              {% elif media.video_url and processing_enabled %}
+                <form method="post" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/extract" data-inline-task data-task-status="#course-task-status" data-task-group="course-extraction" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成">
+                  <button class="resource-chip ready media-trigger" type="submit" data-task-submit><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>{{ "本地转写" if transcription_enabled else "提取文字" }}</button>
                 </form>
               {% else %}<span class="muted">暂无转写</span>{% endif %}
             </div>
@@ -133,8 +137,8 @@
             </div>
             <div class="lesson-actions">
               {% if lesson.is_live %}<button class="btn primary small course-play-button" type="button" data-lesson-play><svg class="icon small"><use href="/static/icons.svg#play"></use></svg>进入直播</button>{% elif media.video_url %}<button class="btn small course-play-button" type="button" data-lesson-play><svg class="icon small"><use href="/static/icons.svg#play"></use></svg>播放</button>{% endif %}
-              {% if not lesson.is_live %}<form method="post" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/extract" data-inline-task data-task-status="#course-task-status" data-task-group="course-extraction" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成"><button class="btn small icon-only" type="submit" data-task-submit title="提取文字"><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg></button></form>{% endif %}
-              <a class="btn small icon-only" href="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/outputs" title="查看提取结果"><svg class="icon small"><use href="/static/icons.svg#file-text"></use></svg></a>
+              {% if not lesson.is_live and processing_enabled %}<form method="post" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/extract" data-inline-task data-task-status="#course-task-status" data-task-group="course-extraction" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成"><button class="btn small icon-only" type="submit" data-task-submit title="提取文字"><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg></button></form>{% endif %}
+              {% if processing_enabled %}<a class="btn small icon-only" href="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/outputs" title="查看提取结果"><svg class="icon small"><use href="/static/icons.svg#file-text"></use></svg></a>{% endif %}
             </div>
           </article>
         {% else %}<div class="empty-state"><div><svg class="icon"><use href="/static/icons.svg#book-open"></use></svg><p>暂无课次</p></div></div>{% endfor %}
@@ -143,4 +147,4 @@
   {% endif %}
 {% endblock %}
 
-{% block scripts %}<script src="/static/vendor/hls.min.js?v=1.7.3"></script><script src="/plugins/classroom/static/course_media.js?v=20260918-3"></script><script src="/plugins/classroom/static/course_media_fit.js?v=20260918-2"></script><script src="/plugins/classroom/static/task_detail_progress.js?v=20260916-1"></script>{% endblock %}
+{% block scripts %}<script src="/static/vendor/hls.min.js?v=1.7.3"></script><script src="/plugins/classroom/static/course_media.js?v=20260918-3"></script><script src="/plugins/classroom/static/course_media_fit.js?v=20260918-2"></script>{% if request.app.state.plugin_registry.is_enabled("attendance") %}<script src="/plugins/attendance/static/qr_assistant.js?v=20260918-3"></script>{% endif %}{% if request.app.state.plugin_registry.is_enabled("processing") %}<script src="/plugins/classroom/static/task_detail_progress.js?v=20260916-1"></script>{% endif %}{% endblock %}

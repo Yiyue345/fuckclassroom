@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import threading
-
 from ...auth import LoginSessionService
 from ...classroom import ClassroomClient, SemesterSyncService
 from ...classroom.downloads import DownloadLibrary
-from ...classroom.extraction import LessonExtractionService
-from ...classroom.ketangpai import KetangpaiClient, KetangpaiCredentialStore
 from ...core.plugins import PluginContext
 
 
@@ -27,18 +23,11 @@ def setup_services(context: PluginContext) -> None:
     classroom_client.set_session_recoverer(
         lambda: auth_service.verify_saved_session(auto_relogin=True)
     )
-    ketangpai_client = KetangpaiClient(
-        KetangpaiCredentialStore(config.data_dir / "account" / "ketangpai.json")
-    )
 
     services.add("classroom_client", classroom_client)
     services.add("semester_sync", semester_sync)
     services.add("auth_service", auth_service)
-    services.add("ketangpai_client", ketangpai_client)
-    services.add("extraction_service", LessonExtractionService(config))
     services.add("download_library", DownloadLibrary(config.downloads_dir))
-    services.add("ketangpai_sms_sessions", {})
-    services.add("ketangpai_sms_lock", threading.Lock())
 
 
 __all__ = ["setup_services"]

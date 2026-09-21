@@ -20,18 +20,27 @@ class PluginCompositionTests(unittest.TestCase):
         self.assertNotIn("plugins.classroom.routes", source)
         self.assertNotIn("plugins.course_selection.routes", source)
 
-        for plugin_id in ("core_ui", "classroom", "course_selection"):
+        for plugin_id in (
+            "core_ui",
+            "classroom",
+            "processing",
+            "transcription",
+            "ocr",
+            "ai_summary",
+            "attendance",
+            "course_selection",
+        ):
             root = Path("fuckclassroom/plugins") / plugin_id
             self.assertTrue((root / "plugin.py").exists())
-            self.assertTrue((root / "routes.py").exists())
-            self.assertTrue((root / "services.py").exists())
 
-        self.assertTrue(
-            (Path("fuckclassroom/plugins/classroom") / "lifecycle.py").exists()
-        )
-        self.assertTrue(
-            (Path("fuckclassroom/plugins/course_selection") / "lifecycle.py").exists()
-        )
+        for plugin_id in ("core_ui", "classroom", "processing", "ai_summary", "attendance", "course_selection"):
+            self.assertTrue((Path("fuckclassroom/plugins") / plugin_id / "routes.py").exists())
+
+        for plugin_id in ("core_ui", "classroom", "processing", "transcription", "ocr", "ai_summary", "attendance", "course_selection"):
+            self.assertTrue((Path("fuckclassroom/plugins") / plugin_id / "services.py").exists())
+
+        for plugin_id in ("classroom", "attendance", "course_selection"):
+            self.assertTrue((Path("fuckclassroom/plugins") / plugin_id / "lifecycle.py").exists())
 
     def test_registry_can_enable_feature_plugins_independently(self) -> None:
         classroom = build_plugin_registry({"classroom"})
@@ -39,6 +48,12 @@ class PluginCompositionTests(unittest.TestCase):
 
         self.assertEqual(classroom.plugin_ids, ("core_ui", "classroom"))
         self.assertEqual(selection.plugin_ids, ("core_ui", "course_selection"))
+
+        transcription = build_plugin_registry({"transcription"})
+        self.assertEqual(
+            transcription.plugin_ids,
+            ("core_ui", "classroom", "processing", "transcription"),
+        )
 
     def test_classroom_only_app_has_no_selection_routes_or_services(self) -> None:
         app = create_app(enabled_plugins={"classroom"})
@@ -52,6 +67,38 @@ class PluginCompositionTests(unittest.TestCase):
         self.assertTrue(services.has("auth_service"))
         self.assertFalse(services.has("course_selection"))
         self.assertFalse(services.has("auto_selection"))
+        self.assertFalse(services.has("extraction_service"))
+        self.assertFalse(services.has("transcription_service"))
+        self.assertFalse(services.has("ocr_service"))
+        self.assertFalse(services.has("ai_summary_service"))
+        self.assertFalse(services.has("ketangpai_client"))
+
+    def test_transcription_plugin_loads_only_its_processing_capability(self) -> None:
+        app = create_app(enabled_plugins={"transcription"})
+        paths = {getattr(route, "path", "") for route in app.routes}
+        services = app.state.plugin_runtime.services
+
+        self.assertIn("/classroom", paths)
+        self.assertIn("/courses/{course_id}/lessons/{lesson_id}/extract", paths)
+        self.assertNotIn("/courses/{course_id}/lessons/{lesson_id}/summarize", paths)
+        self.assertTrue(services.has("extraction_service"))
+        self.assertTrue(services.has("transcription_service"))
+        self.assertFalse(services.has("ocr_service"))
+        self.assertFalse(services.has("ai_summary_service"))
+        self.assertFalse(services.has("ketangpai_client"))
+
+    def test_attendance_plugin_owns_qr_and_ketangpai_routes(self) -> None:
+        app = create_app(enabled_plugins={"attendance"})
+        paths = {getattr(route, "path", "") for route in app.routes}
+        services = app.state.plugin_runtime.services
+
+        self.assertIn("/accounts/ketangpai/login", paths)
+        self.assertIn(
+            "/api/courses/{course_id}/lessons/{lesson_id}/live/ppt/{slide_id}/qr",
+            paths,
+        )
+        self.assertTrue(services.has("ketangpai_client"))
+        self.assertFalse(services.has("extraction_service"))
 
     def test_selection_only_app_has_no_classroom_routes_or_services(self) -> None:
         app = create_app(enabled_plugins={"course_selection"})

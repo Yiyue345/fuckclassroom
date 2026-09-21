@@ -1,0 +1,9 @@
+<section class="settings-section" id="ai">
+  <div><h2>AI 总结</h2><p>配置课程文本总结服务；密钥只保存在本机。</p></div>
+  <div class="fields">
+    <div class="field"><label for="ai_base_url">服务地址</label><input class="input mono" id="ai_base_url" name="ai_base_url" value="{{ settings.ai_base_url }}"></div>
+    <div class="field"><label for="ai_model">总结模型</label><input class="input mono" id="ai_model" name="ai_model" value="{{ settings.ai_model }}"></div>
+    <div class="field"><label for="ai_api_key">API Key</label><input class="input mono" id="ai_api_key" name="ai_api_key" type="password" autocomplete="off" placeholder="{% if settings.has_ai_api_key %}已保存，留空保持不变{% else %}未设置{% endif %}"></div>
+    <label class="check-row"><input type="checkbox" name="auto_summarize_after_extract" {% if settings.auto_summarize_after_extract %}checked{% endif %}><span>文字提取完成后自动生成 AI 总结</span></label>
+  </div>
+</section>

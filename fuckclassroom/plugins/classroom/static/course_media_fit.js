@@ -177,8 +177,4 @@
 
   rebuildThumbnails();
 
-  const qrAssistantScript = document.createElement('script');
-  qrAssistantScript.src = '/plugins/classroom/static/qr_assistant.js?v=20260918-3';
-  qrAssistantScript.defer = true;
-  document.head.append(qrAssistantScript);
 })();
