@@ -1,11 +1,49 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
-from ...core.plugins import NavigationGroup, NavigationItem, PluginSpec, SettingsPanel
+from ...auth.cas import LoginVerificationBroker
+from ...auth.credentials import SelectionCredentialStore
+from ...core.cache import JsonCache
+from ...core.plugins import (
+    NavigationGroup,
+    NavigationItem,
+    PluginContext,
+    PluginSpec,
+    SettingsPanel,
+)
+from ...core.settings import SettingsStore
+from ...core.tasks import TaskManager
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
+
+
+def _credential_path(config) -> Path:
+    target = config.data_dir / "account" / "credentials.json"
+    legacy = config.data_dir / "webvpn" / "credentials.json"
+    if target.exists() or not legacy.exists():
+        return target
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        legacy.replace(target)
+        return target
+    except OSError:
+        return legacy
+
+
+def setup_services(context: PluginContext) -> None:
+    config = context.config
+    context.services.add("settings_store", SettingsStore(config.data_dir / "settings.json"))
+    context.services.add("cache_store", JsonCache(config.cache_dir))
+    context.services.add("task_manager", TaskManager())
+    context.services.add(
+        "credential_store",
+        SelectionCredentialStore(_credential_path(config)),
+    )
+    context.services.add("verification_broker", LoginVerificationBroker())
+    context.services.add("login_lock", threading.Lock())
 
 
 def build_plugin() -> PluginSpec:
@@ -13,6 +51,7 @@ def build_plugin() -> PluginSpec:
         id="core_ui",
         name="通用",
         order=0,
+        service_factory=setup_services,
         template_dir=PLUGIN_DIR / "templates",
         navigation_groups=(
             NavigationGroup(
@@ -73,4 +112,4 @@ def build_plugin() -> PluginSpec:
     )
 
 
-__all__ = ["build_plugin"]
+__all__ = ["build_plugin", "setup_services"]

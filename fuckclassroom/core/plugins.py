@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Callable, Iterable
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +39,50 @@ class SettingsPanel:
     checkbox_fields: tuple[str, ...] = ()
 
 
+class ServiceContainer:
+    """Small explicit service container shared by enabled plugins."""
+
+    def __init__(self) -> None:
+        self._services: dict[str, object] = {}
+
+    def add(self, key: str, service: object) -> object:
+        if key in self._services:
+            raise ValueError(f"duplicate service: {key}")
+        self._services[key] = service
+        return service
+
+    def get(self, key: str) -> Any:
+        try:
+            return self._services[key]
+        except KeyError as exc:
+            raise KeyError(f"service is not available: {key}") from exc
+
+    def maybe(self, key: str, default: Any = None) -> Any:
+        return self._services.get(key, default)
+
+    def has(self, key: str) -> bool:
+        return key in self._services
+
+    @property
+    def keys(self) -> tuple[str, ...]:
+        return tuple(self._services)
+
+
+@dataclass(slots=True)
+class PluginContext:
+    plugin_id: str
+    config: object
+    services: ServiceContainer
+    logger: Any
+    _runtime: "PluginRuntime"
+
+    def create_task(self, awaitable: Any) -> asyncio.Task[Any]:
+        return self._runtime.create_background_task(self.plugin_id, awaitable)
+
+
+PluginHook = Callable[[PluginContext], object]
+
+
 @dataclass(frozen=True, slots=True)
 class PluginSpec:
     id: str
@@ -49,6 +95,9 @@ class PluginSpec:
     system_labels: tuple[tuple[str, str], ...] = ()
     template_dir: Path | None = None
     static_dir: Path | None = None
+    service_factory: PluginHook | None = None
+    startup: PluginHook | None = None
+    shutdown: PluginHook | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,13 +109,6 @@ class StaticMount:
 
 
 class PluginRegistry:
-    """Registry for UI-facing plugin contributions.
-
-    This first layer intentionally owns presentation concerns only: navigation,
-    settings panels, template roots and static assets. Business routes/services
-    remain unchanged until they can be migrated independently.
-    """
-
     def __init__(self, plugins: Iterable[PluginSpec] = ()) -> None:
         self._plugins: dict[str, PluginSpec] = {}
         for plugin in plugins:
@@ -77,9 +119,22 @@ class PluginRegistry:
             raise ValueError(f"duplicate plugin id: {plugin.id}")
         self._plugins[plugin.id] = plugin
 
+    def is_enabled(self, plugin_id: str) -> bool:
+        return plugin_id in self._plugins
+
+    def get(self, plugin_id: str) -> PluginSpec:
+        try:
+            return self._plugins[plugin_id]
+        except KeyError as exc:
+            raise KeyError(f"plugin is not enabled: {plugin_id}") from exc
+
     @property
     def plugins(self) -> tuple[PluginSpec, ...]:
         return tuple(sorted(self._plugins.values(), key=lambda item: (item.order, item.id)))
+
+    @property
+    def plugin_ids(self) -> tuple[str, ...]:
+        return tuple(plugin.id for plugin in self.plugins)
 
     @property
     def navigation_groups(self) -> tuple[NavigationGroup, ...]:
@@ -93,11 +148,7 @@ class PluginRegistry:
 
     @property
     def sidebar_templates(self) -> tuple[str, ...]:
-        return tuple(
-            template
-            for plugin in self.plugins
-            for template in plugin.sidebar_templates
-        )
+        return tuple(template for plugin in self.plugins for template in plugin.sidebar_templates)
 
     @property
     def topbar_status_templates(self) -> tuple[str, ...]:
@@ -150,11 +201,93 @@ class PluginRegistry:
         return labels.get(system, system)
 
 
+class PluginRuntime:
+    """Owns enabled plugin services, routes and lifecycle hooks."""
+
+    def __init__(self, registry: PluginRegistry, config: object, logger: Any) -> None:
+        self.registry = registry
+        self.config = config
+        self.logger = logger
+        self.services = ServiceContainer()
+        self._routers: dict[str, object] = {}
+        self._background_tasks: dict[str, list[asyncio.Task[Any]]] = {}
+
+    def _context(self, plugin_id: str) -> PluginContext:
+        return PluginContext(
+            plugin_id=plugin_id,
+            config=self.config,
+            services=self.services,
+            logger=self.logger,
+            _runtime=self,
+        )
+
+    def initialize_services(self) -> None:
+        for plugin in self.registry.plugins:
+            if plugin.service_factory is not None:
+                plugin.service_factory(self._context(plugin.id))
+
+    def attach_router(self, plugin_id: str, router: object) -> None:
+        if not self.registry.is_enabled(plugin_id):
+            return
+        if plugin_id in self._routers:
+            raise ValueError(f"router already attached for plugin: {plugin_id}")
+        self._routers[plugin_id] = router
+
+    def include_routes(self, app: Any) -> None:
+        for plugin in self.registry.plugins:
+            router = self._routers.get(plugin.id)
+            if router is not None:
+                app.include_router(router)
+
+    def create_background_task(self, plugin_id: str, awaitable: Any) -> asyncio.Task[Any]:
+        task = asyncio.create_task(awaitable)
+        self._background_tasks.setdefault(plugin_id, []).append(task)
+        return task
+
+    async def start(self) -> None:
+        for plugin in self.registry.plugins:
+            if plugin.startup is None:
+                continue
+            result = plugin.startup(self._context(plugin.id))
+            if inspect.isawaitable(result):
+                await result
+
+    async def stop(self) -> None:
+        tasks = [
+            task
+            for plugin_tasks in self._background_tasks.values()
+            for task in plugin_tasks
+            if not task.done()
+        ]
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001 - lifecycle cleanup must continue.
+                self.logger.warning("插件后台任务退出异常：%s", exc)
+
+        for plugin in reversed(self.registry.plugins):
+            if plugin.shutdown is None:
+                continue
+            try:
+                result = plugin.shutdown(self._context(plugin.id))
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:  # noqa: BLE001 - one plugin must not block shutdown.
+                self.logger.warning("插件 %s 停止失败：%s", plugin.id, exc)
+
+
 __all__ = [
     "NavigationGroup",
     "NavigationItem",
+    "PluginContext",
     "PluginRegistry",
+    "PluginRuntime",
     "PluginSpec",
+    "ServiceContainer",
     "SettingsPanel",
     "StaticMount",
 ]
