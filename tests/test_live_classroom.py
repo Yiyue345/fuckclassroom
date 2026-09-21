@@ -230,7 +230,7 @@ class LiveClassroomTests(unittest.TestCase):
 
         self.assertIn("正在直播", overview)
         self.assertIn("live-now-icon", overview)
-        self.assertIn("app.css?v=20260918-3", base)
+        self.assertIn("app.css?v=20260921-1", base)
         self.assertIn("data-live-info-url", detail)
         self.assertIn("data-ppt-slides-url", detail)
         self.assertIn("进入直播", detail)
