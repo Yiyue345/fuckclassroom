@@ -91,6 +91,8 @@ def build_router(context: PluginContext) -> APIRouter:
                 "selection_source": plugin_manager.selection_source,
                 "plugin_config_mutable": plugin_manager.mutable,
                 "plugin_dir": plugin_manager.plugin_dir,
+                "plugin_api_version": plugin_manager.api_version,
+                "app_version": plugin_manager.app_version,
                 "notice": request.query_params.get("notice"),
                 "error": error,
                 "restart_required": request.query_params.get("restart") == "1"

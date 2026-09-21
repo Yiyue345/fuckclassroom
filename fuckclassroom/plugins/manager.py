@@ -18,10 +18,12 @@ from types import ModuleType
 from typing import Iterable
 
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
+from .. import __version__ as APP_VERSION
 from ..core.config import PROJECT_ROOT, AppConfig
-from ..core.plugins import PluginSpec
+from ..core.plugins import PLUGIN_API_VERSION, PluginSpec
 
 
 _PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
@@ -66,6 +68,8 @@ class PluginDescriptor:
     root: Path | None = None
     entry: str = "plugin.py"
     python_requirements: tuple[DependencySpec, ...] = ()
+    api_version: int = PLUGIN_API_VERSION
+    app_requires: str = ""
 
     @property
     def source_label(self) -> str:
@@ -152,6 +156,14 @@ class PluginManager:
     def builtin_descriptors(self) -> tuple[PluginDescriptor, ...]:
         return _BUILTINS
 
+    @property
+    def api_version(self) -> int:
+        return PLUGIN_API_VERSION
+
+    @property
+    def app_version(self) -> str:
+        return APP_VERSION
+
     def set_runtime_override(self, enabled: Iterable[str] | None) -> None:
         self._runtime_override = None if enabled is None else frozenset(enabled)
 
@@ -217,6 +229,11 @@ class PluginManager:
         for enabled_id in sorted(desired):
             descriptor = descriptors[enabled_id]
             if not descriptor.builtin:
+                compatibility = self.compatibility_status(descriptor)
+                if not compatibility["compatible"]:
+                    raise PluginManagerError(
+                        f"插件 {descriptor.name} 不兼容：{compatibility['message']}"
+                    )
                 missing = [
                     item["label"]
                     for item in self.dependency_status(enabled_id)
@@ -294,6 +311,11 @@ class PluginManager:
             shutil.rmtree(destination)
 
     def load_spec(self, descriptor: PluginDescriptor) -> PluginSpec:
+        compatibility = self.compatibility_status(descriptor)
+        if not compatibility["compatible"]:
+            raise PluginManagerError(
+                f"插件 {descriptor.name} 不兼容：{compatibility['message']}"
+            )
         if descriptor.builtin:
             module = importlib.import_module(descriptor.module)
         else:
@@ -314,7 +336,43 @@ class PluginManager:
                 if not descriptor.builtin
                 else f"内置插件 {descriptor.id} 的依赖声明不一致"
             )
+        if int(spec.api_version) != int(descriptor.api_version):
+            raise PluginManagerError(
+                f"插件 {descriptor.id} 的 PluginSpec.api_version="
+                f"{spec.api_version} 与清单 api_version={descriptor.api_version} 不一致"
+            )
         return spec
+
+    def compatibility_status(
+        self,
+        descriptor: PluginDescriptor,
+    ) -> dict[str, object]:
+        reasons: list[str] = []
+        if int(descriptor.api_version) != PLUGIN_API_VERSION:
+            reasons.append(
+                f"插件 API {descriptor.api_version}，当前支持 API {PLUGIN_API_VERSION}"
+            )
+
+        if descriptor.app_requires:
+            try:
+                app_spec = SpecifierSet(descriptor.app_requires)
+                current_version = Version(APP_VERSION)
+            except (InvalidSpecifier, InvalidVersion):
+                reasons.append("应用版本约束无效")
+            else:
+                if current_version not in app_spec:
+                    reasons.append(
+                        f"需要 FuckClassroom {descriptor.app_requires}，当前为 {APP_VERSION}"
+                    )
+
+        return {
+            "compatible": not reasons,
+            "message": "；".join(reasons) if reasons else "兼容",
+            "api_version": descriptor.api_version,
+            "current_api_version": PLUGIN_API_VERSION,
+            "app_requires": descriptor.app_requires,
+            "app_version": APP_VERSION,
+        }
 
     def dependency_status(self, plugin_id: str) -> list[dict[str, object]]:
         descriptor = self.descriptor_map().get(plugin_id)
@@ -518,6 +576,7 @@ class PluginManager:
                 other.id for other in descriptor_map.values() if item.id in other.requires
             )
             dependencies = self.dependency_status(item.id)
+            compatibility = self.compatibility_status(item)
             missing_required = [
                 dependency for dependency in dependencies
                 if not dependency["installed"] and not dependency["optional"]
@@ -544,6 +603,12 @@ class PluginManager:
                     "missing_required_dependencies": missing_required,
                     "missing_optional_dependencies": missing_optional,
                     "dependency_issue": bool(missing_required),
+                    "compatible": compatibility["compatible"],
+                    "compatibility_message": compatibility["message"],
+                    "api_version": compatibility["api_version"],
+                    "current_api_version": compatibility["current_api_version"],
+                    "app_requires": compatibility["app_requires"],
+                    "app_version": compatibility["app_version"],
                 }
             )
         return sorted(
@@ -670,6 +735,22 @@ class PluginManager:
         except (TypeError, ValueError):
             order = 100
 
+        try:
+            api_version = int(payload.get("api_version", PLUGIN_API_VERSION))
+        except (TypeError, ValueError) as exc:
+            raise PluginManagerError("plugin.json 的 api_version 必须是整数") from exc
+        if api_version < 1:
+            raise PluginManagerError("plugin.json 的 api_version 必须大于等于 1")
+
+        app_requires = str(payload.get("app_requires") or "").strip()
+        if app_requires:
+            try:
+                SpecifierSet(app_requires)
+            except InvalidSpecifier as exc:
+                raise PluginManagerError(
+                    f"plugin.json 的 app_requires 无效：{app_requires}"
+                ) from exc
+
         python_requirements = self._parse_external_requirements(
             payload.get("python_requires", [])
         )
@@ -684,6 +765,8 @@ class PluginManager:
             root=root,
             entry=entry,
             python_requirements=python_requirements,
+            api_version=api_version,
+            app_requires=app_requires,
         )
 
     @staticmethod
@@ -813,9 +896,12 @@ def build_registry(
         plugin_id
         for plugin_id in desired
         if not descriptors[plugin_id].builtin
-        and any(
-            not item["installed"] and not item["optional"]
-            for item in manager.dependency_status(plugin_id)
+        and (
+            not manager.compatibility_status(descriptors[plugin_id])["compatible"]
+            or any(
+                not item["installed"] and not item["optional"]
+                for item in manager.dependency_status(plugin_id)
+            )
         )
     }
     changed = True

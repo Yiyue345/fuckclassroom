@@ -205,6 +205,19 @@ class PluginCompositionTests(unittest.TestCase):
         )
 
 
+    def test_registry_rejects_incompatible_plugin_api(self) -> None:
+        with self.assertRaisesRegex(ValueError, "uses API"):
+            PluginRegistry(
+                (
+                    PluginSpec(
+                        id="future",
+                        name="Future",
+                        api_version=999,
+                    ),
+                )
+            )
+
+
 class PluginRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_service_route_and_lifecycle_hooks_are_owned_by_runtime(self) -> None:
         events: list[str] = []

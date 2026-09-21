@@ -48,7 +48,7 @@ $env:FUCKCLASSROOM_PLUGINS="classroom"
 .\.venv\Scripts\python.exe main.py
 ```
 
-可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。应用启动后可访问 `/plugins` 管理页面启停插件、查看运行依赖、安装/修复依赖，并可从本机目录或 ZIP 包添加外部插件；网页配置保存在 `data/plugin_state.json`，启停变更在重启后生效。详细架构见 `docs/plugins.md`。
+可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。应用启动后可访问 `/plugins` 管理页面启停插件、查看运行依赖、安装/修复依赖，并可从本机目录或 ZIP 包添加外部插件；页面还会检查插件 API 版本和 FuckClassroom 版本约束，不兼容插件不会被执行。网页配置保存在 `data/plugin_state.json`，启停变更在重启后生效。详细架构见 `docs/plugins.md`。
 
 ## 首次配置与登录
 

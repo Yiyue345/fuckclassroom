@@ -5,7 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from fuckclassroom import __version__ as APP_VERSION
 from fuckclassroom.core.config import AppConfig
+from fuckclassroom.core.plugins import PLUGIN_API_VERSION
 from fuckclassroom.plugins import build_plugin_registry
 from fuckclassroom.plugins.manager import PluginManager, PluginManagerError
 from fuckclassroom.web import create_app
@@ -94,6 +96,8 @@ class PluginManagerTests(unittest.TestCase):
                         "id": "demo_plugin",
                         "name": "Demo Plugin",
                         "version": "0.1.0",
+                        "api_version": PLUGIN_API_VERSION,
+                        "app_requires": ">=0.1,<0.2",
                         "description": "test plugin",
                         "requires": ["classroom"],
                         "entry": "plugin.py",
@@ -130,6 +134,120 @@ def build_plugin():
 
             self.assertIn("demo_plugin", registry.plugin_ids)
             self.assertIn("classroom", registry.plugin_ids)
+
+    def test_plugin_api_and_app_version_compatibility_are_exposed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            rows = {row["id"]: row for row in manager.status_rows(())}
+
+            self.assertEqual(manager.api_version, PLUGIN_API_VERSION)
+            self.assertEqual(manager.app_version, APP_VERSION)
+            self.assertTrue(rows["classroom"]["compatible"])
+            self.assertEqual(rows["classroom"]["api_version"], PLUGIN_API_VERSION)
+
+    def test_incompatible_plugin_api_cannot_be_enabled_and_is_skipped_on_boot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            plugin_root = data_dir / "plugins" / "future_plugin"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "future_plugin",
+                        "name": "Future Plugin",
+                        "api_version": PLUGIN_API_VERSION + 1,
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "raise RuntimeError('incompatible plugin must not execute')\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=data_dir))
+
+            with self.assertRaisesRegex(PluginManagerError, "不兼容"):
+                manager.enable("future_plugin")
+
+            (data_dir / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui", "future_plugin"]}),
+                encoding="utf-8",
+            )
+            registry = build_plugin_registry(
+                config=manager.config,
+                manager=manager,
+            )
+            self.assertEqual(registry.plugin_ids, ("core_ui",))
+
+            rows = {row["id"]: row for row in manager.status_rows(registry.plugin_ids)}
+            self.assertFalse(rows["future_plugin"]["compatible"])
+            self.assertIn("插件 API", rows["future_plugin"]["compatibility_message"])
+
+    def test_incompatible_app_version_cannot_be_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "future_app"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "future_app",
+                        "name": "Future App",
+                        "api_version": PLUGIN_API_VERSION,
+                        "app_requires": ">=99",
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='future_app', name='Future App')\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+
+            with self.assertRaisesRegex(PluginManagerError, "不兼容"):
+                manager.enable("future_app")
+
+            descriptor = manager.descriptor_map()["future_app"]
+            compatibility = manager.compatibility_status(descriptor)
+            self.assertFalse(compatibility["compatible"])
+            self.assertIn("需要 FuckClassroom", compatibility["message"])
+
+    def test_manifest_and_plugin_spec_api_versions_must_match(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "api_mismatch"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "api_mismatch",
+                        "name": "API Mismatch",
+                        "api_version": PLUGIN_API_VERSION,
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='api_mismatch', name='API Mismatch', api_version=2)\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+            descriptor = manager.descriptor_map()["api_mismatch"]
+
+            with self.assertRaisesRegex(PluginManagerError, "api_version"):
+                manager.load_spec(descriptor)
 
     def test_builtin_dependency_status_is_exposed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

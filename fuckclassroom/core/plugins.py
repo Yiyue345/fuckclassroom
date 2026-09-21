@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 
+PLUGIN_API_VERSION = 1
+
+
 @dataclass(frozen=True, slots=True)
 class NavigationItem:
     key: str
@@ -92,6 +95,7 @@ class PluginSpec:
     id: str
     name: str
     order: int = 100
+    api_version: int = PLUGIN_API_VERSION
     requires: tuple[str, ...] = ()
     navigation_groups: tuple[NavigationGroup, ...] = ()
     settings_panels: tuple[SettingsPanel, ...] = ()
@@ -124,6 +128,11 @@ class PluginRegistry:
     def register(self, plugin: PluginSpec) -> None:
         if plugin.id in self._plugins:
             raise ValueError(f"duplicate plugin id: {plugin.id}")
+        if int(plugin.api_version) != PLUGIN_API_VERSION:
+            raise ValueError(
+                f"plugin {plugin.id} uses API {plugin.api_version}; "
+                f"runtime supports API {PLUGIN_API_VERSION}"
+            )
         self._plugins[plugin.id] = plugin
 
     def validate_dependencies(self) -> None:

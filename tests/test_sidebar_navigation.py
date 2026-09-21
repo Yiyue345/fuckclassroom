@@ -84,6 +84,30 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("plugin_registry.system_label(active_system)", base)
         self.assertEqual(registry.system_label("selection"), "本科选课")
 
+    def test_plugin_manager_reuses_existing_card_spacing(self) -> None:
+        template = Path(
+            "fuckclassroom/plugins/core_ui/templates/plugin_manager.html"
+        ).read_text(encoding="utf-8")
+        styles = Path("static/app.css").read_text(encoding="utf-8")
+        base = Path("templates/base.html").read_text(encoding="utf-8")
+
+        self.assertIn("account-session-panel plugin-manager-card", template)
+        self.assertIn("account-session-header plugin-manager-card-header", template)
+        self.assertIn("detail-grid plugin-manager-details", template)
+        self.assertIn(
+            ".account-session-panel { display: flex; min-width: 0; flex-direction: column; scroll-margin-top: 92px; padding: 22px; }",
+            styles,
+        )
+        self.assertIn(
+            ".plugin-install-option { display: flex; min-width: 0; flex-direction: column; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); padding: 18px; }",
+            styles,
+        )
+        self.assertIn(
+            ".plugin-manager-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: stretch; }",
+            styles,
+        )
+        self.assertIn("/static/app.css?v=20260921-1", base)
+
     def test_plugin_static_mounts_are_isolated(self) -> None:
         registry = build_plugin_registry()
         mounts = {mount.plugin_id: mount for mount in registry.static_mounts}

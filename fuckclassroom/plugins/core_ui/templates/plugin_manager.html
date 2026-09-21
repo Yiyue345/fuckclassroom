@@ -3,12 +3,17 @@
 {% set active_nav = "plugins" %}
 
 {% block title %}插件管理 · Fuck Classroom{% endblock %}
+{% block page_title %}插件管理{% endblock %}
 
 {% block content %}
   <div class="page-head">
     <div>
       <h1>插件管理</h1>
-      <p class="page-description">启用、停用或添加功能插件。插件状态修改会保存到本机，涉及路由、服务或静态资源的变化需要重启应用后生效。</p>
+      <p class="page-description">按需启用功能、安装运行依赖和添加外部插件。插件路由、服务与生命周期在启动时装配，因此启停变更会在重启后生效。</p>
+    </div>
+    <div class="head-actions">
+      <span class="status blue">API v{{ plugin_api_version }}</span>
+      <span class="status gray">FuckClassroom {{ app_version }}</span>
     </div>
   </div>
 
@@ -19,61 +24,96 @@
     <div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>{{ notice }}</span></div>
   {% endif %}
   {% if restart_required %}
-    <div class="notice warning"><svg class="icon"><use href="/static/icons.svg#rotate-ccw"></use></svg><span>当前运行状态与保存的插件配置不同。请重启 Fuck Classroom 使变更完全生效。</span></div>
+    <div class="notice warning"><svg class="icon"><use href="/static/icons.svg#rotate-ccw"></use></svg><span>当前运行状态与保存配置不同。重启应用后，待启用/待停用的插件才会真正切换。</span></div>
   {% endif %}
   {% if not plugin_config_mutable %}
     <div class="notice warning">
       <svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg>
-      <span>
-        当前插件列表由
-        <strong>{{ "FUCKCLASSROOM_PLUGINS 环境变量" if selection_source == "environment" else "create_app(enabled_plugins=...) 参数" }}</strong>
-        控制，网页中的启用/停用操作已锁定。
-      </span>
+      <span>当前插件列表由 <strong>{{ "FUCKCLASSROOM_PLUGINS 环境变量" if selection_source == "environment" else "create_app(enabled_plugins=...) 参数" }}</strong> 控制，网页启停已锁定。</span>
     </div>
   {% endif %}
 
-  <section class="plugin-install surface">
-    <div class="plugin-install-copy">
-      <h2>添加外部插件</h2>
-      <p>输入本机插件目录或 ZIP 包路径。插件包需要包含 <code>plugin.json</code> 和入口 Python 文件；添加后默认保持停用。</p>
-      <p class="plugin-security-note">外部插件会在启用后执行 Python 代码，只添加你信任的插件。</p>
+  <section class="surface account-session-panel plugin-install-panel">
+    <header class="account-session-header">
+      <div class="account-session-name">
+        <span class="workspace-icon"><svg class="icon"><use href="/static/icons.svg#folder"></use></svg></span>
+        <div>
+          <h2>添加外部插件</h2>
+          <span>从本机目录或 ZIP 包安装；新插件默认保持停用</span>
+        </div>
+      </div>
+      <span class="status gray">{{ plugin_dir }}</span>
+    </header>
+
+    <div class="plugin-install-options">
+      <section class="plugin-install-option">
+        <div class="plugin-install-option-head">
+          <div>
+            <h3>本机路径</h3>
+            <p>适合开发中的插件目录，或已经下载到磁盘的 ZIP 插件包。</p>
+          </div>
+          <span class="status blue">目录 / ZIP</span>
+        </div>
+        <form class="plugin-install-form" method="post" action="/plugins/install">
+          <div class="field">
+            <label for="plugin-source-path">插件路径</label>
+            <input class="input mono" id="plugin-source-path" name="source_path" placeholder="D:\plugins\my_plugin 或 /home/me/my_plugin.zip" {% if not plugin_config_mutable %}disabled{% endif %}>
+            <span class="field-hint">插件根目录中需要包含 plugin.json。</span>
+          </div>
+          <button class="btn primary" type="submit" {% if not plugin_config_mutable %}disabled{% endif %}>
+            <svg class="icon small"><use href="/static/icons.svg#folder"></use></svg>从路径添加
+          </button>
+        </form>
+      </section>
+
+      <section class="plugin-install-option">
+        <div class="plugin-install-option-head">
+          <div>
+            <h3>上传 ZIP</h3>
+            <p>直接选择插件压缩包，安装后可以在下方检查兼容性与依赖。</p>
+          </div>
+          <span class="status gray">最大 50 MB</span>
+        </div>
+        <div class="plugin-upload-box">
+          <input id="plugin-zip-file" type="file" accept=".zip,application/zip" hidden {% if not plugin_config_mutable %}disabled{% endif %}>
+          <button class="btn" id="plugin-zip-button" type="button" {% if not plugin_config_mutable %}disabled{% endif %}>
+            <svg class="icon small"><use href="/static/icons.svg#folder"></use></svg>选择 ZIP 插件包
+          </button>
+          <span class="plugin-upload-status" id="plugin-upload-status">选择文件后会直接安装，不会自动启用。</span>
+        </div>
+      </section>
     </div>
-    <form class="plugin-install-form" method="post" action="/plugins/install">
-      <label for="plugin-source-path">插件目录 / ZIP 路径</label>
-      <div class="plugin-install-row">
-        <input class="input mono" id="plugin-source-path" name="source_path" placeholder="D:\plugins\my_plugin 或 /home/me/my_plugin.zip" {% if not plugin_config_mutable %}disabled{% endif %}>
-        <button class="btn primary" type="submit" {% if not plugin_config_mutable %}disabled{% endif %}>添加插件</button>
-      </div>
-      <span class="field-hint">安装目录：<span class="mono">{{ plugin_dir }}</span></span>
-      <div class="plugin-upload-divider"><span>或</span></div>
-      <div class="plugin-upload-row">
-        <input id="plugin-zip-file" type="file" accept=".zip,application/zip" hidden {% if not plugin_config_mutable %}disabled{% endif %}>
-        <button class="btn" id="plugin-zip-button" type="button" {% if not plugin_config_mutable %}disabled{% endif %}>选择 ZIP 插件包</button>
-        <span class="plugin-upload-status" id="plugin-upload-status">选择后会直接安装，最大 50 MB</span>
-      </div>
-    </form>
+
+    <div class="plugin-security-note">
+      <svg class="icon small"><use href="/static/icons.svg#shield-check"></use></svg>
+      <span>外部插件启用后会执行 Python 代码。只安装可信来源；不兼容当前插件 API 或应用版本的插件会被阻止启用。</span>
+    </div>
   </section>
 
   <section class="section">
     <div class="section-head">
       <h2>已发现插件</h2>
-      <span class="section-meta">{{ plugins|length }} 个</span>
+      <span class="section-meta">{{ plugins|length }} 个插件</span>
     </div>
-    <div class="plugin-grid">
+
+    <div class="plugin-manager-grid">
       {% for plugin in plugins %}
-        <article class="surface plugin-card">
-          <div class="plugin-card-head">
-            <div class="plugin-title-group">
-              <div class="plugin-title-line">
-                <h3>{{ plugin.name }}</h3>
-                <span class="status {{ 'blue' if plugin.builtin else 'gray' }}">{{ plugin.source_label }}</span>
-                {% if plugin.version and plugin.version != "builtin" %}
-                  <span class="plugin-version mono">v{{ plugin.version }}</span>
-                {% endif %}
+        <article class="surface account-session-panel plugin-manager-card">
+          <header class="account-session-header plugin-manager-card-header">
+            <div class="account-session-name">
+              <span class="workspace-icon">
+                <svg class="icon">
+                  <use href="/static/icons.svg#{% if plugin.id == 'classroom' %}book-open{% elif plugin.id == 'course_selection' %}check-square{% elif plugin.id == 'transcription' %}captions{% elif plugin.id == 'ocr' %}scan-text{% elif plugin.id == 'ai_summary' %}sparkles{% elif plugin.id == 'attendance' %}shield-check{% elif plugin.id == 'processing' %}list-todo{% else %}settings{% endif %}"></use>
+                </svg>
+              </span>
+              <div>
+                <h2>{{ plugin.name }}</h2>
+                <span class="mono">{{ plugin.id }}{% if plugin.version and plugin.version != "builtin" %} · v{{ plugin.version }}{% endif %}</span>
               </div>
-              <div class="plugin-id mono">{{ plugin.id }}</div>
             </div>
-            <div class="plugin-state">
+
+            <div class="plugin-manager-statuses">
+              <span class="status {{ 'blue' if plugin.builtin else 'gray' }}">{{ plugin.source_label }}</span>
               {% if plugin.current_enabled and plugin.desired_enabled %}
                 <span class="status green"><span class="tiny-dot"></span>已启用</span>
               {% elif plugin.current_enabled and not plugin.desired_enabled %}
@@ -84,105 +124,133 @@
                 <span class="status gray"><span class="tiny-dot"></span>已停用</span>
               {% endif %}
             </div>
-          </div>
+          </header>
 
-          <p class="plugin-description">{{ plugin.description or "该插件未提供描述。" }}</p>
+          <div class="plugin-manager-card-body">
+            <p class="plugin-manager-description">{{ plugin.description or "该插件未提供描述。" }}</p>
 
-          {% if plugin.dependencies %}
-            <div class="plugin-dependencies">
-              <div class="plugin-dependencies-head">
-                <span>运行依赖</span>
-                {% if plugin.dependency_issue %}
-                  <span class="status red">缺少必需依赖</span>
-                {% elif plugin.missing_optional_dependencies %}
-                  <span class="status amber">缺少可选增强</span>
-                {% else %}
-                  <span class="status green">已就绪</span>
-                {% endif %}
+            {% if not plugin.compatible %}
+              <div class="notice error plugin-manager-inline-notice">
+                <svg class="icon small"><use href="/static/icons.svg#circle-alert"></use></svg>
+                <span><strong>插件不兼容。</strong> {{ plugin.compatibility_message }}</span>
               </div>
-              <div class="plugin-dependency-list">
-                {% for dependency in plugin.dependencies %}
-                  <div class="plugin-dependency-item">
-                    <span class="tiny-dot {% if dependency.installed %}dep-ok{% else %}dep-missing{% endif %}"></span>
-                    <span class="plugin-dependency-name">{{ dependency.label }}</span>
-                    {% if dependency.version %}<span class="plugin-dependency-version mono">{{ dependency.version }}</span>{% endif %}
-                    {% if dependency.optional %}<span class="plugin-dependency-optional">可选</span>{% endif %}
+            {% endif %}
+
+            <div class="detail-grid plugin-manager-details">
+              <div class="detail-item">
+                <label>插件 API</label>
+                <strong>v{{ plugin.api_version }}{% if plugin.api_version == plugin.current_api_version %} · 兼容{% endif %}</strong>
+              </div>
+              <div class="detail-item">
+                <label>应用版本要求</label>
+                <strong>{{ plugin.app_requires or "无限制" }}</strong>
+              </div>
+              <div class="detail-item">
+                <label>依赖插件</label>
+                <strong title="{{ plugin.requires|join(', ') }}">{{ plugin.requires|join(", ") if plugin.requires else "无" }}</strong>
+              </div>
+              <div class="detail-item">
+                <label>被依赖</label>
+                <strong title="{{ plugin.dependents|join(', ') }}">{{ plugin.dependents|join(", ") if plugin.dependents else "无" }}</strong>
+              </div>
+            </div>
+
+            {% if plugin.dependencies %}
+              <div class="plugin-manager-dependencies">
+                <div class="plugin-manager-dependencies-head">
+                  <div>
+                    <strong>运行依赖</strong>
+                    <span>Python 包与运行时组件</span>
                   </div>
-                {% endfor %}
-              </div>
-              <form method="post" action="/plugins/{{ plugin.id }}/dependencies/install">
-                <button class="btn small" type="submit">
-                  {{ "安装/修复依赖" if plugin.dependency_issue or plugin.missing_optional_dependencies else "重新安装依赖" }}
-                </button>
-              </form>
-            </div>
-          {% endif %}
+                  {% if plugin.dependency_issue %}
+                    <span class="status red">缺少必需依赖</span>
+                  {% elif plugin.missing_optional_dependencies %}
+                    <span class="status amber">缺少可选增强</span>
+                  {% else %}
+                    <span class="status green">已就绪</span>
+                  {% endif %}
+                </div>
 
-          <div class="plugin-meta-grid">
-            <div>
-              <span>依赖</span>
-              <strong>
-                {% if plugin.requires %}
-                  {{ plugin.requires|join(", ") }}
-                {% else %}
-                  无
-                {% endif %}
-              </strong>
-            </div>
-            <div>
-              <span>被依赖</span>
-              <strong>
-                {% if plugin.dependents %}
-                  {{ plugin.dependents|join(", ") }}
-                {% else %}
-                  无
-                {% endif %}
-              </strong>
-            </div>
+                <div class="plugin-manager-dependency-list">
+                  {% for dependency in plugin.dependencies %}
+                    <div class="plugin-manager-dependency-row">
+                      <span class="session-dot {% if dependency.installed %}valid{% else %}invalid{% endif %}"></span>
+                      <div>
+                        <strong>{{ dependency.label }}</strong>
+                        <span class="mono">{{ dependency.version or dependency.requirement or dependency.import_name }}</span>
+                      </div>
+                      {% if dependency.optional %}<span class="status gray">可选</span>{% endif %}
+                    </div>
+                  {% endfor %}
+                </div>
+
+                <form method="post" action="/plugins/{{ plugin.id }}/dependencies/install">
+                  <button class="btn small" type="submit">
+                    <svg class="icon small"><use href="/static/icons.svg#download"></use></svg>
+                    {{ "安装/修复依赖" if plugin.dependency_issue or plugin.missing_optional_dependencies else "重新安装依赖" }}
+                  </button>
+                </form>
+              </div>
+            {% endif %}
           </div>
 
-          <div class="plugin-actions">
+          <div class="account-session-actions plugin-manager-actions">
             {% if plugin.locked %}
-              <button class="btn small" type="button" disabled>基础插件</button>
+              <button class="btn" type="button" disabled>基础插件</button>
             {% elif plugin.desired_enabled %}
               <form method="post" action="/plugins/{{ plugin.id }}/disable">
-                <button class="btn small danger" type="submit" {% if not plugin_config_mutable %}disabled{% endif %}>停用</button>
+                <button class="btn danger" type="submit" {% if not plugin_config_mutable %}disabled{% endif %}>
+                  <svg class="icon small"><use href="/static/icons.svg#log-out"></use></svg>停用
+                </button>
               </form>
             {% else %}
               <form method="post" action="/plugins/{{ plugin.id }}/enable">
-                <button class="btn small primary" type="submit" {% if not plugin_config_mutable %}disabled{% endif %}>启用</button>
+                <button class="btn primary" type="submit" {% if not plugin_config_mutable or not plugin.compatible %}disabled{% endif %}>
+                  <svg class="icon small"><use href="/static/icons.svg#circle-check"></use></svg>启用
+                </button>
               </form>
             {% endif %}
 
             {% if not plugin.builtin %}
               <form method="post" action="/plugins/{{ plugin.id }}/remove">
-                <button class="btn small" type="submit"
+                <button class="btn" type="submit"
                   {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
                   title="{% if plugin.current_enabled %}请先停用并重启应用{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
-                  删除
+                  <svg class="icon small"><use href="/static/icons.svg#trash-2"></use></svg>删除
                 </button>
               </form>
             {% endif %}
           </div>
         </article>
       {% else %}
-        <div class="surface empty-state">没有发现可用插件。</div>
+        <div class="surface empty-state"><div><svg class="icon"><use href="/static/icons.svg#settings"></use></svg><p>没有发现可用插件</p></div></div>
       {% endfor %}
     </div>
   </section>
 
-  <section class="section surface plugin-format">
-    <h2>外部插件包格式</h2>
-    <p>最小插件包可以只包含 <code>plugin.json</code> 与 <code>plugin.py</code>。依赖必须写在清单中，并与 <code>PluginSpec.requires</code> 保持一致。</p>
+  <details class="surface plugin-package-guide">
+    <summary>
+      <div>
+        <h2>外部插件包格式</h2>
+        <p>查看 plugin.json 的最小示例与兼容性字段。</p>
+      </div>
+      <svg class="icon"><use href="/static/icons.svg#chevron-down"></use></svg>
+    </summary>
+    <div class="plugin-package-guide-body">
 <pre class="plugin-manifest-example">{
   "id": "my_plugin",
   "name": "示例插件",
   "version": "0.1.0",
+  "api_version": {{ plugin_api_version }},
+  "app_requires": ">=0.1,<0.2",
   "description": "插件说明",
   "requires": ["classroom"],
+  "python_requires": ["httpx>=0.27"],
   "entry": "plugin.py"
 }</pre>
-  </section>
+      <p>plugin.py 中的 <code>PluginSpec.api_version</code> 必须与清单一致。API 主版本不匹配，或当前 FuckClassroom 版本不满足 <code>app_requires</code> 时，插件仍可保留在插件目录中，但不会被启用或执行。</p>
+    </div>
+  </details>
 {% endblock %}
 
 {% block scripts %}

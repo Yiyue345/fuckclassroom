@@ -160,6 +160,8 @@ my_plugin/
   "id": "my_plugin",
   "name": "示例插件",
   "version": "0.1.0",
+  "api_version": 1,
+  "app_requires": ">=0.1,<0.2",
   "description": "插件说明",
   "requires": ["classroom"],
   "python_requires": ["httpx>=0.27"],
@@ -167,7 +169,7 @@ my_plugin/
 }
 ```
 
-`plugin.py` 需要导出 `build_plugin() -> PluginSpec`，并且 `PluginSpec.id`、`PluginSpec.requires` 必须与 `plugin.json` 一致。外部插件会执行 Python 代码，只应安装可信来源的插件。
+`plugin.py` 需要导出 `build_plugin() -> PluginSpec`，并且 `PluginSpec.id`、`PluginSpec.requires`、`PluginSpec.api_version` 必须与 `plugin.json` 一致。外部插件会执行 Python 代码，只应安装可信来源的插件。
 
 ## 插件运行依赖
 
@@ -220,6 +222,32 @@ python -m pip install -r requirements/all.txt
 ```
 
 外部插件依赖仅接受正常 PyPI requirement，不接受 URL、本地路径或 pip 参数。缺少必需依赖时外部插件不能启用；如果状态文件中残留了这种配置，启动时会跳过该插件及依赖它的插件，而不会阻止 core UI 启动。
+
+## 插件 API 与版本兼容
+
+核心插件 API 版本由 `fuckclassroom.core.plugins.PLUGIN_API_VERSION` 定义，当前为：
+
+```text
+PLUGIN_API_VERSION = 1
+```
+
+外部插件建议在 `plugin.json` 中显式声明：
+
+```json
+{
+  "api_version": 1,
+  "app_requires": ">=0.1,<0.2"
+}
+```
+
+- `api_version`：插件接口版本。涉及 `PluginSpec`、生命周期 hook、ServiceContainer、Route/Static/Template 注册契约的破坏性变更时才递增。
+- `app_requires`：可选的 PEP 440 FuckClassroom 版本约束，例如 `>=0.1,<0.2`。
+- 旧插件若没有声明 `api_version`，当前按 API v1 兼容处理。
+- `plugin.py` 返回的 `PluginSpec.api_version` 必须与 `plugin.json.api_version` 一致。
+- API 版本不匹配或 `app_requires` 不满足时，插件可以继续保留在 `data/plugins/` 中并显示在管理页面，但不能启用，也不会执行插件入口代码。
+- 如果状态文件中已经把不兼容插件标记为启用，启动时会安全跳过该插件以及依赖它的插件，保证 `core_ui` 仍可启动并展示具体兼容性错误。
+
+当前应用版本来自 `fuckclassroom.__version__`，插件管理页会同时显示当前 FuckClassroom 版本与插件 API 版本。
 
 ## Manifest 懒加载
 
