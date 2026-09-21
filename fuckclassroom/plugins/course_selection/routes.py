@@ -102,7 +102,7 @@ def register_routes(
     def selection_catalog(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
-            "selection_catalog.html",
+            "selection/catalog.html",
             {
                 "session": course_selection.get_session_status(),
                 "catalog_targets": settings_store.load().catalog_lesson_name_targets,
@@ -269,7 +269,7 @@ def register_routes(
         )
         return templates.TemplateResponse(
             request,
-            "selection_info.html",
+            "selection/info.html",
             {
                 "session": course_selection.get_session_status(),
                 "info": info,
@@ -285,7 +285,7 @@ def register_routes(
     def selection_auto_jobs(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
-            "selection_auto.html",
+            "selection/auto.html",
             {
                 "session": course_selection.get_session_status(),
                 "jobs": auto_selection.list_jobs(),
@@ -519,7 +519,7 @@ def register_routes(
     def selection_captures(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
-            "selection_captures.html",
+            "selection/captures.html",
             {
                 "session": course_selection.get_session_status(),
                 "captures": course_selection.list_captures(),
@@ -534,7 +534,7 @@ def register_routes(
             raise HTTPException(status_code=404, detail="抓取记录不存在") from exc
         return templates.TemplateResponse(
             request,
-            "selection_capture_detail.html",
+            "selection/capture_detail.html",
             {
                 "session": course_selection.get_session_status(),
                 "name": name,

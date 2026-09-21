@@ -36,6 +36,8 @@ def build_plugin() -> PluginSpec:
         shutdown=shutdown,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
+        stylesheets=("/plugins/course_selection/static/selection.css?v=20260921-1",),
+        scripts=("/plugins/course_selection/static/selection_ui.js?v=20260921-1",),
         navigation_groups=(
             NavigationGroup(
                 key="selection",

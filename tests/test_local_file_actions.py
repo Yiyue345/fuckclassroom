@@ -106,8 +106,8 @@ class LocalFileActionTests(unittest.TestCase):
                     operation.assert_called_once_with("course/slides.pdf")
 
     def test_download_page_uses_inline_local_file_actions(self) -> None:
-        template = Path("templates/downloads.html").read_text(encoding="utf-8")
-        script = Path("static/app.js").read_text(encoding="utf-8")
+        template = Path("fuckclassroom/plugins/classroom/templates/classroom/downloads.html").read_text(encoding="utf-8")
+        script = Path("fuckclassroom/plugins/classroom/static/downloads.js").read_text(encoding="utf-8")
 
         self.assertNotIn('href="/downloads/file/', template)
         self.assertIn('action="/downloads/local/open"', template)
@@ -137,8 +137,8 @@ class LocalFileActionTests(unittest.TestCase):
             delete_many.assert_called_once_with(["course/slides.pdf", "course/notes.txt"])
 
     def test_download_page_supports_visible_multi_selection(self) -> None:
-        template = Path("templates/downloads.html").read_text(encoding="utf-8")
-        script = Path("static/app.js").read_text(encoding="utf-8")
+        template = Path("fuckclassroom/plugins/classroom/templates/classroom/downloads.html").read_text(encoding="utf-8")
+        script = Path("fuckclassroom/plugins/classroom/static/downloads.js").read_text(encoding="utf-8")
 
         self.assertIn("data-download-select-all", template)
         self.assertIn("data-download-delete-selected", template)

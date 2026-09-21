@@ -64,6 +64,7 @@ fuckclassroom/plugins/<plugin_id>/
 ├── routes.py
 ├── lifecycle.py      # 只有需要启停逻辑的插件才需要
 ├── templates/
+│   └── <plugin_id>/   # 完整页面使用命名空间目录
 └── static/
 ```
 
@@ -73,7 +74,8 @@ fuckclassroom/plugins/<plugin_id>/
 - `services.py`：创建并注册该插件自己的服务；
 - `routes.py`：创建该插件自己的 `APIRouter` 和 HTTP handler；
 - `lifecycle.py`：只处理 startup/shutdown 与后台任务；
-- `templates/`、`static/`：只放插件自己的 UI 资源。
+- `templates/`、`static/`：只放插件自己的 UI 资源；完整页面使用 `<plugin_id>/...` 命名空间避免模板重名；
+- 插件级 CSS/JS 通过 `PluginSpec.stylesheets` / `PluginSpec.scripts` 注册，core `base.html` 只负责聚合已启用插件的资源。
 
 `fuckclassroom/web/app.py` 现在只是 composition root：创建 registry/runtime、模板环境、挂载静态资源并启动 lifecycle，不包含具体功能路由。
 
@@ -134,6 +136,40 @@ PluginSpec(
 - `attendance` 的课堂派会话验证属于 startup；
 - `course_selection` 的教务会话验证、缓存刷新、自动选课启动属于 startup；
 - 自动选课停止和 Hy2 停止属于 shutdown。
+
+## UI 资源插件化
+
+UI 与后端使用相同的所有权边界。
+
+当前根目录 `templates/` 只保留应用壳层模板，例如 `base.html`。功能页面已经物理迁移到所属插件：
+
+```text
+core_ui/templates/core/...
+classroom/templates/classroom/...
+processing/templates/processing/...
+course_selection/templates/selection/...
+```
+
+路由使用完整命名空间模板名，例如：
+
+```python
+templates.TemplateResponse(request, "classroom/course_detail.html", context)
+templates.TemplateResponse(request, "selection/catalog.html", context)
+```
+
+功能专属前端资源也由插件所有：
+
+```text
+classroom/static/classroom.css
+classroom/static/downloads.js
+processing/static/processing.css
+course_selection/static/selection.css
+course_selection/static/selection_ui.js
+core_ui/static/task_status.css
+core_ui/static/task_status.js
+```
+
+`PluginRegistry.stylesheets` 和 `PluginRegistry.scripts` 只聚合当前已启用插件声明的资源，`base.html` 不硬编码功能插件。禁用插件后，它的路由、service、lifecycle、模板目录、静态挂载以及插件级 CSS/JS 会一起退出应用。
 
 ## 插件管理页面
 

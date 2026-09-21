@@ -15,7 +15,8 @@
         document.documentElement.dataset.theme = mode === "auto" ? (dark ? "dark" : "light") : mode;
       })();
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=20260921-2">
+    <link rel="stylesheet" href="/static/app.css?v=20260921-3">
+    {% for stylesheet in plugin_registry.stylesheets %}<link rel="stylesheet" href="{{ stylesheet }}">{% endfor %}
     {% block head_extra %}{% endblock %}
   </head>
   <body>
@@ -107,7 +108,8 @@
         </footer>
       </div>
     </div>
-    <script src="/static/app.js?v=20260824-3"></script>
+    <script src="/static/app.js?v=20260921-1"></script>
+    {% for script in plugin_registry.scripts %}<script src="{{ script }}"></script>{% endfor %}
     {% block scripts %}{% endblock %}
   </body>
 </html>

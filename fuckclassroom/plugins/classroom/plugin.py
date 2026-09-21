@@ -31,6 +31,8 @@ def build_plugin() -> PluginSpec:
         startup=startup,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
+        stylesheets=("/plugins/classroom/static/classroom.css?v=20260921-1",),
+        scripts=("/plugins/classroom/static/downloads.js?v=20260921-1",),
         navigation_groups=(
             NavigationGroup(
                 key="classroom",

@@ -27,6 +27,7 @@ def build_plugin() -> PluginSpec:
         route_factory=build_routes,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
+        stylesheets=("/plugins/processing/static/processing.css?v=20260921-1",),
         settings_panels=(
             SettingsPanel(
                 key="processing",

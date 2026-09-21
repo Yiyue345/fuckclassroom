@@ -102,6 +102,8 @@ class PluginSpec:
     sidebar_templates: tuple[str, ...] = ()
     topbar_status_templates: tuple[str, ...] = ()
     system_labels: tuple[tuple[str, str], ...] = ()
+    stylesheets: tuple[str, ...] = ()
+    scripts: tuple[str, ...] = ()
     template_dir: Path | None = None
     static_dir: Path | None = None
     service_factory: PluginHook | None = None
@@ -180,6 +182,22 @@ class PluginRegistry:
             template
             for plugin in self.plugins
             for template in plugin.topbar_status_templates
+        )
+
+    @property
+    def stylesheets(self) -> tuple[str, ...]:
+        return tuple(
+            stylesheet
+            for plugin in self.plugins
+            for stylesheet in plugin.stylesheets
+        )
+
+    @property
+    def scripts(self) -> tuple[str, ...]:
+        return tuple(
+            script
+            for plugin in self.plugins
+            for script in plugin.scripts
         )
 
     @property

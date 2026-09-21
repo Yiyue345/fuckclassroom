@@ -183,6 +183,8 @@ def build_plugin() -> PluginSpec:
 | `sidebar_templates` | 向侧栏底部注入状态模板 |
 | `topbar_status_templates` | 向顶栏会话状态区域注入模板 |
 | `system_labels` | 面包屑中的 system 名称映射 |
+| `stylesheets` | 插件启用时自动注入到 `<head>` 的 CSS URL |
+| `scripts` | 插件启用时在 core `app.js` 之后自动加载的 JS URL |
 | `template_dir` | 插件 Jinja 模板目录 |
 | `static_dir` | 插件静态资源目录 |
 | `service_factory` | 服务注册 hook |
@@ -633,6 +635,14 @@ templates/
     └── status.html
 ```
 
+并在路由中使用完整模板名：
+
+```python
+templates.TemplateResponse(request, "my_plugin/home.html", {...})
+```
+
+这样不同插件即使都有 `home.html`、`settings.html` 也不会发生 Jinja 模板名冲突。
+
 避免与其他插件或 core 模板重名。
 
 ### `static_dir`
@@ -642,6 +652,33 @@ templates/
 ```python
 static_dir=PLUGIN_DIR / "static"
 ```
+
+### 插件级 CSS / JS
+
+如果某个样式或脚本属于整个插件，而不是某一张页面，可以在 `PluginSpec` 中声明：
+
+```python
+PluginSpec(
+    ...,
+    static_dir=PLUGIN_DIR / "static",
+    stylesheets=(
+        "/plugins/my_plugin/static/plugin.css?v=1",
+    ),
+    scripts=(
+        "/plugins/my_plugin/static/plugin.js?v=1",
+    ),
+)
+```
+
+`base.html` 会遍历当前已启用插件的 `stylesheets` 和 `scripts`。因此：
+
+- 插件禁用后，对应 CSS/JS 不会进入页面；
+- core 不需要知道具体功能插件的资源文件名；
+- 插件脚本会在 core `/static/app.js` 之后加载，可以使用 core 已初始化的通用浏览器 helper；
+- 页面专属资源仍可以继续通过 Jinja 的 `head_extra` / `scripts` block 按页加载。
+
+第三方插件应尽量避免把功能专属样式写进 core `/static/app.css`，也不要修改 core `/static/app.js`。
+
 
 runtime 会自动挂载：
 

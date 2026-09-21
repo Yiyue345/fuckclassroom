@@ -85,7 +85,7 @@ def build_router(context: PluginContext) -> APIRouter:
             error = str(exc)
         return templates.TemplateResponse(
             request,
-            "plugin_manager.html",
+            "core/plugin_manager.html",
             {
                 "plugins": rows,
                 "selection_source": plugin_manager.selection_source,
@@ -241,7 +241,7 @@ def build_router(context: PluginContext) -> APIRouter:
                 error = str(exc)
         return templates.TemplateResponse(
             request,
-            "settings.html",
+            "core/settings.html",
             {
                 "session": (auth_service.get_session_status() if auth_service is not None else {}),
                 "settings": settings_store.load().to_public_dict(),
@@ -393,7 +393,7 @@ def build_router(context: PluginContext) -> APIRouter:
         )
         return templates.TemplateResponse(
             request,
-            "accounts.html",
+            "core/accounts.html",
             {
                 "classroom_enabled": classroom_enabled,
                 "attendance_enabled": attendance_enabled,
@@ -427,7 +427,7 @@ def build_router(context: PluginContext) -> APIRouter:
         )
         return templates.TemplateResponse(
             request,
-            "task_status.html",
+            "core/task_status.html",
             {
                 "task": task,
                 "active_system": "selection" if selection_task else "classroom",
@@ -448,7 +448,7 @@ def build_router(context: PluginContext) -> APIRouter:
     def tasks_overview(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
-            "tasks.html",
+            "core/tasks.html",
             {
                 "session": (
                     auth_service.get_session_status()

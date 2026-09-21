@@ -21,7 +21,7 @@ class LoginStatusIndicatorTests(unittest.TestCase):
         self.assertIn('data-session-label="selection"', plugin_templates)
 
     def test_only_login_actions_activate_the_transient_state(self) -> None:
-        template = Path("templates/accounts.html").read_text(encoding="utf-8")
+        template = Path("fuckclassroom/plugins/core_ui/templates/core/accounts.html").read_text(encoding="utf-8")
 
         self.assertRegex(
             template,

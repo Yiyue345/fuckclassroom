@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+
+class UiModularizationTests(unittest.TestCase):
+    def test_feature_pages_are_owned_by_plugin_template_directories(self) -> None:
+        root = Path("templates")
+        forbidden = {
+            "accounts.html",
+            "settings.html",
+            "tasks.html",
+            "task_status.html",
+            "login.html",
+            "courses.html",
+            "course_detail.html",
+            "downloads.html",
+            "lesson_outputs.html",
+            "selection_catalog.html",
+            "selection_info.html",
+            "selection_auto.html",
+            "selection_captures.html",
+            "selection_capture_detail.html",
+        }
+        self.assertFalse(forbidden.intersection(path.name for path in root.glob("*.html")))
+
+        expected = (
+            Path("fuckclassroom/plugins/core_ui/templates/core/accounts.html"),
+            Path("fuckclassroom/plugins/core_ui/templates/core/settings.html"),
+            Path("fuckclassroom/plugins/core_ui/templates/core/tasks.html"),
+            Path("fuckclassroom/plugins/core_ui/templates/core/task_status.html"),
+            Path("fuckclassroom/plugins/core_ui/templates/core/plugin_manager.html"),
+            Path("fuckclassroom/plugins/classroom/templates/classroom/login.html"),
+            Path("fuckclassroom/plugins/classroom/templates/classroom/courses.html"),
+            Path("fuckclassroom/plugins/classroom/templates/classroom/course_detail.html"),
+            Path("fuckclassroom/plugins/classroom/templates/classroom/downloads.html"),
+            Path("fuckclassroom/plugins/processing/templates/processing/lesson_outputs.html"),
+            Path("fuckclassroom/plugins/course_selection/templates/selection/catalog.html"),
+            Path("fuckclassroom/plugins/course_selection/templates/selection/info.html"),
+            Path("fuckclassroom/plugins/course_selection/templates/selection/auto.html"),
+            Path("fuckclassroom/plugins/course_selection/templates/selection/captures.html"),
+            Path("fuckclassroom/plugins/course_selection/templates/selection/capture_detail.html"),
+        )
+        for path in expected:
+            with self.subTest(path=path):
+                self.assertTrue(path.is_file())
+
+    def test_feature_javascript_is_not_kept_in_core_app_bundle(self) -> None:
+        core = Path("static/app.js").read_text(encoding="utf-8")
+        classroom = Path(
+            "fuckclassroom/plugins/classroom/static/downloads.js"
+        ).read_text(encoding="utf-8")
+        selection = Path(
+            "fuckclassroom/plugins/course_selection/static/selection_ui.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("window.FuckClassroomUI", core)
+        self.assertNotIn("[data-download-library]", core)
+        self.assertNotIn("[data-selection-action]", core)
+        self.assertIn("[data-download-library]", classroom)
+        self.assertIn("[data-selection-action]", selection)
+        self.assertIn("selection-count-refresh-enabled", selection)
+
+    def test_feature_styles_are_not_kept_in_core_stylesheet(self) -> None:
+        core = Path("static/app.css").read_text(encoding="utf-8")
+        classroom = Path(
+            "fuckclassroom/plugins/classroom/static/classroom.css"
+        ).read_text(encoding="utf-8")
+        processing = Path(
+            "fuckclassroom/plugins/processing/static/processing.css"
+        ).read_text(encoding="utf-8")
+        selection = Path(
+            "fuckclassroom/plugins/course_selection/static/selection.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn(".course-summary", core)
+        self.assertNotIn(".output-actions", core)
+        self.assertNotIn(".catalog-filters", core)
+        self.assertIn(".course-summary", classroom)
+        self.assertIn(".output-actions", processing)
+        self.assertIn(".catalog-filters", selection)
+
+    def test_task_detail_assets_belong_to_core_ui_plugin(self) -> None:
+        template = Path(
+            "fuckclassroom/plugins/core_ui/templates/core/task_status.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("/plugins/core_ui/static/task_status.css", template)
+        self.assertIn("/plugins/core_ui/static/task_status.js", template)
+        self.assertIn("data-task-page", template)
+        self.assertTrue(
+            Path("fuckclassroom/plugins/core_ui/static/task_status.css").is_file()
+        )
+        self.assertTrue(
+            Path("fuckclassroom/plugins/core_ui/static/task_status.js").is_file()
+        )
+        self.assertFalse(Path("static/task_status.css").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

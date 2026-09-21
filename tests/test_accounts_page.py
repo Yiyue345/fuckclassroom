@@ -35,7 +35,7 @@ class AccountsPageTests(unittest.TestCase):
             body = response.body.decode("utf-8")
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.template.name, "accounts.html")
+            self.assertEqual(response.template.name, "core/accounts.html")
             self.assertIn('id="classroom-session"', body)
             self.assertIn('id="selection-session"', body)
             self.assertIn('id="ketangpai-session"', body)

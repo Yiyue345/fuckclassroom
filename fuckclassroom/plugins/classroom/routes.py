@@ -82,7 +82,7 @@ def register_routes(
         recent_tasks = task_manager.list_recent(4)
         return templates.TemplateResponse(
             request,
-            "login.html",
+            "classroom/login.html",
             {
                 "session": session,
                 "courses": courses,
@@ -149,7 +149,7 @@ def register_routes(
 
         return templates.TemplateResponse(
             request,
-            "courses.html",
+            "classroom/courses.html",
             {
                 "session": auth_service.get_session_status(),
                 "courses": courses,
@@ -170,7 +170,7 @@ def register_routes(
             error = str(exc)
         return templates.TemplateResponse(
             request,
-            "course_detail.html",
+            "classroom/course_detail.html",
             {
                 "session": auth_service.get_session_status(),
                 "detail": detail,
@@ -205,7 +205,7 @@ def register_routes(
     def downloads(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
-            "downloads.html",
+            "classroom/downloads.html",
             {
                 "session": auth_service.get_session_status(),
                 "files": download_library.list_files(),

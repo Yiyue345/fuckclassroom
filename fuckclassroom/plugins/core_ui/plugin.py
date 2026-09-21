@@ -25,6 +25,7 @@ def build_plugin() -> PluginSpec:
         service_factory=setup_services,
         route_factory=build_routes,
         template_dir=PLUGIN_DIR / "templates",
+        static_dir=PLUGIN_DIR / "static",
         navigation_groups=(
             NavigationGroup(
                 key="common",

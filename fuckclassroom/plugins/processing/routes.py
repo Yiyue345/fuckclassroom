@@ -49,7 +49,7 @@ def build_router(context) -> APIRouter:
             error = str(exc)
         return templates.TemplateResponse(
             request,
-            "lesson_outputs.html",
+            "processing/lesson_outputs.html",
             {
                 "session": auth_service.get_session_status(),
                 "course_id": course_id,

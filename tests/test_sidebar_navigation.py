@@ -65,7 +65,7 @@ class SidebarNavigationTests(unittest.TestCase):
             ],
         )
 
-        settings = Path("templates/settings.html").read_text(encoding="utf-8")
+        settings = Path("fuckclassroom/plugins/core_ui/templates/core/settings.html").read_text(encoding="utf-8")
         base = Path("templates/base.html").read_text(encoding="utf-8")
         environment = Environment(
             loader=FileSystemLoader(
@@ -74,8 +74,8 @@ class SidebarNavigationTests(unittest.TestCase):
         )
 
         environment.get_template("base.html")
-        environment.get_template("settings.html")
-        environment.get_template("plugin_manager.html")
+        environment.get_template("core/settings.html")
+        environment.get_template("core/plugin_manager.html")
         for panel in registry.settings_panels:
             environment.get_template(panel.template)
 
@@ -86,7 +86,7 @@ class SidebarNavigationTests(unittest.TestCase):
 
     def test_plugin_manager_reuses_existing_card_spacing(self) -> None:
         template = Path(
-            "fuckclassroom/plugins/core_ui/templates/plugin_manager.html"
+            "fuckclassroom/plugins/core_ui/templates/core/plugin_manager.html"
         ).read_text(encoding="utf-8")
         styles = Path("static/app.css").read_text(encoding="utf-8")
         base = Path("templates/base.html").read_text(encoding="utf-8")
@@ -113,7 +113,49 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertNotIn("account-session-actions plugin-manager-actions", template)
         self.assertNotIn(">停用</button>", template)
         self.assertNotIn(">启用</button>", template)
-        self.assertIn("/static/app.css?v=20260921-2", base)
+        self.assertIn("/static/app.css?v=20260921-3", base)
+
+    def test_plugin_ui_assets_are_registered_by_enabled_plugins(self) -> None:
+        registry = build_plugin_registry()
+
+        self.assertIn(
+            "/plugins/classroom/static/classroom.css?v=20260921-1",
+            registry.stylesheets,
+        )
+        self.assertIn(
+            "/plugins/processing/static/processing.css?v=20260921-1",
+            registry.stylesheets,
+        )
+        self.assertIn(
+            "/plugins/course_selection/static/selection.css?v=20260921-1",
+            registry.stylesheets,
+        )
+        self.assertIn(
+            "/plugins/classroom/static/downloads.js?v=20260921-1",
+            registry.scripts,
+        )
+        self.assertIn(
+            "/plugins/course_selection/static/selection_ui.js?v=20260921-1",
+            registry.scripts,
+        )
+
+        classroom_only = build_plugin_registry({"classroom"})
+        self.assertIn(
+            "/plugins/classroom/static/classroom.css?v=20260921-1",
+            classroom_only.stylesheets,
+        )
+        self.assertNotIn(
+            "/plugins/course_selection/static/selection.css?v=20260921-1",
+            classroom_only.stylesheets,
+        )
+        self.assertNotIn(
+            "/plugins/course_selection/static/selection_ui.js?v=20260921-1",
+            classroom_only.scripts,
+        )
+
+        base = Path("templates/base.html").read_text(encoding="utf-8")
+        self.assertIn("plugin_registry.stylesheets", base)
+        self.assertIn("plugin_registry.scripts", base)
 
     def test_plugin_static_mounts_are_isolated(self) -> None:
         registry = build_plugin_registry()
@@ -130,6 +172,10 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertEqual(
             mounts["attendance"].path,
             "/plugins/attendance/static",
+        )
+        self.assertEqual(
+            mounts["core_ui"].path,
+            "/plugins/core_ui/static",
         )
 
     def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:
