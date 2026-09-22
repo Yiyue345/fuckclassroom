@@ -315,6 +315,8 @@ class ProcessPluginHost:
     def _dispatch_call_event(progress: object | None, event: dict[str, object]) -> bool:
         if progress is None:
             return False
+        if bool(getattr(progress, "cancel_requested", False)):
+            return True
         kind = str(event.get("kind") or "")
         if kind == "progress" and callable(progress):
             progress(int(event.get("progress") or 0), str(event.get("message") or ""))

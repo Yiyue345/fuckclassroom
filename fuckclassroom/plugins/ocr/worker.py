@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 
 from fuckclassroom.core.config import AppConfig
+from fuckclassroom.plugins.ocr.compat import install_rapidocr_compat
 from fuckclassroom.plugins.ocr.services import OcrService
 
 
@@ -12,6 +13,7 @@ _service: OcrService | None = None
 def _get_service(context) -> OcrService:
     global _service
     if _service is None:
+        install_rapidocr_compat()
         _service = OcrService(AppConfig(data_dir=context.data_dir))
     return _service
 
