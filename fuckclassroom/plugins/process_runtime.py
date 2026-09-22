@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import secrets
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -309,6 +310,103 @@ class ProcessPluginHost:
         if not response.get("ok"):
             raise ProcessPluginError(str(response.get("error") or "隔离插件 IPC 调用失败"))
         return response
+
+    @staticmethod
+    def _dispatch_call_event(progress: object | None, event: dict[str, object]) -> bool:
+        if progress is None:
+            return False
+        kind = str(event.get("kind") or "")
+        if kind == "progress" and callable(progress):
+            progress(int(event.get("progress") or 0), str(event.get("message") or ""))
+        elif kind == "detail":
+            detail = getattr(progress, "detail", None)
+            if callable(detail):
+                detail(int(event.get("progress") or 0), str(event.get("message") or ""))
+        elif kind == "clear_detail":
+            clear_detail = getattr(progress, "clear_detail", None)
+            if callable(clear_detail):
+                clear_detail()
+        elif kind == "log":
+            log = getattr(progress, "log", None)
+            if callable(log):
+                log(str(event.get("message") or ""), str(event.get("level") or "info"))
+        cancel_requested = getattr(progress, "cancel_requested", False)
+        return bool(cancel_requested)
+
+    def call_sync(
+        self,
+        method: str,
+        params: dict[str, object] | None = None,
+        *,
+        progress: object | None = None,
+        timeout: float = 60.0 * 60.0,
+    ) -> object:
+        if not self.running:
+            raise ProcessPluginError(
+                f"隔离插件 {self.plugin_id} 进程未运行"
+                + (f"：{self._error_detail()}" if self._error_detail() else "")
+            )
+        message = {
+            "token": self._token,
+            "op": "invoke",
+            "method": str(method),
+            "params": dict(params or {}),
+        }
+        encoded = (
+            json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            + b"\n"
+        )
+        try:
+            with socket.create_connection(("127.0.0.1", self._port), timeout=5) as connection:
+                connection.settimeout(timeout)
+                stream = connection.makefile("rwb")
+                stream.write(encoded)
+                stream.flush()
+                while True:
+                    raw = stream.readline(64 * 1024 * 1024 + 1)
+                    if not raw or len(raw) > 64 * 1024 * 1024:
+                        raise ProcessPluginError(
+                            f"隔离插件 {self.plugin_id} IPC 响应为空或过大"
+                        )
+                    payload = json.loads(raw.decode("utf-8"))
+                    if payload.get("type") == "event":
+                        event = payload.get("event")
+                        if not isinstance(event, dict):
+                            raise ProcessPluginError("隔离 Worker 返回无效进度事件")
+                        cancel_requested = self._dispatch_call_event(progress, event)
+                        stream.write(
+                            json.dumps(
+                                {
+                                    "ok": True,
+                                    "cancel_requested": cancel_requested,
+                                },
+                                separators=(",", ":"),
+                            ).encode("utf-8")
+                            + b"\n"
+                        )
+                        stream.flush()
+                        continue
+                    if payload.get("ok"):
+                        return payload.get("result")
+                    error = payload.get("error")
+                    code = ""
+                    if isinstance(error, dict):
+                        code = str(error.get("code") or "")
+                        message_text = str(error.get("message") or "隔离 Worker 调用失败")
+                    else:
+                        message_text = str(error or "隔离 Worker 调用失败")
+                    if code == "cancelled":
+                        raise_if_cancelled = getattr(progress, "raise_if_cancelled", None)
+                        if callable(raise_if_cancelled):
+                            raise_if_cancelled()
+                    raise ProcessPluginError(message_text)
+        except ProcessPluginError:
+            raise
+        except (OSError, TimeoutError, ConnectionError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProcessPluginError(
+                f"隔离插件 {self.plugin_id} Service IPC 失败"
+                + (f"：{self._error_detail()}" if self._error_detail() else "")
+            ) from exc
 
     async def request(
         self,

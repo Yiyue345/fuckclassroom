@@ -51,6 +51,52 @@ def _call(callable_object, *args):
     return result
 
 
+class _ProcessCallCancelled(RuntimeError):
+    pass
+
+
+class _CallProgress:
+    def __init__(self, handler: "_Handler") -> None:
+        self._handler = handler
+
+    def _event(self, kind: str, **payload: object) -> None:
+        self._handler._write(
+            {
+                "type": "event",
+                "event": {"kind": kind, **payload},
+            }
+        )
+        raw = self._handler.rfile.readline(_MAX_MESSAGE_BYTES + 1)
+        if not raw or len(raw) > _MAX_MESSAGE_BYTES:
+            raise RuntimeError("主进程未确认进度事件")
+        try:
+            acknowledgement = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("主进程返回了无效进度确认") from exc
+        if acknowledgement.get("cancel_requested"):
+            raise _ProcessCallCancelled("主进程请求取消任务")
+
+    def __call__(self, progress: int, message: str) -> None:
+        self._event("progress", progress=int(progress), message=str(message))
+
+    def detail(self, progress: int, message: str) -> None:
+        self._event("detail", progress=int(progress), message=str(message))
+
+    def clear_detail(self) -> None:
+        self._event("clear_detail")
+
+    def log(self, message: str, level: str = "info") -> None:
+        self._event("log", message=str(message), level=str(level))
+
+    @property
+    def cancel_requested(self) -> bool:
+        self._event("cancel_check")
+        return False
+
+    def raise_if_cancelled(self) -> None:
+        self._event("cancel_check")
+
+
 def _normalize_response(value: object) -> ProcessPluginResponse:
     if isinstance(value, ProcessPluginResponse):
         return value
@@ -124,6 +170,62 @@ class _Handler(socketserver.StreamRequestHandler):
             self._write({"ok": True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
+        if operation == "invoke":
+            handler = getattr(self.server.module, "handle_call", None)
+            if not callable(handler):
+                self._write(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "method_not_supported",
+                            "message": "隔离 Worker 未提供 handle_call(method, params, context, progress)",
+                        },
+                    }
+                )
+                return
+            method = str(message.get("method") or "").strip()
+            params = message.get("params")
+            if not method or (params is not None and not isinstance(params, dict)):
+                self._write(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "invalid_request",
+                            "message": "invoke 需要 method 和 JSON object params",
+                        },
+                    }
+                )
+                return
+            try:
+                result = _call(
+                    handler,
+                    method,
+                    dict(params or {}),
+                    self.server.context,
+                    _CallProgress(self),
+                )
+                json.dumps(result, ensure_ascii=False)
+                self._write({"ok": True, "result": result})
+            except _ProcessCallCancelled as exc:
+                self._write(
+                    {
+                        "ok": False,
+                        "error": {"code": "cancelled", "message": str(exc)},
+                    }
+                )
+            except BaseException as exc:  # noqa: BLE001 - isolate worker failures.
+                traceback.print_exc(file=sys.stderr)
+                self._write(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "worker_error",
+                            "message": f"{type(exc).__name__}: {exc}",
+                        },
+                    }
+                )
+            return
+
         if operation != "request":
             self._write({"ok": False, "error": f"不支持的 IPC 操作：{operation}"})
             return
@@ -216,8 +318,13 @@ def main() -> int:
         startup = getattr(module, "startup", None)
         if callable(startup):
             _call(startup, context)
-        if not callable(getattr(module, "handle_request", None)):
-            raise RuntimeError("隔离插件必须提供 handle_request(request, context)")
+        if not callable(getattr(module, "handle_request", None)) and not callable(
+            getattr(module, "handle_call", None)
+        ):
+            raise RuntimeError(
+                "隔离插件必须提供 handle_request(request, context) "
+                "或 handle_call(method, params, context, progress)"
+            )
     except BaseException:  # noqa: BLE001
         traceback.print_exc(file=sys.stderr)
         return 2
