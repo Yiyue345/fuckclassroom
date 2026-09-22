@@ -145,6 +145,12 @@ def handle_call(method, params, context, progress):
             )
         if method == "selection.catalog.cached":
             return assistant.get_cached_catalog_course(int(params.get("lesson_id") or 0))
+        if method == "selection.catalog.remember":
+            course = params.get("course")
+            if not isinstance(course, dict):
+                raise ValueError("缺少课程缓存")
+            assistant._remember_catalog_courses([course])
+            return {"ok": True}
         if method == "selection.catalog.action":
             return assistant.run_catalog_lesson_action_for_web(
                 int(params.get("lesson_id") or 0),

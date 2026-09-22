@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -29,6 +30,8 @@ class CourseSelectionProcessFacade:
         self.local = local
         self.host = host
         self._policy = threading.local()
+        self._catalog_lock = threading.Lock()
+        self._catalog_cache_path = local.session_dir / "catalog_worker_cache.json"
 
     def __getattr__(self, name: str):
         return getattr(self.local, name)
@@ -173,6 +176,11 @@ class CourseSelectionProcessFacade:
         )
         if not isinstance(result, dict):
             raise CourseSelectionApiError("选课 Worker 返回格式错误")
+        courses = result.get("courses")
+        if isinstance(courses, list):
+            self._remember_catalog_courses(
+                [item for item in courses if isinstance(item, dict)]
+            )
         return result
 
     def query_course_catalog_teachers(
@@ -191,14 +199,57 @@ class CourseSelectionProcessFacade:
         return [item for item in result if isinstance(item, dict)]
 
     def get_cached_catalog_course(self, lesson_id: int) -> dict[str, Any]:
-        result = self._call(
-            "selection.catalog.cached",
-            {"lesson_id": lesson_id},
-            timeout=30,
-        )
+        course_id = int(lesson_id)
+        with self._catalog_lock:
+            cache = self._load_catalog_cache()
+            cached = cache.get(str(course_id))
+            if isinstance(cached, dict):
+                return dict(cached)
+        try:
+            result = self._call(
+                "selection.catalog.cached",
+                {"lesson_id": course_id},
+                timeout=30,
+            )
+        except CourseSelectionApiError as exc:
+            raise ValueError("缓存中找不到这门课，请先刷新课程") from exc
         if not isinstance(result, dict):
             raise ValueError("缓存中找不到这门课，请先刷新课程")
+        self._remember_catalog_courses([result])
         return result
+
+    def _load_catalog_cache(self) -> dict[str, dict[str, Any]]:
+        try:
+            payload = json.loads(self._catalog_cache_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        rows = payload.get("courses") if isinstance(payload, dict) else None
+        if not isinstance(rows, dict):
+            return {}
+        return {
+            str(key): dict(value)
+            for key, value in rows.items()
+            if isinstance(value, dict)
+        }
+
+    def _remember_catalog_courses(self, courses: list[dict[str, Any]]) -> None:
+        with self._catalog_lock:
+            cache = self._load_catalog_cache()
+            for course in courses:
+                try:
+                    lesson_id = int(course.get("lesson_id"))
+                except (TypeError, ValueError):
+                    continue
+                cache[str(lesson_id)] = dict(course)
+            if len(cache) > 2_000:
+                cache = dict(list(cache.items())[-1_500:])
+            self._catalog_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self._catalog_cache_path.with_suffix(".tmp")
+            temporary.write_text(
+                json.dumps({"courses": cache}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            temporary.replace(self._catalog_cache_path)
 
     def run_catalog_lesson_action_for_web(
         self,
@@ -209,6 +260,12 @@ class CourseSelectionProcessFacade:
         timeout_ms: int = 900_000,
         result_url: str = "/selection/catalog",
     ) -> str:
+        course = self.get_cached_catalog_course(lesson_id)
+        self._call(
+            "selection.catalog.remember",
+            {"course": course},
+            timeout=20,
+        )
         return str(
             self._call(
                 "selection.catalog.action",
