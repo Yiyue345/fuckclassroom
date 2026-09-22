@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -33,6 +33,9 @@ def _unified_credential_path(config: AppConfig):
 def create_app(
     config: AppConfig | None = None,
     enabled_plugins: Iterable[str] | None = None,
+    *,
+    reload_callback: Callable[[], object] | None = None,
+    reload_status: Callable[[], dict[str, object]] | None = None,
 ) -> FastAPI:
     app_config = config or AppConfig()
     plugin_manager = PluginManager(app_config)
@@ -43,6 +46,10 @@ def create_app(
     )
     plugin_runtime = PluginRuntime(plugin_registry, app_config, logger)
     plugin_runtime.services.add("plugin_manager", plugin_manager)
+    if reload_callback is not None:
+        plugin_runtime.services.add("plugin_reload", reload_callback)
+    if reload_status is not None:
+        plugin_runtime.services.add("plugin_reload_status", reload_status)
     plugin_runtime.initialize_services()
 
     templates = Jinja2Templates(

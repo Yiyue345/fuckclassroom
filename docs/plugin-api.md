@@ -1366,11 +1366,24 @@ Plugin API v1 目前有几个明确限制：
 1. `requires` 不做运行时拓扑排序，service hook 仍依赖 `PluginSpec.order`。
 2. 第三方插件没有独立的声明式配置 schema；`SettingsPanel` 只负责 UI 组合。
 3. Navigation API 只能使用 core SVG sprite 中已有图标。
-4. 插件启用/停用需要重启应用，暂不支持安全热卸载。
+4. 默认启动器支持“整应用 Runtime 热重载”：启用/停用插件后会在同一 Python 进程内构造新 FastAPI/PluginRuntime 并切换；这不等同于安全卸载单个 Python 模块。
 5. 内置功能插件 service 的具体 Python 类型尚未纳入与 core API 同级的稳定性保证。
 6. 外部插件安装后会执行 Python 代码，目前没有进程级 sandbox。
 
 这些限制如果在未来版本中通过新的稳定接口解决，会同步更新 Plugin API 版本和本文档。
+
+### 当前热重载与真正热插拔的区别
+
+默认 `main.py` 使用可重载 ASGI shell。插件启停后会：
+
+1. 保留当前 Runtime 继续服务正在执行的请求；
+2. 根据新的插件配置构造一套新的 FastAPI、PluginRegistry、ServiceContainer、模板和路由；
+3. 新 Runtime 启动成功后原子切换请求入口；
+4. 等旧请求结束，再执行旧 Runtime 的 shutdown。
+
+因此用户不需要手动重启 FuckClassroom 进程。
+
+但这仍不是“只卸载一个插件模块”的完全热插拔。Python 已 import 的模块、原生扩展、插件自行启动且未注册到 Runtime 的线程/子进程，都无法保证安全从当前解释器中彻底卸载。插件作者仍必须正确实现 `shutdown`，并把长生命周期 asyncio 任务交给 `context.create_task()`。
 
 ---
 

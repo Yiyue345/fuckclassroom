@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import tempfile
 from urllib.parse import parse_qs, quote
 
@@ -26,6 +27,25 @@ def build_router(context: PluginContext) -> APIRouter:
     credential_store = services.get("credential_store")
     verification_broker = services.get("verification_broker")
     plugin_manager = services.get("plugin_manager")
+    plugin_reload = services.maybe("plugin_reload")
+    plugin_reload_status = services.maybe("plugin_reload_status")
+
+    async def request_plugin_reload() -> bool:
+        if not callable(plugin_reload):
+            return False
+        result = plugin_reload()
+        if inspect.isawaitable(result):
+            result = await result
+        return result is not False
+
+    def reload_status() -> dict[str, object]:
+        if not callable(plugin_reload_status):
+            return {}
+        try:
+            value = plugin_reload_status()
+        except Exception:  # noqa: BLE001 - status rendering must stay available.
+            return {}
+        return value if isinstance(value, dict) else {}
 
     @router.get("/")
     def index() -> RedirectResponse:
@@ -83,18 +103,25 @@ def build_router(context: PluginContext) -> APIRouter:
                 "app_version": plugin_manager.app_version,
                 "notice": request.query_params.get("notice"),
                 "error": error,
+                "hot_reload_available": callable(plugin_reload),
+                "reload_status": reload_status(),
                 "restart_required": request.query_params.get("restart") == "1"
                     or any(bool(item.get("restart_required")) for item in rows),
             },
         )
 
     @router.post("/plugins/{plugin_id}/enable")
-    def enable_plugin(plugin_id: str) -> RedirectResponse:
+    async def enable_plugin(plugin_id: str) -> RedirectResponse:
         try:
             plugin_manager.enable(plugin_id)
         except PluginManagerError as exc:
             return RedirectResponse(
                 f"/plugins?error={quote(str(exc))}",
+                status_code=303,
+            )
+        if await request_plugin_reload():
+            return RedirectResponse(
+                f"/plugins?notice={quote('已保存启用配置并自动应用，无需手动重启')}",
                 status_code=303,
             )
         return RedirectResponse(
@@ -103,7 +130,7 @@ def build_router(context: PluginContext) -> APIRouter:
         )
 
     @router.post("/plugins/{plugin_id}/disable")
-    def disable_plugin(plugin_id: str) -> RedirectResponse:
+    async def disable_plugin(plugin_id: str) -> RedirectResponse:
         try:
             plugin_manager.disable(plugin_id)
         except PluginManagerError as exc:
@@ -111,9 +138,29 @@ def build_router(context: PluginContext) -> APIRouter:
                 f"/plugins?error={quote(str(exc))}",
                 status_code=303,
             )
+        if await request_plugin_reload():
+            return RedirectResponse(
+                f"/plugins?notice={quote('已保存停用配置并自动应用；依赖插件也已同步处理')}",
+                status_code=303,
+            )
         return RedirectResponse(
             f"/plugins?restart=1&notice={quote('已保存停用配置；依赖该插件的功能也会在重启后停用')}",
             status_code=303,
+        )
+
+    @router.get("/api/plugins/runtime-status")
+    def plugin_runtime_status() -> JSONResponse:
+        rows = plugin_manager.status_rows(plugin_registry.plugin_ids)
+        status = reload_status()
+        return JSONResponse(
+            {
+                "hot_reload_available": callable(plugin_reload),
+                "restart_required": any(bool(item.get("restart_required")) for item in rows),
+                "current_enabled": list(plugin_registry.plugin_ids),
+                "desired_enabled": sorted(plugin_manager.desired_enabled()),
+                "reloading": bool(status.get("reloading")),
+                "last_error": str(status.get("last_error") or ""),
+            }
         )
 
     @router.post("/plugins/install")

@@ -9,11 +9,12 @@
   <div class="page-head">
     <div>
       <h1>插件管理</h1>
-      <p class="page-description">按需组合你的学习工具。开启或关闭插件后，重启应用即可生效。</p>
+      <p class="page-description">按需组合你的学习工具。{% if hot_reload_available %}开启或关闭插件后会在当前进程中自动重载，无需手动重启。{% else %}开启或关闭插件后，重启应用即可生效。{% endif %}</p>
     </div>
     <div class="head-actions">
       <span class="status blue">API v{{ plugin_api_version }}</span>
       <span class="status gray">FuckClassroom {{ app_version }}</span>
+      {% if hot_reload_available %}<span class="status green">运行时热重载</span>{% endif %}
     </div>
   </div>
 
@@ -23,8 +24,10 @@
   {% if notice %}
     <div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>{{ notice }}</span></div>
   {% endif %}
-  {% if restart_required %}
-    <div class="notice warning"><svg class="icon"><use href="/static/icons.svg#rotate-ccw"></use></svg><span>当前运行状态与保存配置不同。重启应用后，待启用/待停用的插件才会真正切换。</span></div>
+  {% if reload_status.last_error %}
+    <div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>插件自动重载失败，当前 Runtime 已保留：{{ reload_status.last_error }}</span></div>
+  {% elif restart_required %}
+    <div class="notice warning"><svg class="icon"><use href="/static/icons.svg#rotate-ccw"></use></svg><span>{% if hot_reload_available %}当前运行状态与保存配置仍不同，可再次切换重试；必要时再手动重启应用。{% else %}当前运行状态与保存配置不同。重启应用后，待启用/待停用的插件才会真正切换。{% endif %}</span></div>
   {% endif %}
   {% if not plugin_config_mutable %}
     <div class="notice warning">
@@ -117,7 +120,7 @@
 
               <form class="plugin-toggle-form" method="post" action="/plugins/{{ plugin.id }}/{{ 'disable' if plugin.desired_enabled else 'enable' }}">
                 <label class="toggle-control plugin-toggle-control"
-                  title="{% if plugin.locked %}基础插件始终启用{% elif not plugin_config_mutable %}当前插件配置为只读{% elif not plugin.compatible and not plugin.desired_enabled %}插件不兼容，无法启用{% else %}切换后重启应用生效{% endif %}">
+                  title="{% if plugin.locked %}基础插件始终启用{% elif not plugin_config_mutable %}当前插件配置为只读{% elif not plugin.compatible and not plugin.desired_enabled %}插件不兼容，无法启用{% elif hot_reload_available %}切换后自动应用{% else %}切换后重启应用生效{% endif %}">
                   <input
                     type="checkbox"
                     role="switch"
@@ -130,7 +133,7 @@
               </form>
 
               {% if plugin.restart_required %}
-                <span class="status amber">重启后生效</span>
+                <span class="status amber">{{ "待自动应用" if hot_reload_available else "重启后生效" }}</span>
               {% endif %}
             </div>
           </header>
@@ -213,7 +216,7 @@
               <form method="post" action="/plugins/{{ plugin.id }}/remove">
                 <button class="btn small danger" type="submit"
                   {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
-                  title="{% if plugin.current_enabled %}请先停用并重启应用{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
+                  title="{% if plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
                   <svg class="icon small"><use href="/static/icons.svg#trash-2"></use></svg>删除外部插件
                 </button>
               </form>
