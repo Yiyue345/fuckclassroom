@@ -337,6 +337,11 @@ class CourseSelectionProcessFacade:
         }
 
 
+_AUTO_SELECTION_HANDOFF_LOCK = threading.Lock()
+_AUTO_SELECTION_OWNER: "AutoSelectionProcessProxy | None" = None
+_AUTO_SELECTION_PENDING: "AutoSelectionProcessProxy | None" = None
+
+
 class AutoSelectionProcessProxy:
     def __init__(self, host: ProcessPluginHost) -> None:
         self.host = host
@@ -364,13 +369,55 @@ class AutoSelectionProcessProxy:
         )
 
     def start(self) -> None:
-        self._call("selection.auto.start")
+        global _AUTO_SELECTION_OWNER, _AUTO_SELECTION_PENDING
+        should_start = False
+        with _AUTO_SELECTION_HANDOFF_LOCK:
+            if _AUTO_SELECTION_OWNER is self:
+                return
+            if _AUTO_SELECTION_OWNER is None:
+                _AUTO_SELECTION_OWNER = self
+                if _AUTO_SELECTION_PENDING is self:
+                    _AUTO_SELECTION_PENDING = None
+                should_start = True
+            else:
+                _AUTO_SELECTION_PENDING = self
+        if not should_start:
+            return
+        try:
+            self._call("selection.auto.start")
+        except Exception:
+            with _AUTO_SELECTION_HANDOFF_LOCK:
+                if _AUTO_SELECTION_OWNER is self:
+                    _AUTO_SELECTION_OWNER = None
+            raise
 
     def stop(self) -> None:
-        try:
-            self._call("selection.auto.stop", timeout=15)
-        except RuntimeError:
-            pass
+        global _AUTO_SELECTION_OWNER, _AUTO_SELECTION_PENDING
+        next_owner = None
+        should_stop = False
+        with _AUTO_SELECTION_HANDOFF_LOCK:
+            if _AUTO_SELECTION_PENDING is self:
+                _AUTO_SELECTION_PENDING = None
+            if _AUTO_SELECTION_OWNER is self:
+                should_stop = True
+            elif not should_stop:
+                return
+
+        if should_stop:
+            try:
+                self._call("selection.auto.stop", timeout=15)
+            except RuntimeError:
+                pass
+
+        with _AUTO_SELECTION_HANDOFF_LOCK:
+            if _AUTO_SELECTION_OWNER is self:
+                _AUTO_SELECTION_OWNER = None
+            if _AUTO_SELECTION_PENDING is not None:
+                next_owner = _AUTO_SELECTION_PENDING
+                _AUTO_SELECTION_PENDING = None
+
+        if next_owner is not None:
+            next_owner.start()
 
     def add_job(
         self,
