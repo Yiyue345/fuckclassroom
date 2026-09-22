@@ -12,6 +12,16 @@ def setup_services(context: PluginContext):
     return setup(context)
 
 
+async def startup(context: PluginContext):
+    from .services import startup as hook
+    return await hook(context)
+
+
+async def shutdown(context: PluginContext):
+    from .services import shutdown as hook
+    return await hook(context)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="ocr",
@@ -19,6 +29,8 @@ def build_plugin() -> PluginSpec:
         order=40,
         requires=("processing",),
         service_factory=setup_services,
+        startup=startup,
+        shutdown=shutdown,
         template_dir=PLUGIN_DIR / "templates",
         settings_panels=(
             SettingsPanel(

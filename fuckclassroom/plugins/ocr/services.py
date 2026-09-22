@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import mimetypes
 import re
@@ -17,6 +18,8 @@ from .engine import (
 )
 from ..processing.extraction import ExtractionError
 from ...core.plugins import PluginContext
+from ..process_runtime import ProcessPluginHost
+from ..rpc import PLUGIN_RPC_API_VERSION
 
 
 class OcrService:
@@ -116,9 +119,75 @@ class OcrService:
         )
 
 
+class OcrProcessProxy:
+    def __init__(self, host: ProcessPluginHost) -> None:
+        self.host = host
+
+    def ocr_image(
+        self,
+        image_bytes: bytes,
+        image_name: str,
+        *,
+        stats: dict[str, int] | None = None,
+        stats_lock: threading.Lock | None = None,
+    ) -> str:
+        payload = self.host.call_sync(
+            "ocr.image",
+            {
+                "image_b64": base64.b64encode(image_bytes).decode("ascii"),
+                "image_name": image_name,
+            },
+            timeout=300,
+        )
+        if not isinstance(payload, dict):
+            raise ExtractionError("OCR 子进程返回格式错误")
+        deltas = payload.get("stats")
+        if isinstance(deltas, dict) and stats is not None:
+            if stats_lock is None:
+                for key, value in deltas.items():
+                    stats[str(key)] = stats.get(str(key), 0) + int(value)
+            else:
+                with stats_lock:
+                    for key, value in deltas.items():
+                        stats[str(key)] = stats.get(str(key), 0) + int(value)
+        return str(payload.get("text") or "")
+
+    def can_ocr(self, warnings: list[str]) -> bool:
+        payload = self.host.call_sync("ocr.can_ocr", {}, timeout=30)
+        if not isinstance(payload, dict):
+            raise ExtractionError("OCR 子进程返回格式错误")
+        child_warnings = payload.get("warnings")
+        if isinstance(child_warnings, list):
+            warnings.extend(str(item) for item in child_warnings)
+        return bool(payload.get("available"))
+
+
 def setup_services(context: PluginContext) -> None:
-    install_rapidocr_compat()
-    context.services.add("ocr_service", OcrService(context.config))
+    host = ProcessPluginHost(
+        plugin_id="ocr",
+        root=Path(__file__).resolve().parent,
+        entry="worker.py",
+        data_dir=Path(context.config.data_dir),
+        rpc_registry=context.services.get("plugin_rpc"),
+        rpc_api_version=PLUGIN_RPC_API_VERSION,
+        rpc_permissions=(),
+    )
+    context.services.add("ocr_process_host", host)
+    context.services.add("ocr_service", OcrProcessProxy(host))
 
 
-__all__ = ["OcrService", "setup_services"]
+async def startup(context: PluginContext) -> None:
+    await context.services.get("ocr_process_host").start()
+
+
+async def shutdown(context: PluginContext) -> None:
+    await context.services.get("ocr_process_host").stop()
+
+
+__all__ = [
+    "OcrProcessProxy",
+    "OcrService",
+    "setup_services",
+    "shutdown",
+    "startup",
+]
