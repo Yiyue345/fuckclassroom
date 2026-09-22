@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from ..core.config import PROJECT_ROOT, AppConfig
 from ..core.plugins import PluginRuntime
 from ..plugins import PluginManager, build_plugin_registry
+from ..plugins.rpc import PluginRpcRegistry, register_builtin_rpc_methods
 
 
 logger = logging.getLogger(__name__)
@@ -45,12 +46,20 @@ def create_app(
         manager=plugin_manager,
     )
     plugin_runtime = PluginRuntime(plugin_registry, app_config, logger)
+    plugin_rpc = PluginRpcRegistry()
     plugin_runtime.services.add("plugin_manager", plugin_manager)
+    plugin_runtime.services.add("plugin_rpc", plugin_rpc)
     if reload_callback is not None:
         plugin_runtime.services.add("plugin_reload", reload_callback)
     if reload_status is not None:
         plugin_runtime.services.add("plugin_reload_status", reload_status)
     plugin_runtime.initialize_services()
+    register_builtin_rpc_methods(
+        plugin_rpc,
+        services=plugin_runtime.services,
+        plugin_registry=plugin_registry,
+        data_dir=app_config.data_dir,
+    )
 
     templates = Jinja2Templates(
         directory=plugin_registry.template_directories(PROJECT_ROOT / "templates")
@@ -89,6 +98,7 @@ def create_app(
     app.state.plugin_registry = plugin_registry
     app.state.plugin_runtime = plugin_runtime
     app.state.plugin_manager = plugin_manager
+    app.state.plugin_rpc = plugin_rpc
 
     app.mount("/static", StaticFiles(directory=str(PROJECT_ROOT / "static")), name="static")
     for mount in plugin_registry.static_mounts:

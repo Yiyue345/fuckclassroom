@@ -24,6 +24,7 @@ from packaging.version import InvalidVersion, Version
 from .. import __version__ as APP_VERSION
 from ..core.config import PROJECT_ROOT, AppConfig
 from ..core.plugins import PLUGIN_API_VERSION, PluginSpec
+from .rpc import PLUGIN_RPC_API_VERSION
 
 
 _PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
@@ -72,6 +73,8 @@ class PluginDescriptor:
     app_requires: str = ""
     execution: str = "in_process"
     route_prefix: str = ""
+    rpc_api_version: int = PLUGIN_RPC_API_VERSION
+    rpc_permissions: tuple[str, ...] = ()
 
     @property
     def source_label(self) -> str:
@@ -361,6 +364,11 @@ class PluginManager:
                 f"插件 API {descriptor.api_version}，当前支持 API {PLUGIN_API_VERSION}"
             )
 
+        if descriptor.execution == "process" and int(descriptor.rpc_api_version) != PLUGIN_RPC_API_VERSION:
+            reasons.append(
+                f"Plugin RPC API {descriptor.rpc_api_version}，当前支持 RPC API {PLUGIN_RPC_API_VERSION}"
+            )
+
         if descriptor.app_requires:
             try:
                 app_spec = SpecifierSet(descriptor.app_requires)
@@ -606,6 +614,8 @@ class PluginManager:
                     "execution": item.execution,
                     "isolated": item.execution == "process",
                     "route_prefix": item.route_prefix,
+                    "rpc_api_version": item.rpc_api_version,
+                    "rpc_permissions": item.rpc_permissions,
                     "current_enabled": item.id in current,
                     "desired_enabled": item.id in desired,
                     "restart_required": (item.id in current) != (item.id in desired),
@@ -786,6 +796,27 @@ class PluginManager:
         elif route_prefix:
             raise PluginManagerError("route_prefix 仅适用于 execution=process 的插件")
 
+        try:
+            rpc_api_version = int(payload.get("rpc_api_version", PLUGIN_RPC_API_VERSION))
+        except (TypeError, ValueError) as exc:
+            raise PluginManagerError("plugin.json 的 rpc_api_version 必须是整数") from exc
+
+        rpc_permissions_payload = payload.get("rpc_permissions", [])
+        if not isinstance(rpc_permissions_payload, list):
+            raise PluginManagerError("plugin.json 的 rpc_permissions 必须是数组")
+        rpc_permissions: list[str] = []
+        rpc_method_re = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+$")
+        for raw_permission in rpc_permissions_payload:
+            permission = str(raw_permission or "").strip()
+            if not rpc_method_re.fullmatch(permission):
+                raise PluginManagerError(f"非法 RPC 权限：{permission or raw_permission}")
+            if permission not in rpc_permissions:
+                rpc_permissions.append(permission)
+        if execution != "process" and (rpc_permissions or "rpc_api_version" in payload):
+            raise PluginManagerError(
+                "rpc_api_version/rpc_permissions 仅适用于 execution=process 的插件"
+            )
+
         return PluginDescriptor(
             id=plugin_id,
             name=name,
@@ -801,6 +832,8 @@ class PluginManager:
             app_requires=app_requires,
             execution=execution,
             route_prefix=route_prefix,
+            rpc_api_version=rpc_api_version,
+            rpc_permissions=tuple(rpc_permissions),
         )
 
     @staticmethod
