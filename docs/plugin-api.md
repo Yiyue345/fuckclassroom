@@ -1187,6 +1187,7 @@ if context.registry.is_enabled("classroom"):
 | `ocr` | `ocr_service` | `OcrProcessProxy` |
 | `ai_summary` | `ai_summary_service` | `AiSummaryProcessProxy` |
 | `attendance` | `ketangpai_client` | `KetangpaiClient` |
+| `attendance` | `qr_scanner` | `AttendanceScannerProcessProxy` |
 | `course_selection` | `course_selection` | `CourseSelectionAssistant` |
 | `course_selection` | `auto_selection` | `AutoSelectionService` |
 | `course_selection` | `hy2_proxy` | `Hy2ProxyManager` |
@@ -1211,7 +1212,7 @@ if classroom is not None:
 
 ### 内置重型插件的 Worker 迁移
 
-`transcription`、`ocr`、`ai_summary` 现在采用“进程内薄壳 + 独立 Worker”模式：
+`transcription`、`ocr`、`ai_summary`，以及 `attendance` 的二维码扫描能力现在采用“进程内薄壳 + 独立 Worker”模式：
 
 ```text
 PluginSpec / UI / routes（主进程）
@@ -1222,10 +1223,10 @@ PluginSpec / UI / routes（主进程）
        Service Invoke IPC
               │
               ▼
-faster-whisper / RapidOCR / AIClient（子进程）
+faster-whisper / RapidOCR / AIClient / wxscan + OpenCV（子进程）
 ```
 
-这样保留了原有页面、设置面板、`processing` 编排和 service key，同时把模型、ONNX Runtime、ASR 推理以及 AI 网络调用移出主 Python 进程。关闭对应插件或 Runtime 后，Worker 进程会退出并释放其模型/原生库资源。
+这样保留了原有页面、设置面板、`processing` 编排和 service key，同时把模型、ONNX Runtime、ASR 推理、AI 网络调用以及 wxscan/OpenCV 二维码识别移出主 Python 进程。关闭对应插件或 Runtime 后，Worker 进程会退出并释放其模型/原生库资源。
 
 这三个 proxy 为兼容现有内置编排保留了原 service 的主要调用形状，但**具体 proxy Python 类型不是新的稳定第三方插件 API**。新的进程隔离第三方插件应优先使用前文的 Plugin RPC，而不是直接取得 `*_process_host`。
 

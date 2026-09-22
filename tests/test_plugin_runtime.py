@@ -203,6 +203,12 @@ class PluginCompositionTests(unittest.TestCase):
             paths,
         )
         self.assertTrue(services.has("ketangpai_client"))
+        self.assertTrue(services.has("qr_scanner"))
+        self.assertTrue(services.has("attendance_scanner_process_host"))
+        self.assertEqual(
+            type(services.get("qr_scanner")).__name__,
+            "AttendanceScannerProcessProxy",
+        )
         self.assertFalse(services.has("extraction_service"))
 
     def test_selection_only_app_has_no_classroom_routes_or_services(self) -> None:
