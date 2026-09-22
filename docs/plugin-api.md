@@ -1230,7 +1230,7 @@ faster-whisper / RapidOCR / AIClient / wxscan + OpenCV（子进程）
 
 这样保留了原有页面、设置面板、`processing` 编排和 service key，同时把模型、ONNX Runtime、ASR 推理、AI 网络调用以及 wxscan/OpenCV 二维码识别移出主 Python 进程。关闭对应插件或 Runtime 后，Worker 进程会退出并释放其模型/原生库资源。
 
-这三个 proxy 为兼容现有内置编排保留了原 service 的主要调用形状，但**具体 proxy Python 类型不是新的稳定第三方插件 API**。新的进程隔离第三方插件应优先使用前文的 Plugin RPC，而不是直接取得 `*_process_host`。
+这些 proxy/facade 为兼容现有内置编排保留了原 service 的主要调用形状，但**具体 proxy Python 类型不是新的稳定第三方插件 API**。新的进程隔离第三方插件应优先使用前文的 Plugin RPC，而不是直接取得 `*_process_host`。
 
 
 带业务状态的两个插件采用更严格的单一状态源：
@@ -1252,6 +1252,8 @@ course_selection
 两个进程共享的持久状态只通过 data 目录中的原子文件交接，例如课程登录 `storage_state.json`、教务 `selection_info.json`、`auto_selection_jobs.json`。自动选课任务本身原本就持久化；全校开课查询结果现在也额外写入 `catalog_worker_cache.json`，因此 Runtime/Worker 热重载后仍能继续加入队列或执行刚查询到的课程。
 
 Worker 遇到登录失效时不会自行持有第二份凭据或启动第二套登录流程，而是通过主进程内部 RPC 请求会话恢复。Hy2 也只由主进程 `Hy2ProxyManager` 控制，选课 Worker 只取得已经管理好的代理地址。
+
+Runtime 热重载时，新 Runtime 会先启动再关闭旧 Runtime。为避免两个 AutoSelectionService 短暂同时消费同一份队列，主进程维护自动选课 Worker 的执行权 handoff：新 Worker 先进入 pending，旧 Worker 停止后再原子交接执行权。因此插件热重载不会产生两个并发自动选课循环。
 
 内部 Worker RPC 使用保留的 `internal.*` method。第三方外部插件的 `plugin.json.rpc_permissions` **不能声明 `internal.*` 权限**；这些 method 不属于 Plugin RPC 公共 API，也不承诺跨版本兼容。
 
