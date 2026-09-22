@@ -11,13 +11,17 @@ def setup_services(context: PluginContext):
     from .services import setup_services as setup
     return setup(context)
 
-def startup(context: PluginContext):
+async def startup(context: PluginContext):
+    from .services import startup as worker_startup
+    await worker_startup(context)
     from .lifecycle import startup as hook
-    return hook(context)
+    return await hook(context)
 
-def shutdown(context: PluginContext):
-    from .lifecycle import shutdown as hook
-    return hook(context)
+async def shutdown(context: PluginContext):
+    from .lifecycle import shutdown as lifecycle_shutdown
+    lifecycle_shutdown(context)
+    from .services import shutdown as worker_shutdown
+    await worker_shutdown(context)
 
 
 def build_routes(context: PluginContext):

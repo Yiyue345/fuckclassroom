@@ -1,34 +1,431 @@
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
 from ...core.plugins import PluginContext
-from ...course_selection import CourseSelectionAssistant
-from ...course_selection.automation import AutoSelectionService
+from ...course_selection import (
+    CourseSelectionApiError,
+    CourseSelectionAssistant,
+    SelectionBatch,
+)
+from ...course_selection.automation import AutoSelectionJob
 from ...course_selection.proxy import Hy2ProxyManager
+from ..process_runtime import ProcessPluginError, ProcessPluginHost
+from ..rpc import PLUGIN_RPC_API_VERSION
+
+
+class CourseSelectionProcessFacade:
+    """Keep auth/session state in-process while moving API execution to a worker."""
+
+    def __init__(
+        self,
+        local: CourseSelectionAssistant,
+        host: ProcessPluginHost,
+    ) -> None:
+        self.local = local
+        self.host = host
+        self._policy = threading.local()
+
+    def __getattr__(self, name: str):
+        return getattr(self.local, name)
+
+    @contextmanager
+    def defer_hy2_start(self):
+        previous = bool(getattr(self._policy, "defer_hy2", False))
+        self._policy.defer_hy2 = True
+        try:
+            with self.local.defer_hy2_start():
+                yield
+        finally:
+            self._policy.defer_hy2 = previous
+
+    def _call(
+        self,
+        method: str,
+        params: dict[str, object] | None = None,
+        *,
+        progress=None,
+        timeout: float = 180.0,
+    ):
+        payload = dict(params or {})
+        payload["_defer_hy2"] = bool(getattr(self._policy, "defer_hy2", False))
+        try:
+            return self.host.call_sync(
+                method,
+                payload,
+                progress=progress,
+                timeout=timeout,
+            )
+        except ProcessPluginError as exc:
+            raise CourseSelectionApiError(str(exc)) from exc
+
+    def invalidate_access_mode(self) -> None:
+        self.local.invalidate_access_mode()
+        try:
+            self._call("selection.runtime.invalidate", {}, timeout=20)
+        except CourseSelectionApiError:
+            # Settings should remain saveable when the worker is already stopping.
+            pass
+
+    def clear_session(self) -> None:
+        self.local.clear_session()
+        try:
+            self._call("selection.runtime.clear_session", {}, timeout=20)
+        except CourseSelectionApiError:
+            pass
+
+    def refresh_selection_info_for_web(
+        self,
+        progress=None,
+        timeout_ms: int = 300_000,
+        result_url: str = "/selection/info",
+        student_id: int | None = None,
+        turn_id: int | None = None,
+    ) -> str:
+        return str(
+            self._call(
+                "selection.info.refresh",
+                {
+                    "timeout_ms": timeout_ms,
+                    "result_url": result_url,
+                    "student_id": student_id,
+                    "turn_id": turn_id,
+                },
+                progress=progress,
+                timeout=max(360.0, timeout_ms / 1000 + 60),
+            )
+            or result_url
+        )
+
+    def get_live_selection_counts(self, timeout_ms: int = 60_000) -> dict[str, Any]:
+        result = self._call(
+            "selection.counts",
+            {"timeout_ms": timeout_ms},
+            timeout=max(90.0, timeout_ms / 1000 + 30),
+        )
+        if not isinstance(result, dict):
+            raise CourseSelectionApiError("选课 Worker 返回格式错误")
+        return result
+
+    def select_cached_lesson_for_web(
+        self,
+        lesson_id: int,
+        progress=None,
+        timeout_ms: int = 900_000,
+        result_url: str = "/selection/info",
+    ) -> str:
+        return str(
+            self._call(
+                "selection.lesson.select",
+                {
+                    "lesson_id": lesson_id,
+                    "timeout_ms": timeout_ms,
+                    "result_url": result_url,
+                },
+                progress=progress,
+                timeout=max(960.0, timeout_ms / 1000 + 60),
+            )
+            or result_url
+        )
+
+    def drop_cached_lesson_for_web(
+        self,
+        lesson_id: int,
+        progress=None,
+        timeout_ms: int = 900_000,
+        result_url: str = "/selection/info/selected",
+    ) -> str:
+        return str(
+            self._call(
+                "selection.lesson.drop",
+                {
+                    "lesson_id": lesson_id,
+                    "timeout_ms": timeout_ms,
+                    "result_url": result_url,
+                },
+                progress=progress,
+                timeout=max(960.0, timeout_ms / 1000 + 60),
+            )
+            or result_url
+        )
+
+    def query_whole_school_courses(
+        self,
+        filters,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        timeout_ms: int = 60_000,
+    ) -> dict[str, Any]:
+        result = self._call(
+            "selection.catalog.query",
+            {
+                "filters": dict(filters),
+                "page": page,
+                "page_size": page_size,
+                "timeout_ms": timeout_ms,
+            },
+            timeout=max(90.0, timeout_ms / 1000 + 30),
+        )
+        if not isinstance(result, dict):
+            raise CourseSelectionApiError("选课 Worker 返回格式错误")
+        return result
+
+    def query_course_catalog_teachers(
+        self,
+        term: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> list[dict[str, Any]]:
+        result = self._call(
+            "selection.catalog.teachers",
+            {"term": term, "timeout_ms": timeout_ms},
+            timeout=max(60.0, timeout_ms / 1000 + 30),
+        )
+        if not isinstance(result, list):
+            raise CourseSelectionApiError("选课 Worker 返回格式错误")
+        return [item for item in result if isinstance(item, dict)]
+
+    def get_cached_catalog_course(self, lesson_id: int) -> dict[str, Any]:
+        result = self._call(
+            "selection.catalog.cached",
+            {"lesson_id": lesson_id},
+            timeout=30,
+        )
+        if not isinstance(result, dict):
+            raise ValueError("缓存中找不到这门课，请先刷新课程")
+        return result
+
+    def run_catalog_lesson_action_for_web(
+        self,
+        lesson_id: int,
+        action: str,
+        *,
+        progress=None,
+        timeout_ms: int = 900_000,
+        result_url: str = "/selection/catalog",
+    ) -> str:
+        return str(
+            self._call(
+                "selection.catalog.action",
+                {
+                    "lesson_id": lesson_id,
+                    "action": action,
+                    "timeout_ms": timeout_ms,
+                    "result_url": result_url,
+                },
+                progress=progress,
+                timeout=max(960.0, timeout_ms / 1000 + 60),
+            )
+            or result_url
+        )
+
+    def get_available_catalog_batch(self, timeout_ms: int = 60_000) -> dict[str, Any]:
+        result = self._call(
+            "selection.catalog.batch",
+            {"timeout_ms": timeout_ms},
+            timeout=max(90.0, timeout_ms / 1000 + 30),
+        )
+        if not isinstance(result, dict):
+            raise CourseSelectionApiError("选课 Worker 返回格式错误")
+        return result
+
+    def select_lesson_for_batch_once(
+        self,
+        lesson_id: int,
+        batch: SelectionBatch,
+        course: dict[str, Any],
+        timeout_ms: int = 60_000,
+    ) -> str:
+        return str(
+            self._call(
+                "selection.batch.select_once",
+                {
+                    "lesson_id": lesson_id,
+                    "batch": asdict(batch),
+                    "course": course,
+                    "timeout_ms": timeout_ms,
+                },
+                timeout=max(90.0, timeout_ms / 1000 + 30),
+            )
+            or ""
+        )
+
+    def get_lesson_capacity_for_batch(
+        self,
+        lesson_id: int,
+        batch: SelectionBatch,
+        course: dict[str, Any],
+        timeout_ms: int = 60_000,
+    ) -> dict[str, int | None]:
+        result = self._call(
+            "selection.batch.capacity",
+            {
+                "lesson_id": lesson_id,
+                "batch": asdict(batch),
+                "course": course,
+                "timeout_ms": timeout_ms,
+            },
+            timeout=max(90.0, timeout_ms / 1000 + 30),
+        )
+        if not isinstance(result, dict):
+            raise CourseSelectionApiError("选课 Worker 返回格式错误")
+        return {
+            "selected_count": _optional_int(result.get("selected_count")),
+            "max_count": _optional_int(result.get("max_count")),
+        }
+
+
+class AutoSelectionProcessProxy:
+    def __init__(self, host: ProcessPluginHost) -> None:
+        self.host = host
+
+    def _call(self, method: str, params: dict[str, object] | None = None, *, timeout: float = 60.0):
+        try:
+            return self.host.call_sync(method, params or {}, timeout=timeout)
+        except ProcessPluginError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    def configure_intervals(
+        self,
+        *,
+        retry_seconds: float,
+        session_retry_seconds: float,
+        capacity_retry_seconds: float,
+    ) -> None:
+        self._call(
+            "selection.auto.configure",
+            {
+                "retry_seconds": retry_seconds,
+                "session_retry_seconds": session_retry_seconds,
+                "capacity_retry_seconds": capacity_retry_seconds,
+            },
+        )
+
+    def start(self) -> None:
+        self._call("selection.auto.start")
+
+    def stop(self) -> None:
+        try:
+            self._call("selection.auto.stop", timeout=15)
+        except RuntimeError:
+            pass
+
+    def add_job(
+        self,
+        lesson_id: int,
+        course: dict[str, Any],
+        batch: dict[str, Any] | None,
+    ) -> tuple[AutoSelectionJob, bool]:
+        try:
+            result = self._call(
+                "selection.auto.add",
+                {"lesson_id": lesson_id, "course": course, "batch": batch},
+            )
+        except RuntimeError as exc:
+            raise ValueError(_clean_worker_error(str(exc))) from exc
+        if not isinstance(result, dict) or not isinstance(result.get("job"), dict):
+            raise ValueError("定时选课 Worker 返回格式错误")
+        return AutoSelectionJob(**result["job"]), bool(result.get("created"))
+
+    def list_jobs(self) -> list[dict[str, Any]]:
+        result = self._call("selection.auto.list")
+        return [item for item in result if isinstance(item, dict)] if isinstance(result, list) else []
+
+    def active_lesson_ids(self) -> set[int]:
+        result = self._call("selection.auto.active_lesson_ids")
+        if not isinstance(result, list):
+            return set()
+        return {int(item) for item in result}
+
+    def cancel(self, job_id: str) -> AutoSelectionJob:
+        return self._job_mutation("selection.auto.cancel", job_id)
+
+    def resume(self, job_id: str) -> AutoSelectionJob:
+        return self._job_mutation("selection.auto.resume", job_id)
+
+    def delete(self, job_id: str) -> None:
+        result = self._call("selection.auto.delete", {"job_id": job_id})
+        if isinstance(result, dict) and result.get("error") == "not_found":
+            raise KeyError(job_id)
+        if isinstance(result, dict) and result.get("error") == "active":
+            raise ValueError(str(result.get("message") or "任务仍在运行"))
+
+    def run_due_once(self) -> bool:
+        return bool(self._call("selection.auto.run_due_once", timeout=180))
+
+    def _job_mutation(self, method: str, job_id: str) -> AutoSelectionJob:
+        result = self._call(method, {"job_id": job_id})
+        if isinstance(result, dict) and result.get("error") == "not_found":
+            raise KeyError(job_id)
+        if not isinstance(result, dict) or not isinstance(result.get("job"), dict):
+            raise RuntimeError("定时选课 Worker 返回格式错误")
+        return AutoSelectionJob(**result["job"])
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
+def _clean_worker_error(message: str) -> str:
+    for prefix in ("ValueError: ", "CourseSelectionApiError: ", "RuntimeError: "):
+        if message.startswith(prefix):
+            return message[len(prefix):]
+    return message
 
 
 def setup_services(context: PluginContext) -> None:
     config = context.config
     services = context.services
     hy2_proxy = Hy2ProxyManager(config)
-    course_selection = CourseSelectionAssistant(
+    local = CourseSelectionAssistant(
         config,
         hy2_proxy=hy2_proxy,
         credential_store=services.get("credential_store"),
         verification_broker=services.get("verification_broker"),
         login_lock=services.get("login_lock"),
     )
-    runtime_settings = services.get("settings_store").load()
-    auto_selection = AutoSelectionService(
-        course_selection,
-        config.data_dir / "webvpn" / "auto_selection_jobs.json",
-        retry_seconds=runtime_settings.auto_selection_retry_seconds,
-        session_retry_seconds=runtime_settings.auto_selection_session_retry_seconds,
-        capacity_retry_seconds=runtime_settings.auto_selection_capacity_retry_seconds,
+    host = ProcessPluginHost(
+        plugin_id="course-selection-worker",
+        root=Path(__file__).resolve().parent,
+        entry="worker.py",
+        data_dir=Path(config.data_dir),
+        rpc_registry=services.get("plugin_rpc"),
+        rpc_api_version=PLUGIN_RPC_API_VERSION,
+        rpc_permissions=(
+            "selection.session.ensure",
+            "selection.access.info",
+            "selection.hy2.ensure",
+        ),
     )
+    facade = CourseSelectionProcessFacade(local, host)
+    auto_selection = AutoSelectionProcessProxy(host)
 
     services.add("hy2_proxy", hy2_proxy)
-    services.add("course_selection", course_selection)
+    services.add("course_selection_process_host", host)
+    services.add("course_selection_local", local)
+    services.add("course_selection", facade)
     services.add("auto_selection", auto_selection)
 
 
-__all__ = ["setup_services"]
+async def startup(context: PluginContext) -> None:
+    await context.services.get("course_selection_process_host").start()
+
+
+async def shutdown(context: PluginContext) -> None:
+    await context.services.get("course_selection_process_host").stop()
+
+
+__all__ = [
+    "AutoSelectionProcessProxy",
+    "CourseSelectionProcessFacade",
+    "setup_services",
+    "shutdown",
+    "startup",
+]

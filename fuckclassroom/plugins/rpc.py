@@ -227,6 +227,12 @@ class PluginRpcBuiltins:
             registry.register("classroom.courses.list", self.classroom_courses_list)
             registry.register("classroom.course.get", self.classroom_course_get)
 
+        if self.services.has("course_selection"):
+            registry.register("selection.session.ensure", self.selection_session_ensure)
+            registry.register("selection.access.info", self.selection_access_info)
+        if self.services.has("hy2_proxy"):
+            registry.register("selection.hy2.ensure", self.selection_hy2_ensure)
+
     def settings_get(
         self, _context: PluginRpcCallContext, params: Mapping[str, object]
     ) -> object:
@@ -374,6 +380,28 @@ class PluginRpcBuiltins:
         return asdict(
             self.services.get("auth_service").verify_saved_session(auto_relogin=True)
         )
+
+    def selection_session_ensure(
+        self, _context: PluginRpcCallContext, params: Mapping[str, object]
+    ) -> object:
+        selection = self.services.get("course_selection")
+        status = selection.verify_saved_session(
+            timeout_ms=_bounded_int(params.get("timeout_ms"), 15_000, 1_000, 600_000),
+            auto_relogin=bool(params.get("auto_relogin", True)),
+        )
+        return asdict(status)
+
+    def selection_access_info(
+        self, _context: PluginRpcCallContext, params: Mapping[str, object]
+    ) -> object:
+        return self.services.get("course_selection").get_access_info(
+            force=bool(params.get("force", False))
+        )
+
+    def selection_hy2_ensure(
+        self, _context: PluginRpcCallContext, _params: Mapping[str, object]
+    ) -> object:
+        return self.services.get("hy2_proxy").ensure_started()
 
     def classroom_terms_list(
         self, _context: PluginRpcCallContext, params: Mapping[str, object]
