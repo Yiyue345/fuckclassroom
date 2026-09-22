@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...core.plugins import PluginContext, PluginSpec, SettingsPanel
+from ...core.plugins import PluginContext, PluginSpec, SettingsPanel, UIAsset, UISlot
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -20,6 +20,14 @@ def build_routes(context: PluginContext):
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="processing",
+        ui_assets=(
+            UIAsset("task_detail_progress.css?v=20260922-1", "style", ("course_detail", "lesson_outputs")),
+            UIAsset("task_detail_progress.js?v=20260922-1", pages=("course_detail", "lesson_outputs")),
+        ),
+        ui_slots=(
+            UISlot("classroom.lesson.transcript", "processing/lesson_transcript.html"),
+            UISlot("classroom.lesson.actions", "processing/lesson_actions.html"),
+        ),
         name="课次处理",
         order=20,
         requires=("classroom",),
@@ -27,7 +35,7 @@ def build_plugin() -> PluginSpec:
         route_factory=build_routes,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
-        stylesheets=("/plugins/processing/static/processing.css?v=20260921-1",),
+        stylesheets=("/plugins/processing/static/processing.css?v=20260922-1",),
         settings_panels=(
             SettingsPanel(
                 key="processing",

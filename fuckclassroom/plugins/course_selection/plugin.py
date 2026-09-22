@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...core.plugins import AccountPanel, NavigationGroup, NavigationItem, PluginContext, PluginSpec, SettingsPanel
+from ...core.plugins import AccountPanel, NavigationGroup, NavigationItem, PluginContext, PluginSpec, SettingsPanel, UIAsset
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -48,6 +48,10 @@ def clear_session(context: PluginContext):
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="course_selection",
+        ui_assets=(
+            UIAsset("selection_ui.js?v=20260921-1", pages=("selection_info", "selection_selected", "selection_auto", "selection_catalog")),
+            UIAsset("selection_catalog.js?v=20260910-1", pages=("selection_catalog",)),
+        ),
         name="本科选课",
         order=20,
         service_factory=setup_services,
@@ -58,8 +62,7 @@ def build_plugin() -> PluginSpec:
         clear_session=clear_session,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
-        stylesheets=("/plugins/course_selection/static/selection.css?v=20260921-1",),
-        scripts=("/plugins/course_selection/static/selection_ui.js?v=20260921-1",),
+        stylesheets=("/plugins/course_selection/static/selection.css?v=20260922-1",),
         navigation_groups=(
             NavigationGroup(
                 key="selection",

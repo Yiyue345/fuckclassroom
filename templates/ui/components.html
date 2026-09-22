@@ -1,0 +1,41 @@
+{# Public template primitives. Values are autoescaped by the application's Jinja environment. #}
+{% macro icon(name, size='') -%}
+<svg class="icon {{ size }}" aria-hidden="true"><use href="/static/icons.svg#{{ name }}"></use></svg>
+{%- endmacro %}
+
+{% macro field(name, label, value='', type='text', hint='', min=none, max=none, step=none, placeholder='', autocomplete=none) -%}
+<div class="field">
+  <label for="{{ name }}">{{ label }}</label>
+  <input class="input" id="{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ value }}"{% if min is not none %} min="{{ min }}"{% endif %}{% if max is not none %} max="{{ max }}"{% endif %}{% if step is not none %} step="{{ step }}"{% endif %}{% if placeholder %} placeholder="{{ placeholder }}"{% endif %}{% if autocomplete is not none %} autocomplete="{{ autocomplete }}"{% endif %}{% if hint %} aria-describedby="{{ name }}-hint"{% endif %}>
+  {% if hint %}<span class="field-hint" id="{{ name }}-hint">{{ hint }}</span>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro select(name, label, value, options, hint='') -%}
+<div class="field">
+  <label for="{{ name }}">{{ label }}</label>
+  <select class="select" id="{{ name }}" name="{{ name }}"{% if hint %} aria-describedby="{{ name }}-hint"{% endif %}>
+    {% for option in options %}<option value="{{ option }}"{% if value == option %} selected{% endif %}>{{ option }}</option>{% endfor %}
+  </select>
+  {% if hint %}<span class="field-hint" id="{{ name }}-hint">{{ hint }}</span>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro checkbox(name, label, checked=false) -%}
+<label class="check-row" for="{{ name }}"><input id="{{ name }}" type="checkbox" name="{{ name }}"{% if checked %} checked{% endif %}><span>{{ label }}</span></label>
+{%- endmacro %}
+
+{% macro section(id, title, description='') -%}
+<section class="settings-section" id="{{ id }}" aria-labelledby="{{ id }}-title">
+  <div><h2 id="{{ id }}-title">{{ title }}</h2>{% if description %}<p>{{ description }}</p>{% endif %}</div>
+  <div class="fields">{{ caller() }}</div>
+</section>
+{%- endmacro %}
+
+{% macro notice(message, kind='info') -%}
+<div class="notice {{ kind }}" role="{{ 'alert' if kind == 'error' else 'status' }}">{{ icon('circle-alert' if kind == 'error' else 'circle-check') }}<span>{{ message }}</span></div>
+{%- endmacro %}
+
+{% macro page_header(title, description='') -%}
+<div class="page-head"><div><h1>{{ title }}</h1>{% if description %}<p class="page-description">{{ description }}</p>{% endif %}</div>{% if caller is defined %}<div class="head-actions">{{ caller() }}</div>{% endif %}</div>
+{%- endmacro %}

@@ -115,6 +115,30 @@ SettingsSavedHook = Callable[[PluginContext, object, dict[str, str]], object]
 
 
 @dataclass(frozen=True, slots=True)
+class UIAsset:
+    """Page-scoped local resource; paths are relative to the owning plugin."""
+
+    path: str
+    kind: str = "script"
+    pages: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.kind not in {"script", "style"}:
+            raise ValueError(f"unsupported UI asset kind: {self.kind}")
+        if not self.path or self.path.startswith("//") or ":" in self.path or "\\" in self.path or ".." in self.path.split("?")[0].split("/"):
+            raise ValueError("UI assets must use local application paths")
+
+
+@dataclass(frozen=True, slots=True)
+class UISlot:
+    """A template contributed to an extension point in another plugin's page."""
+
+    name: str
+    template: str
+    order: int = 100
+
+
+@dataclass(frozen=True, slots=True)
 class PluginSpec:
     id: str
     name: str
@@ -137,6 +161,8 @@ class PluginSpec:
     shutdown: PluginHook | None = None
     settings_saved: SettingsSavedHook | None = None
     clear_session: PluginHook | None = None
+    ui_assets: tuple[UIAsset, ...] = ()
+    ui_slots: tuple[UISlot, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +300,20 @@ class PluginRegistry:
         }
         return labels.get(system, system)
 
+    def page_assets(self, page: str, kind: str) -> tuple[str, ...]:
+        """Keep API v1 global assets, then append matching assets in plugin order."""
+        result = list(self.stylesheets if kind == "style" else self.scripts)
+        for plugin in self.plugins:
+            for asset in plugin.ui_assets:
+                if asset.kind != kind or (asset.pages and page not in asset.pages):
+                    continue
+                result.append(asset.path if asset.path.startswith("/") else f"/plugins/{plugin.id}/static/{asset.path}")
+        return tuple(dict.fromkeys(result))
+
+    def slot_templates(self, name: str) -> tuple[str, ...]:
+        slots = [slot for plugin in self.plugins for slot in plugin.ui_slots if slot.name == name]
+        return tuple(slot.template for slot in sorted(slots, key=lambda slot: slot.order))
+
 
 class PluginRuntime:
     """Owns enabled plugin services, routes and lifecycle hooks."""
@@ -409,4 +449,6 @@ __all__ = [
     "SettingsPanel",
     "SettingsSavedHook",
     "StaticMount",
+    "UIAsset",
+    "UISlot",
 ]

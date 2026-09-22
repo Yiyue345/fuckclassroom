@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...core.plugins import AccountPanel, NavigationGroup, NavigationItem, PluginContext, PluginSpec, SettingsPanel
+from ...core.plugins import AccountPanel, NavigationGroup, NavigationItem, PluginContext, PluginSpec, SettingsPanel, UIAsset
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -38,6 +38,14 @@ def clear_session(context: PluginContext):
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="classroom",
+        ui_assets=(
+            UIAsset("downloads.js?v=20260921-1", pages=("downloads", "lesson_outputs")),
+            UIAsset("/static/vendor/hls.min.js?v=1.7.3", pages=("course_detail",)),
+            UIAsset("course_media.css?v=20260922-1", "style", ("course_detail",)),
+            UIAsset("course_media_fit.css?v=20260922-1", "style", ("course_detail",)),
+            UIAsset("course_media.js?v=20260918-3", pages=("course_detail",)),
+            UIAsset("course_media_fit.js?v=20260918-2", pages=("course_detail",)),
+        ),
         name="课程录播",
         order=10,
         service_factory=setup_services,
@@ -46,8 +54,7 @@ def build_plugin() -> PluginSpec:
         clear_session=clear_session,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
-        stylesheets=("/plugins/classroom/static/classroom.css?v=20260921-1",),
-        scripts=("/plugins/classroom/static/downloads.js?v=20260921-1",),
+        stylesheets=("/plugins/classroom/static/classroom.css?v=20260922-1",),
         navigation_groups=(
             NavigationGroup(
                 key="classroom",

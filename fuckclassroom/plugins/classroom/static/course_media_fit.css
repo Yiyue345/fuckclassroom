@@ -37,7 +37,7 @@
   padding: 11px 12px 9px;
   border-bottom: 1px solid var(--border);
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-weight: 700;
   letter-spacing: 0.04em;
 }
@@ -57,7 +57,7 @@
   padding: 4px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #fff;
   cursor: pointer;
   transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
@@ -97,7 +97,7 @@
   border-radius: 999px;
   background: rgba(8, 12, 20, 0.74);
   color: #fff;
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }

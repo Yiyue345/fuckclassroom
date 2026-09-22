@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...core.plugins import AccountPanel, PluginContext, PluginSpec
+from ...core.plugins import AccountPanel, PluginContext, PluginSpec, UIAsset
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -29,6 +29,7 @@ def build_account_context(services, request):
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="attendance",
+        ui_assets=(UIAsset("qr_assistant.js?v=20260918-3", pages=("course_detail",)),),
         name="二维码签到",
         order=60,
         requires=("classroom",),
@@ -45,7 +46,7 @@ def build_plugin() -> PluginSpec:
             ),
         ),
         static_dir=PLUGIN_DIR / "static",
-        stylesheets=("/plugins/attendance/static/attendance.css?v=20260921-1",),
+        stylesheets=("/plugins/attendance/static/attendance.css?v=20260922-1",),
     )
 
 

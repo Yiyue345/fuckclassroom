@@ -187,6 +187,8 @@ def build_plugin() -> PluginSpec:
 | `system_labels` | 面包屑中的 system 名称映射 |
 | `stylesheets` | 插件启用时自动注入到 `<head>` 的 CSS URL |
 | `scripts` | 插件启用时在 core `app.js` 之后自动加载的 JS URL |
+| `ui_assets` | `UIAsset` 声明的按页面加载资源，兼容原有全局资源 |
+| `ui_slots` | `UISlot` 声明的页面模板贡献 |
 | `template_dir` | 插件 Jinja 模板目录 |
 | `static_dir` | 插件静态资源目录 |
 | `service_factory` | 服务注册 hook |
@@ -686,12 +688,14 @@ PluginSpec(
 )
 ```
 
-`base.html` 会遍历当前已启用插件的 `stylesheets` 和 `scripts`。因此：
+`base.html` 通过 `page_assets(ui_page, kind)` 聚合当前已启用插件的全局与页面资源。因此：
 
 - 插件禁用后，对应 CSS/JS 不会进入页面；
 - core 不需要知道具体功能插件的资源文件名；
 - 插件脚本会在 core `/static/app.js` 之后加载，可以使用 core 已初始化的通用浏览器 helper；
 - 页面专属资源仍可以继续通过 Jinja 的 `head_extra` / `scripts` block 按页加载。
+
+新插件建议用 `UIAsset` 声明页面资源、用 `UISlot` 扩展宿主页面，并复用 Jinja 表单组件。接口、加载顺序、插槽上下文和示例见 [UI 设计系统](ui-system.md)。
 
 第三方插件应尽量避免把功能专属样式写进 core `/static/app.css`，也不要修改 core `/static/app.js`。
 

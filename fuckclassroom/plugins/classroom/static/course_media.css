@@ -25,7 +25,7 @@
 .course-media-context-label {
   flex: 0 0 auto;
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-weight: 700;
   letter-spacing: 0.04em;
 }
@@ -42,7 +42,7 @@
 .course-media-hint {
   flex: 0 0 auto;
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: var(--font-sm);
 }
 
 .course-media-grid {
@@ -161,12 +161,12 @@
 .course-media-empty strong,
 .ppt-status strong {
   color: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .course-media-empty span,
 .ppt-status span {
-  font-size: 11px;
+  font-size: var(--font-sm);
 }
 
 .course-media-empty.hidden,
@@ -287,7 +287,7 @@
 .ppt-counter {
   min-width: 70px;
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   text-align: center;
@@ -380,7 +380,7 @@ button.resource-chip.media-trigger:hover {
 .course-lessons-heading p {
   margin: 5px 0 0;
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: var(--font-sm);
 }
 
 .course-media-lesson-list {
@@ -481,3 +481,5 @@ button.resource-chip.media-trigger:hover {
     padding: 8px;
   }
 }
+
+@media (max-width: 760px) { .course-media-grid { grid-template-columns: minmax(0, 1fr); } .course-media-card-header { flex-wrap: wrap; gap: 12px; } .course-media-card-actions { flex-wrap: wrap; } .course-media-context { flex-wrap: wrap; } }

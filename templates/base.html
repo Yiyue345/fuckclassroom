@@ -1,5 +1,6 @@
 {% set active_system = active_system|default("common") %}
 {% set active_nav = active_nav|default("") %}
+{% set ui_page = ui_page|default(active_nav) %}
 {% set plugin_registry = request.app.state.plugin_registry %}
 <!doctype html>
 <html lang="zh-CN" data-theme="light" data-theme-mode="auto">
@@ -15,17 +16,20 @@
         document.documentElement.dataset.theme = mode === "auto" ? (dark ? "dark" : "light") : mode;
       })();
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=20260921-5">
-    {% for stylesheet in plugin_registry.stylesheets %}<link rel="stylesheet" href="{{ stylesheet }}">{% endfor %}
+    <link rel="stylesheet" href="/static/tokens.css?v=20260921-6">
+    <link rel="stylesheet" href="/static/app.css?v=20260921-6">
+    {% for stylesheet in plugin_registry.page_assets(ui_page, "style") %}<link rel="stylesheet" href="{{ stylesheet }}">{% endfor %}
     {% block head_extra %}{% endblock %}
   </head>
   <body>
+    <a class="skip-link" href="#main-content">跳到页面内容</a>
     <div class="app-shell">
-      <aside class="sidebar">
+      <aside class="sidebar" id="app-navigation" aria-label="主导航">
         <a class="brand" href="/">
           <span class="brand-mark">GA</span>
           <span><span class="brand-name">学业助手</span><span class="brand-subtitle">GUET Academic</span></span>
         </a>
+        <button class="btn nav-close" type="button" data-nav-close aria-label="关闭导航">关闭导航 ×</button>
 
         <div class="sidebar-nav">
           {% for group in plugin_registry.navigation_groups %}
@@ -35,7 +39,7 @@
                 {% if group.status_template %}{% include group.status_template %}{% endif %}
               </div>
               {% for item in group.items %}
-                <a class="nav-item{% if active_nav in item.active_keys %} active{% endif %}" href="{{ item.href }}">
+                <a class="nav-item{% if active_nav in item.active_keys %} active{% endif %}" href="{{ item.href }}"{% if active_nav in item.active_keys %} aria-current="page"{% endif %}>
                   <svg class="icon"><use href="/static/icons.svg#{{ item.icon }}"></use></svg><span>{{ item.label }}</span>
                   {% if item.badge_template %}{% include item.badge_template %}{% endif %}
                 </a>
@@ -58,9 +62,11 @@
           </div>
         </div>
       </aside>
+      <button class="nav-backdrop" type="button" data-nav-close aria-label="关闭导航" tabindex="-1" hidden></button>
 
       <main class="main">
         <header class="topbar">
+          <button class="btn icon-only nav-toggle" type="button" data-nav-toggle aria-controls="app-navigation" aria-expanded="false" aria-label="打开导航">☰</button>
           <div class="breadcrumb">
             <span>{% block breadcrumb_parent %}{{ plugin_registry.system_label(active_system) }}{% endblock %}</span>
             <span>/</span>
@@ -81,7 +87,7 @@
           </div>
         </header>
 
-        <div class="content">
+        <div class="content" id="main-content" tabindex="-1">
           {% block content %}{% endblock %}
         </div>
       </main>
@@ -108,8 +114,9 @@
         </footer>
       </div>
     </div>
-    <script src="/static/app.js?v=20260921-1"></script>
-    {% for script in plugin_registry.scripts %}<script src="{{ script }}"></script>{% endfor %}
+    <script src="/static/app.js?v=20260921-6"></script>
+    <script src="/static/shell.js?v=20260921-6"></script>
+    {% for script in plugin_registry.page_assets(ui_page, "script") %}<script src="{{ script }}"></script>{% endfor %}
     {% block scripts %}{% endblock %}
   </body>
 </html>

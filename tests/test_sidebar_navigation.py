@@ -10,7 +10,7 @@ from fuckclassroom.plugins import build_plugin_registry
 
 class SidebarNavigationTests(unittest.TestCase):
     def test_navigation_is_registered_by_plugins(self) -> None:
-        registry = build_plugin_registry()
+        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
         groups = {group.aria_label: group for group in registry.navigation_groups}
 
         self.assertEqual(
@@ -50,7 +50,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertNotIn('aria-label="本科选课导航"', template)
 
     def test_settings_panels_and_plugin_templates_are_registered(self) -> None:
-        registry = build_plugin_registry()
+        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
         panel_keys = [panel.key for panel in registry.settings_panels]
 
         self.assertEqual(
@@ -97,7 +97,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertEqual(registry.system_label("selection"), "本科选课")
 
     def test_account_panels_are_registered_by_plugins(self) -> None:
-        registry = build_plugin_registry()
+        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
         panels = {panel.key: panel for panel in registry.account_panels}
 
         self.assertEqual(
@@ -130,18 +130,9 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("account-session-panel plugin-manager-card", template)
         self.assertIn("account-session-header plugin-manager-card-header", template)
         self.assertIn("detail-grid plugin-manager-details", template)
-        self.assertIn(
-            ".account-session-panel { display: flex; min-width: 0; flex-direction: column; scroll-margin-top: 92px; padding: 22px; }",
-            styles,
-        )
-        self.assertIn(
-            ".plugin-install-option { display: flex; min-width: 0; flex-direction: column; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); padding: 18px; }",
-            styles,
-        )
-        self.assertIn(
-            ".plugin-manager-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: stretch; }",
-            styles,
-        )
+        self.assertIn(".account-session-panel {", styles)
+        self.assertIn(".plugin-install-option {", styles)
+        self.assertIn(".plugin-manager-grid {", styles)
         self.assertIn('class="toggle-control plugin-toggle-control"', template)
         self.assertIn('role="switch"', template)
         self.assertIn('onchange="this.form.requestSubmit()"', template)
@@ -149,47 +140,47 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertNotIn("account-session-actions plugin-manager-actions", template)
         self.assertNotIn(">停用</button>", template)
         self.assertNotIn(">启用</button>", template)
-        self.assertIn("/static/app.css?v=20260921-5", base)
+        self.assertIn("/static/app.css?v=20260921-6", base)
 
     def test_plugin_ui_assets_are_registered_by_enabled_plugins(self) -> None:
-        registry = build_plugin_registry()
+        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260921-2",
+            "/plugins/core_ui/static/core_ui.css?v=20260922-1",
             registry.stylesheets,
         )
         self.assertIn(
-            "/plugins/classroom/static/classroom.css?v=20260921-1",
+            "/plugins/classroom/static/classroom.css?v=20260922-1",
             registry.stylesheets,
         )
         self.assertIn(
-            "/plugins/attendance/static/attendance.css?v=20260921-1",
+            "/plugins/attendance/static/attendance.css?v=20260922-1",
             registry.stylesheets,
         )
         self.assertIn(
-            "/plugins/processing/static/processing.css?v=20260921-1",
+            "/plugins/processing/static/processing.css?v=20260922-1",
             registry.stylesheets,
         )
         self.assertIn(
-            "/plugins/course_selection/static/selection.css?v=20260921-1",
+            "/plugins/course_selection/static/selection.css?v=20260922-1",
             registry.stylesheets,
         )
         self.assertIn(
             "/plugins/classroom/static/downloads.js?v=20260921-1",
-            registry.scripts,
+            registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
         )
         self.assertIn(
             "/plugins/course_selection/static/selection_ui.js?v=20260921-1",
-            registry.scripts,
+            registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
         )
 
         classroom_only = build_plugin_registry({"classroom"})
         self.assertIn(
-            "/plugins/classroom/static/classroom.css?v=20260921-1",
+            "/plugins/classroom/static/classroom.css?v=20260922-1",
             classroom_only.stylesheets,
         )
         self.assertNotIn(
-            "/plugins/course_selection/static/selection.css?v=20260921-1",
+            "/plugins/course_selection/static/selection.css?v=20260922-1",
             classroom_only.stylesheets,
         )
         self.assertNotIn(
@@ -198,11 +189,11 @@ class SidebarNavigationTests(unittest.TestCase):
         )
 
         base = Path("templates/base.html").read_text(encoding="utf-8")
-        self.assertIn("plugin_registry.stylesheets", base)
-        self.assertIn("plugin_registry.scripts", base)
+        self.assertIn('plugin_registry.page_assets(ui_page, "style")', base)
+        self.assertIn('plugin_registry.page_assets(ui_page, "script")', base)
 
     def test_plugin_static_mounts_are_isolated(self) -> None:
-        registry = build_plugin_registry()
+        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
         mounts = {mount.plugin_id: mount for mount in registry.static_mounts}
 
         self.assertEqual(

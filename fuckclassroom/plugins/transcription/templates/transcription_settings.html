@@ -1,21 +1,19 @@
-<section class="settings-section" id="transcription">
-  <div><h2>本地语音转写</h2><p>调整 faster-whisper 的模型、并发与输出方式。</p></div>
-  <div class="fields">
-    <div class="field"><label for="asr_model">语音识别模型</label><input class="input mono" id="asr_model" name="asr_model" value="{{ settings.asr_model }}"><span class="field-hint">默认 small；模型越大通常越准，但下载、内存和推理开销也更高。</span></div>
+{% import "ui/components.html" as ui %}
+{% call ui.section("transcription", "本地语音转写", "调整 faster-whisper 的模型、并发与输出方式。") %}
+    {{ ui.field("asr_model", "语音识别模型", settings.asr_model, hint="默认 small；模型越大通常越准，但下载、内存和推理开销也更高。") }}
     <div class="field-row">
-      <div class="field"><label for="asr_device">推理设备</label><select class="select" id="asr_device" name="asr_device">{% for device in ["cpu", "cuda", "auto"] %}<option value="{{ device }}" {% if settings.asr_device == device %}selected{% endif %}>{{ device }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="asr_compute_type">计算精度</label><select class="select" id="asr_compute_type" name="asr_compute_type">{% for compute in ["int8", "int8_float16", "float16", "float32", "default"] %}<option value="{{ compute }}" {% if settings.asr_compute_type == compute %}selected{% endif %}>{{ compute }}</option>{% endfor %}</select></div>
+      {{ ui.select("asr_device", "推理设备", settings.asr_device, ["cpu", "cuda", "auto"]) }}
+      {{ ui.select("asr_compute_type", "计算精度", settings.asr_compute_type, ["int8", "int8_float16", "float16", "float32", "default"]) }}
     </div>
     <div class="field-row">
-      <div class="field"><label for="asr_cpu_threads">每个模型 CPU 线程</label><input class="input" id="asr_cpu_threads" name="asr_cpu_threads" type="number" min="1" max="64" step="1" value="{{ settings.asr_cpu_threads }}"></div>
-      <div class="field"><label for="asr_num_workers">模型 Worker 数</label><input class="input" id="asr_num_workers" name="asr_num_workers" type="number" min="1" max="16" step="1" value="{{ settings.asr_num_workers }}"></div>
+      {{ ui.field("asr_cpu_threads", "每个模型 CPU 线程", settings.asr_cpu_threads, type="number", min="1", max="64", step="1") }}
+      {{ ui.field("asr_num_workers", "模型 Worker 数", settings.asr_num_workers, type="number", min="1", max="16", step="1") }}
     </div>
     <div class="field-row">
-      <div class="field"><label for="asr_max_concurrent_tasks">同时转写课次数</label><input class="input" id="asr_max_concurrent_tasks" name="asr_max_concurrent_tasks" type="number" min="1" max="8" step="1" value="{{ settings.asr_max_concurrent_tasks }}"></div>
-      <div class="field"><label for="asr_batch_size">单课批量大小</label><input class="input" id="asr_batch_size" name="asr_batch_size" type="number" min="1" max="32" step="1" value="{{ settings.asr_batch_size }}"></div>
+      {{ ui.field("asr_max_concurrent_tasks", "同时转写课次数", settings.asr_max_concurrent_tasks, type="number", min="1", max="8", step="1") }}
+      {{ ui.field("asr_batch_size", "单课批量大小", settings.asr_batch_size, type="number", min="1", max="32", step="1") }}
     </div>
-    <div class="field"><label for="audio_prefetch_queue_size">音频预取队列</label><input class="input" id="audio_prefetch_queue_size" name="audio_prefetch_queue_size" type="number" min="1" max="8" step="1" value="{{ settings.audio_prefetch_queue_size }}"></div>
-    <label class="check-row"><input type="checkbox" name="asr_use_batched" {% if settings.asr_use_batched %}checked{% endif %}><span>启用 BatchedInferencePipeline 批量推理</span></label>
-    <label class="check-row"><input type="checkbox" name="asr_simplified_chinese" {% if settings.asr_simplified_chinese %}checked{% endif %}><span>中文转写自动转换为简体</span></label>
-  </div>
-</section>
+    {{ ui.field("audio_prefetch_queue_size", "音频预取队列", settings.audio_prefetch_queue_size, type="number", min="1", max="8", step="1") }}
+    {{ ui.checkbox("asr_use_batched", "启用 BatchedInferencePipeline 批量推理", settings.asr_use_batched) }}
+    {{ ui.checkbox("asr_simplified_chinese", "中文转写自动转换为简体", settings.asr_simplified_chinese) }}
+{% endcall %}

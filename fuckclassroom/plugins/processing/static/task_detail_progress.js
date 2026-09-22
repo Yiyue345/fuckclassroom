@@ -1,14 +1,4 @@
 (() => {
-  const nativeFetch = window.fetch.bind(window);
-
-  if (!document.querySelector('link[data-task-detail-style]')) {
-    const style = document.createElement('link');
-    style.rel = 'stylesheet';
-    style.href = '/plugins/processing/static/task_detail_progress.css?v=20260916-1';
-    style.dataset.taskDetailStyle = '';
-    document.head.append(style);
-  }
-
   function ensureDetail(statusBox) {
     if (!statusBox) return null;
     let detail = statusBox.querySelector('[data-task-detail]');
@@ -44,7 +34,7 @@
     };
   }
 
-  function renderTaskDetail(task) {
+  function renderTaskDetail(task, statusBox) {
     if (!task || typeof task !== 'object') return;
     const explicit = task.detail_progress !== null
       && task.detail_progress !== undefined
@@ -56,7 +46,7 @@
       : null;
     const progressState = explicit || modelProgressFromMessage(task);
 
-    document.querySelectorAll('.inline-task-status').forEach((statusBox) => {
+    if (statusBox) {
       const detail = ensureDetail(statusBox);
       if (!detail) return;
       if (!progressState || task.status === 'failed' || task.status === 'succeeded' || task.status === 'cancelled') {
@@ -70,7 +60,7 @@
       detail.classList.remove('hidden');
       message.textContent = progressState.message;
       bar.style.width = `${progressState.percent}%`;
-    });
+    }
   }
 
   document.querySelectorAll('form[data-inline-task]').forEach((form) => {
@@ -80,33 +70,7 @@
     }, { capture: true });
   });
 
-  window.fetch = async (...args) => {
-    const response = await nativeFetch(...args);
-    try {
-      const input = args[0];
-      const url = typeof input === 'string' ? input : input?.url || '';
-      if (url.includes('/api/tasks/') && !url.endsWith('/cancel')) {
-        const task = await response.clone().json();
-        renderTaskDetail(task);
-
-        // static/app.js predates the explicit `cancelled` task state and only exits
-        // its polling loop for succeeded/failed. On inline-task pages translate the
-        // terminal state so controls are re-enabled instead of polling forever.
-        if (task?.status === 'cancelled' && document.querySelector('form[data-inline-task]')) {
-          return new Response(
-            JSON.stringify({ ...task, status: 'failed', error: '任务已取消' }),
-            {
-              status: response.status,
-              statusText: response.statusText,
-              headers: { 'Content-Type': 'application/json' },
-            },
-          );
-        }
-      }
-    } catch (_) {
-      // Detail progress/cancellation compatibility is optional and must never
-      // interfere with the main task poller.
-    }
-    return response;
-  };
+  document.addEventListener('academic:task-progress', (event) => {
+    renderTaskDetail(event.detail?.task, event.detail?.statusBox);
+  });
 })();

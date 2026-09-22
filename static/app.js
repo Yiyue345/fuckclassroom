@@ -167,12 +167,16 @@
           });
           if (!taskResponse.ok) throw new Error("读取任务进度失败（" + taskResponse.status + "）");
           const task = await taskResponse.json();
+          document.dispatchEvent(new CustomEvent("academic:task-progress", { detail: { task, statusBox } }));
           const percent = Math.max(0, Math.min(100, Number(task.progress) || 0));
           progress.style.width = percent + "%";
           message.textContent = task.error || task.message || form.dataset.taskRunningText || "任务正在进行";
 
           if (task.status === "failed") {
             throw new Error(task.error || fallbackText);
+          }
+          if (task.status === "cancelled") {
+            throw new Error(task.error || "任务已取消");
           }
           if (task.status === "succeeded") {
             taskSucceeded = true;
@@ -214,6 +218,7 @@
     const toast = document.createElement("aside");
     toast.className = "toast" + (isError ? " error" : "");
     toast.dataset.toast = "";
+    toast.setAttribute("role", isError ? "alert" : "status");
     toast.innerHTML = '<div class="toast-icon"><svg class="icon small"><use href="/static/icons.svg#' +
       (isError ? "circle-alert" : "circle-check") +
       '"></use></svg></div><div><div class="toast-title"></div><p class="toast-copy"></p></div>';

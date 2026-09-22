@@ -8,7 +8,11 @@
 {% block page_title %}设置{% endblock %}
 
 {% block content %}
-  <div class="page-head"><div><h1>设置</h1><p class="page-description">设置项由已启用插件注册；关闭某个功能后，对应设置面板可独立移除。</p></div><div class="head-actions"><button class="btn primary" type="submit" form="settings-form">保存更改</button></div></div>
+  {% from "ui/components.html" import page_header %}
+  {% call page_header("设置", "让学业助手更适合你的学习方式。所有更改保存在本机。") %}
+    <span class="meta" role="status" data-settings-status>按你的习惯调整</span>
+    <button class="btn primary" type="submit" form="settings-form">保存更改</button>
+  {% endcall %}
 
   {% if saved %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>设置已保存。</span></div>{% endif %}
   {% if settings_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>部分插件未能立即应用设置：{{ settings_error }}</span></div>{% endif %}
@@ -25,7 +29,7 @@
   {% endfor %}
 
   <div class="settings-layout">
-    <nav class="settings-nav">
+    <nav class="settings-nav" aria-label="设置分类" data-section-nav>
       {% for item in settings_panels if item.panel.show_in_nav %}
         <a{% if loop.first %} class="active"{% endif %} href="#{{ item.panel.key }}">{{ item.panel.label }}</a>
       {% endfor %}

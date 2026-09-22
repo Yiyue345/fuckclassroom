@@ -38,7 +38,7 @@ class PlanCourseGroupTests(unittest.TestCase):
 
     def test_selection_info_template_compiles(self) -> None:
         template_dir = Path(__file__).resolve().parents[1] / "templates"
-        registry = build_plugin_registry()
+        registry = build_plugin_registry({"course_selection"})
         environment = Environment(
             loader=FileSystemLoader(registry.template_directories(template_dir))
         )

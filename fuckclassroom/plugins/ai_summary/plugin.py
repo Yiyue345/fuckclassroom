@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...core.plugins import PluginContext, PluginSpec, SettingsPanel
+from ...core.plugins import PluginContext, PluginSpec, SettingsPanel, UISlot
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -20,6 +20,7 @@ def build_routes(context: PluginContext):
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="ai_summary",
+        ui_slots=(UISlot("processing.output.actions", "ai_summary/action.html"),),
         name="AI 总结",
         order=50,
         requires=("processing",),

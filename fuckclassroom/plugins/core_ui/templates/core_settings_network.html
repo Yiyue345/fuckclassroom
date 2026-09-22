@@ -1,7 +1,8 @@
+{% import "ui/components.html" as ui %}
 <section class="settings-section" id="network">
-  <div><h2>统一登录</h2><p>统一桂电账号由需要学校统一身份认证的插件共用；Core 只负责安全保存凭据，不绑定具体业务功能。</p></div>
+  <div><h2>统一登录</h2><p>保存统一桂电账号，方便各学习工具自动登录。密码加密保存在本机。</p></div>
   <div class="fields">
-    <div class="field-row"><div class="field"><label for="account_username">统一桂电账号</label><input class="input mono" id="account_username" name="account_username" autocomplete="username" value="{{ panel_context.credentials.username }}"></div><div class="field"><label for="account_password">统一桂电密码</label><input class="input mono" id="account_password" name="account_password" type="password" autocomplete="new-password" placeholder="{% if panel_context.credentials.is_saved %}已加密保存，留空保持不变{% else %}未保存{% endif %}"></div></div>
+    <div class="field-row">{{ ui.field("account_username", "统一桂电账号", panel_context.credentials.username, autocomplete="username") }}<div class="field"><label for="account_password">统一桂电密码</label><input class="input mono" id="account_password" name="account_password" type="password" autocomplete="new-password" placeholder="{% if panel_context.credentials.is_saved %}已加密保存，留空保持不变{% else %}未保存{% endif %}"></div></div>
     <div class="detail-grid"><div class="detail-item"><label>自动登录</label><strong>{{ panel_context.credentials.message }}</strong></div><div class="detail-item"><label>凭据存储</label><strong>系统安全存储</strong></div></div>
     <button class="btn danger" type="submit" form="login-state-clear-form"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除插件登录状态</button>
     {% if panel_context.credentials.is_saved %}
