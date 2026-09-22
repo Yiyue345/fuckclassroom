@@ -234,14 +234,12 @@ class ProcessPluginHost:
             self.entry,
             "--data-dir",
             str(self.data_dir),
-            "--token",
-            self._token,
+            f"--token={self._token}",
             "--rpc-host",
             "127.0.0.1",
             "--rpc-port",
             str(self._parent_rpc_port),
-            "--rpc-token",
-            self._parent_rpc_token,
+            f"--rpc-token={self._parent_rpc_token}",
             "--rpc-api-version",
             str(self.rpc_api_version),
             cwd=str(PROJECT_ROOT),
@@ -262,9 +260,11 @@ class ProcessPluginHost:
             await self._process.wait()
             if self._stderr_task is not None:
                 await asyncio.gather(self._stderr_task, return_exceptions=True)
+            detail = self._error_detail()
+            await self.stop()
             raise ProcessPluginError(
                 f"隔离插件 {self.plugin_id} 启动失败"
-                + (f"：{self._error_detail()}" if self._error_detail() else "")
+                + (f"：{detail}" if detail else "")
             )
         try:
             ready = json.loads(raw.decode("utf-8"))
