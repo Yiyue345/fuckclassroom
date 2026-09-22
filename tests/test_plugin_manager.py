@@ -595,5 +595,34 @@ def build_plugin():
                 manager.descriptor_map()
 
 
+    def test_external_plugin_cannot_request_internal_worker_rpc(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "internal_rpc"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "internal_rpc",
+                        "name": "Internal RPC",
+                        "execution": "process",
+                        "rpc_permissions": ["internal.classroom.session.ensure"],
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "def handle_request(request, context):\n"
+                "    return {'ok': True}\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+
+            with self.assertRaisesRegex(PluginManagerError, "内部 Worker 保留能力"):
+                manager.descriptor_map()
+
+
 if __name__ == "__main__":
     unittest.main()
