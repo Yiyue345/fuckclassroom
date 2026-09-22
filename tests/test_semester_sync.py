@@ -12,6 +12,7 @@ from fuckclassroom.classroom import ClassroomClient, ClassroomClientError, Term
 from fuckclassroom.classroom.semester_sync import SemesterSnapshot, SemesterSyncService
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.web import create_app
+from fuckclassroom.plugins.classroom.services import ClassroomClientProcessProxy
 
 
 def _term(term_id: str, *, current: bool = False) -> Term:
@@ -104,9 +105,14 @@ class SemesterSyncTests(unittest.TestCase):
             SemesterSyncService,
             "sync",
             return_value=snapshot,
-        ), patch.object(ClassroomClient, "list_courses", return_value=[]) as list_courses:
+        ), patch.object(
+            ClassroomClientProcessProxy,
+            "list_courses",
+            return_value=[],
+        ) as list_courses:
             app = create_app(AppConfig(data_dir=Path(directory)))
-            response = TestClient(app).get("/courses")
+            with TestClient(app) as client:
+                response = client.get("/courses")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('value="current" selected', response.text)
