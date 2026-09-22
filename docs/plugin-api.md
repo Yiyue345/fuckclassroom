@@ -256,7 +256,7 @@ async def handle_request(request, context):
 1. 当前 FuckClassroom Runtime 已注册该 method；
 2. 插件在 `plugin.json.rpc_permissions` 中**精确声明**该 method。
 
-v1 不支持 `*` 通配权限。未声明会返回 `permission_denied`。插件可捕获：
+v1 不支持 `*` 通配权限。未声明会返回 `permission_denied`。此外 `internal.*` 是内置 Worker 保留命名空间，外部插件清单声明它会直接被拒绝。插件可捕获：
 
 ```python
 from fuckclassroom.plugins.process_api import ProcessPluginRpcError
@@ -1178,7 +1178,7 @@ if context.registry.is_enabled("classroom"):
 
 | 插件 | service key | 当前对象 |
 | --- | --- | --- |
-| `classroom` | `classroom_client` | `ClassroomClient` |
+| `classroom` | `classroom_client` | `ClassroomClientProcessProxy` |
 | `classroom` | `semester_sync` | `SemesterSyncService` |
 | `classroom` | `auth_service` | `LoginSessionService` |
 | `classroom` | `download_library` | `DownloadLibrary` |
@@ -1188,8 +1188,8 @@ if context.registry.is_enabled("classroom"):
 | `ai_summary` | `ai_summary_service` | `AiSummaryProcessProxy` |
 | `attendance` | `ketangpai_client` | `KetangpaiClient` |
 | `attendance` | `qr_scanner` | `AttendanceScannerProcessProxy` |
-| `course_selection` | `course_selection` | `CourseSelectionAssistant` |
-| `course_selection` | `auto_selection` | `AutoSelectionService` |
+| `course_selection` | `course_selection` | `CourseSelectionProcessFacade` |
+| `course_selection` | `auto_selection` | `AutoSelectionProcessProxy` |
 | `course_selection` | `hy2_proxy` | `Hy2ProxyManager` |
 
 例如：
@@ -1210,9 +1210,11 @@ if classroom is not None:
 
 但是不要把这种可选探测代替 `requires` 用于核心功能依赖。
 
-### 内置重型插件的 Worker 迁移
+### 内置插件的 Worker 迁移
 
-`transcription`、`ocr`、`ai_summary`，以及 `attendance` 的二维码扫描能力现在采用“进程内薄壳 + 独立 Worker”模式：
+目前不仅重型计算插件，带业务状态的 `classroom` 和 `course_selection` 也已经拆成“主进程状态 Facade + 独立执行 Worker”。
+
+`transcription`、`ocr`、`ai_summary`，以及 `attendance` 的二维码扫描能力采用“进程内薄壳 + 独立 Worker”模式：
 
 ```text
 PluginSpec / UI / routes（主进程）
@@ -1229,6 +1231,29 @@ faster-whisper / RapidOCR / AIClient / wxscan + OpenCV（子进程）
 这样保留了原有页面、设置面板、`processing` 编排和 service key，同时把模型、ONNX Runtime、ASR 推理、AI 网络调用以及 wxscan/OpenCV 二维码识别移出主 Python 进程。关闭对应插件或 Runtime 后，Worker 进程会退出并释放其模型/原生库资源。
 
 这三个 proxy 为兼容现有内置编排保留了原 service 的主要调用形状，但**具体 proxy Python 类型不是新的稳定第三方插件 API**。新的进程隔离第三方插件应优先使用前文的 Plugin RPC，而不是直接取得 `*_process_host`。
+
+
+带业务状态的两个插件采用更严格的单一状态源：
+
+```text
+classroom
+  主进程: LoginSessionService / 凭据 / storage_state
+                         │ internal RPC
+                         ▼
+  子进程: ClassroomClient 网络访问、直播、课件/转写导出
+
+course_selection
+  主进程: CourseSelectionAssistant 会话层 / CAS / 短信 / Hy2 控制
+                         │ internal RPC
+                         ▼
+  子进程: 教务 API、全校开课查询、选退课、AutoSelectionService
+```
+
+两个进程共享的持久状态只通过 data 目录中的原子文件交接，例如课程登录 `storage_state.json`、教务 `selection_info.json`、`auto_selection_jobs.json`。自动选课任务本身原本就持久化；全校开课查询结果现在也额外写入 `catalog_worker_cache.json`，因此 Runtime/Worker 热重载后仍能继续加入队列或执行刚查询到的课程。
+
+Worker 遇到登录失效时不会自行持有第二份凭据或启动第二套登录流程，而是通过主进程内部 RPC 请求会话恢复。Hy2 也只由主进程 `Hy2ProxyManager` 控制，选课 Worker 只取得已经管理好的代理地址。
+
+内部 Worker RPC 使用保留的 `internal.*` method。第三方外部插件的 `plugin.json.rpc_permissions` **不能声明 `internal.*` 权限**；这些 method 不属于 Plugin RPC 公共 API，也不承诺跨版本兼容。
 
 Service Invoke 会桥接现有 `TaskProgressReporter` 的：
 

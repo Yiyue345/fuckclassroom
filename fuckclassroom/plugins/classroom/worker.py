@@ -16,7 +16,7 @@ def _get_client(context) -> ClassroomClient:
         _client = ClassroomClient(AppConfig(data_dir=context.data_dir))
 
         def recover_session():
-            result = context.rpc.call("classroom.session.ensure")
+            result = context.rpc.call("internal.classroom.session.ensure")
             return bool(isinstance(result, dict) and result.get("is_logged_in"))
 
         _client.set_session_recoverer(recover_session)

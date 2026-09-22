@@ -18,7 +18,7 @@ class _RemoteHy2Proxy:
         self.context = context
 
     def ensure_started(self) -> str:
-        result = self.context.rpc.call("selection.hy2.ensure")
+        result = self.context.rpc.call("internal.selection.hy2.ensure")
         if not result:
             raise Hy2ProxyError("Hy2 主进程代理未返回地址")
         return str(result)
@@ -39,7 +39,7 @@ class _WorkerSelectionAssistant(CourseSelectionAssistant):
         auto_relogin: bool = True,
     ) -> WebVpnSessionStatus:
         payload = self._worker_context.rpc.call(
-            "selection.session.ensure",
+            "internal.selection.session.ensure",
             {
                 "timeout_ms": timeout_ms,
                 "auto_relogin": auto_relogin,
@@ -51,7 +51,7 @@ class _WorkerSelectionAssistant(CourseSelectionAssistant):
 
     def _detect_access_mode(self, force: bool = False) -> str:
         payload = self._worker_context.rpc.call(
-            "selection.access.info",
+            "internal.selection.access.info",
             {"force": force},
         )
         if not isinstance(payload, dict):

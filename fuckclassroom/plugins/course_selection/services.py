@@ -456,9 +456,9 @@ def setup_services(context: PluginContext) -> None:
         rpc_registry=services.get("plugin_rpc"),
         rpc_api_version=PLUGIN_RPC_API_VERSION,
         rpc_permissions=(
-            "selection.session.ensure",
-            "selection.access.info",
-            "selection.hy2.ensure",
+            "internal.selection.session.ensure",
+            "internal.selection.access.info",
+            "internal.selection.hy2.ensure",
         ),
     )
     facade = CourseSelectionProcessFacade(local, host)

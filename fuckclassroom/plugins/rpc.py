@@ -221,17 +221,17 @@ class PluginRpcBuiltins:
 
         if self.services.has("auth_service"):
             registry.register("classroom.session.status", self.classroom_session_status)
-            registry.register("classroom.session.ensure", self.classroom_session_ensure)
+            registry.register("internal.classroom.session.ensure", self.classroom_session_ensure)
         if self.services.has("classroom_client"):
             registry.register("classroom.terms.list", self.classroom_terms_list)
             registry.register("classroom.courses.list", self.classroom_courses_list)
             registry.register("classroom.course.get", self.classroom_course_get)
 
         if self.services.has("course_selection"):
-            registry.register("selection.session.ensure", self.selection_session_ensure)
-            registry.register("selection.access.info", self.selection_access_info)
+            registry.register("internal.selection.session.ensure", self.selection_session_ensure)
+            registry.register("internal.selection.access.info", self.selection_access_info)
         if self.services.has("hy2_proxy"):
-            registry.register("selection.hy2.ensure", self.selection_hy2_ensure)
+            registry.register("internal.selection.hy2.ensure", self.selection_hy2_ensure)
 
     def settings_get(
         self, _context: PluginRpcCallContext, params: Mapping[str, object]

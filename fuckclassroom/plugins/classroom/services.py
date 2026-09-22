@@ -266,7 +266,7 @@ def setup_services(context: PluginContext) -> None:
         data_dir=Path(config.data_dir),
         rpc_registry=services.get("plugin_rpc"),
         rpc_api_version=PLUGIN_RPC_API_VERSION,
-        rpc_permissions=("classroom.session.ensure",),
+        rpc_permissions=("internal.classroom.session.ensure",),
     )
     classroom_client = ClassroomClientProcessProxy(host)
     semester_sync = SemesterSyncService(

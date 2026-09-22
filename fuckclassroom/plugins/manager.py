@@ -810,6 +810,10 @@ class PluginManager:
             permission = str(raw_permission or "").strip()
             if not rpc_method_re.fullmatch(permission):
                 raise PluginManagerError(f"非法 RPC 权限：{permission or raw_permission}")
+            if permission.startswith("internal."):
+                raise PluginManagerError(
+                    f"RPC 权限 {permission} 为 FuckClassroom 内部 Worker 保留能力"
+                )
             if permission not in rpc_permissions:
                 rpc_permissions.append(permission)
         if execution != "process" and (rpc_permissions or "rpc_api_version" in payload):
