@@ -130,6 +130,9 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("account-session-panel plugin-manager-card", template)
         self.assertIn("account-session-header plugin-manager-card-header", template)
         self.assertIn("detail-grid plugin-manager-details", template)
+        self.assertIn('<details class="plugin-manager-dependencies">', template)
+        self.assertIn("grid-template-columns: repeat(4, minmax(0, 1fr))", styles)
+        self.assertIn(".plugin-manager-card { min-height: 0; padding: 16px; }", styles)
         self.assertIn(".account-session-panel {", styles)
         self.assertIn(".plugin-install-option {", styles)
         self.assertIn(".plugin-manager-grid {", styles)
@@ -146,7 +149,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260922-1",
+            "/plugins/core_ui/static/core_ui.css?v=20260922-2",
             registry.stylesheets,
         )
         self.assertIn(

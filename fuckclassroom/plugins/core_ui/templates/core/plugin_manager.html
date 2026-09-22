@@ -165,41 +165,46 @@
             </div>
 
             {% if plugin.dependencies %}
-              <div class="plugin-manager-dependencies">
-                <div class="plugin-manager-dependencies-head">
+              <details class="plugin-manager-dependencies">
+                <summary class="plugin-manager-dependencies-head">
                   <div>
-                    <strong>运行依赖</strong>
-                    <span>Python 包与运行时组件</span>
+                    <strong>运行依赖 · {{ plugin.dependencies|length }}</strong>
+                    <span>点击展开 Python 包与运行时组件</span>
                   </div>
-                  {% if plugin.dependency_issue %}
-                    <span class="status red">缺少必需依赖</span>
-                  {% elif plugin.missing_optional_dependencies %}
-                    <span class="status amber">缺少可选增强</span>
-                  {% else %}
-                    <span class="status green">已就绪</span>
-                  {% endif %}
-                </div>
+                  <div class="plugin-manager-dependency-summary">
+                    {% if plugin.dependency_issue %}
+                      <span class="status red">缺少必需依赖</span>
+                    {% elif plugin.missing_optional_dependencies %}
+                      <span class="status amber">缺少可选增强</span>
+                    {% else %}
+                      <span class="status green">已就绪</span>
+                    {% endif %}
+                    <svg class="icon small plugin-manager-dependency-chevron"><use href="/static/icons.svg#chevron-down"></use></svg>
+                  </div>
+                </summary>
 
-                <div class="plugin-manager-dependency-list">
-                  {% for dependency in plugin.dependencies %}
-                    <div class="plugin-manager-dependency-row">
-                      <span class="session-dot {% if dependency.installed %}valid{% else %}invalid{% endif %}"></span>
-                      <div>
-                        <strong>{{ dependency.label }}</strong>
-                        <span class="mono">{{ dependency.version or dependency.requirement or dependency.import_name }}</span>
+                <div class="plugin-manager-dependencies-body">
+                  <div class="plugin-manager-dependency-list">
+                    {% for dependency in plugin.dependencies %}
+                      <div class="plugin-manager-dependency-row">
+                        <span class="session-dot {% if dependency.installed %}valid{% else %}invalid{% endif %}"></span>
+                        <div>
+                          <strong>{{ dependency.label }}</strong>
+                          <span class="mono">{{ dependency.version or dependency.requirement or dependency.import_name }}</span>
+                        </div>
+                        {% if dependency.optional %}<span class="status gray">可选</span>{% endif %}
                       </div>
-                      {% if dependency.optional %}<span class="status gray">可选</span>{% endif %}
-                    </div>
-                  {% endfor %}
-                </div>
+                    {% endfor %}
+                  </div>
 
-                <form method="post" action="/plugins/{{ plugin.id }}/dependencies/install">
-                  <button class="btn small" type="submit">
-                    <svg class="icon small"><use href="/static/icons.svg#download"></use></svg>
-                    {{ "安装/修复依赖" if plugin.dependency_issue or plugin.missing_optional_dependencies else "重新安装依赖" }}
-                  </button>
-                </form>
-              </div>
+                  <form method="post" action="/plugins/{{ plugin.id }}/dependencies/install">
+                    <button class="btn small" type="submit">
+                      <svg class="icon small"><use href="/static/icons.svg#download"></use></svg>
+                      {{ "安装/修复依赖" if plugin.dependency_issue or plugin.missing_optional_dependencies else "重新安装依赖" }}
+                    </button>
+                  </form>
+                </div>
+              </details>
             {% endif %}
           </div>
 
