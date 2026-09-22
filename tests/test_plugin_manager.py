@@ -467,5 +467,33 @@ def build_plugin():
             self.assertIsNotNone(spec.shutdown)
 
 
+    def test_plugin_toggle_supports_json_without_page_redirect(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = AppConfig(data_dir=Path(directory))
+            reload_calls: list[bool] = []
+
+            async def request_reload() -> bool:
+                reload_calls.append(True)
+                return True
+
+            app = create_app(config, reload_callback=request_reload)
+            from fastapi.testclient import TestClient
+
+            with TestClient(app) as client:
+                response = client.post(
+                    "/plugins/ocr/disable",
+                    headers={"Accept": "application/json"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["plugin_id"], "ocr")
+            self.assertEqual(payload["action"], "disable")
+            self.assertNotIn("ocr", payload["desired_enabled"])
+            self.assertTrue(payload["reload_scheduled"])
+            self.assertEqual(reload_calls, [True])
+
+
 if __name__ == "__main__":
     unittest.main()

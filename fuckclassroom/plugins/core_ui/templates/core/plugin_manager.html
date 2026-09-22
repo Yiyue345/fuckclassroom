@@ -267,7 +267,7 @@
     return document.querySelector(`[data-plugin-card="${CSS.escape(id)}"]`);
   }
 
-  function setCardState(id, desiredEnabled, currentEnabled, message = '') {
+  function setCardState(id, desiredEnabled, currentEnabled, options = {}) {
     const card = cardFor(id);
     if (!card) return;
     const form = card.querySelector('.plugin-toggle-form');
@@ -278,28 +278,54 @@
     const locked = card.dataset.pluginLocked === 'true';
     const mutable = card.dataset.pluginMutable === 'true';
     const compatible = card.dataset.pluginCompatible === 'true';
+    const pending = desiredEnabled !== currentEnabled;
+    const errorMessage = pending ? String(options.error || '') : '';
+    const busy = Boolean(options.busy && pending);
 
     input.checked = desiredEnabled;
     form.action = `/plugins/${encodeURIComponent(id)}/${desiredEnabled ? 'disable' : 'enable'}`;
     input.setAttribute('aria-label', `${desiredEnabled ? '停用' : '启用'} ${card.querySelector('h2')?.textContent || id}`);
 
-    const pending = desiredEnabled !== currentEnabled;
-    card.classList.toggle('is-applying', pending);
-    form.classList.toggle('is-busy', pending);
-    badge.classList.toggle('hidden', !pending && !message);
-    badge.className = `status ${message ? 'red' : 'amber'}${(!pending && !message) ? ' hidden' : ''}`;
-    badge.textContent = message || (pending ? '应用中…' : '');
+    card.classList.toggle('is-applying', busy);
+    form.classList.toggle('is-busy', busy);
+    badge.className = `status ${errorMessage ? 'red' : 'amber'}${pending ? '' : ' hidden'}`;
+    badge.textContent = errorMessage
+      ? '应用失败'
+      : pending
+        ? (options.pendingLabel || '待应用')
+        : '';
+    badge.title = errorMessage;
 
-    input.disabled = locked || !mutable || (!desiredEnabled && !compatible) || pending;
+    input.disabled = locked || !mutable || (!desiredEnabled && !compatible) || busy;
   }
 
   function syncCards(status) {
     const desired = new Set(status.desired_enabled || []);
     const current = new Set(status.current_enabled || []);
+    const error = String(status.last_error || '');
+    const pendingLabel = status.hot_reload_available ? '待自动应用' : '重启后生效';
     document.querySelectorAll('[data-plugin-card]').forEach((card) => {
       const id = card.dataset.pluginCard;
-      setCardState(id, desired.has(id), current.has(id), status.last_error || '');
+      setCardState(id, desired.has(id), current.has(id), {
+        error,
+        busy: Boolean(status.reloading),
+        pendingLabel,
+      });
     });
+  }
+
+  async function refreshShellChrome() {
+    const response = await fetch('/plugins', {
+      headers: { Accept: 'text/html' },
+      cache: 'no-store',
+    });
+    if (!response.ok) return;
+    const documentCopy = new DOMParser().parseFromString(await response.text(), 'text/html');
+    for (const selector of ['.sidebar-nav', '.session-list', '.top-actions .session-pair']) {
+      const current = document.querySelector(selector);
+      const next = documentCopy.querySelector(selector);
+      if (current && next) current.replaceChildren(...Array.from(next.childNodes).map((node) => node.cloneNode(true)));
+    }
   }
 
   async function waitForRuntime() {
@@ -323,12 +349,14 @@
       const requestedEnabled = input.checked;
       const card = cardFor(id);
       const badge = card && card.querySelector('[data-plugin-runtime-state]');
+      let configurationSaved = false;
       input.disabled = true;
       card?.classList.add('is-applying');
       form.classList.add('is-busy');
       if (badge) {
         badge.className = 'status amber';
         badge.textContent = '应用中…';
+        badge.title = '';
       }
 
       try {
@@ -338,37 +366,47 @@
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || '插件状态修改失败');
+        configurationSaved = true;
 
         const desired = new Set(payload.desired_enabled || []);
         document.querySelectorAll('[data-plugin-card]').forEach((item) => {
           const pluginId = item.dataset.pluginCard;
           const currentInput = item.querySelector('.plugin-toggle-form input[type="checkbox"]');
-          if (currentInput && desired.has(pluginId) !== currentInput.checked) {
-            currentInput.checked = desired.has(pluginId);
-          }
+          if (currentInput) currentInput.checked = desired.has(pluginId);
         });
 
-        if (payload.reload_scheduled) {
-          const status = await waitForRuntime();
-          if (status.last_error) throw new Error(status.last_error);
-        } else {
-          const status = await waitForRuntime();
-          syncCards(status);
+        const status = await waitForRuntime();
+        if (!status.last_error && !status.restart_required) {
+          await refreshShellChrome();
         }
       } catch (error) {
-        input.checked = !requestedEnabled;
         const message = error instanceof Error ? error.message : String(error);
-        if (badge) {
-          badge.className = 'status red';
-          badge.textContent = '应用失败';
-          badge.title = message;
+        if (!configurationSaved) {
+          input.checked = !requestedEnabled;
+          form.action = `/plugins/${encodeURIComponent(id)}/${input.checked ? 'disable' : 'enable'}`;
+          if (badge) {
+            badge.className = 'status red';
+            badge.textContent = '修改失败';
+            badge.title = message;
+          }
+          card?.classList.remove('is-applying');
+          form.classList.remove('is-busy');
+          input.disabled = false;
+        } else {
+          try {
+            const status = await waitForRuntime();
+            syncCards({ ...status, last_error: status.last_error || message });
+          } catch (_) {
+            if (badge) {
+              badge.className = 'status red';
+              badge.textContent = '应用失败';
+              badge.title = message;
+            }
+            card?.classList.remove('is-applying');
+            form.classList.remove('is-busy');
+            input.disabled = false;
+          }
         }
-        card?.classList.remove('is-applying');
-        form.classList.remove('is-busy');
-        input.disabled = false;
-        window.setTimeout(() => {
-          if (badge) badge.title = '';
-        }, 4000);
       }
     });
   });
