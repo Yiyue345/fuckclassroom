@@ -19,6 +19,7 @@ def build_router(context) -> APIRouter:
     classroom_client = services.get("classroom_client")
     ketangpai_sms_sessions = services.get("ketangpai_sms_sessions")
     ketangpai_sms_lock = services.get("ketangpai_sms_lock")
+    qr_scanner = services.get("qr_scanner")
 
     @router.post("/accounts/ketangpai/login")
     async def ketangpai_password_login(request: Request) -> RedirectResponse:
@@ -164,6 +165,7 @@ def build_router(context) -> APIRouter:
         context.config,
         classroom_client=classroom_client,
         ketangpai_client=ketangpai_client,
+        scanner=qr_scanner,
     )
     return router
 

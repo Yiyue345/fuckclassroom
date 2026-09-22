@@ -11,9 +11,16 @@ def setup_services(context: PluginContext):
     from .services import setup_services as setup
     return setup(context)
 
-def startup(context: PluginContext):
+async def startup(context: PluginContext):
+    from .services import startup as worker_startup
+    await worker_startup(context)
     from .lifecycle import startup as hook
-    return hook(context)
+    return await hook(context)
+
+
+async def shutdown(context: PluginContext):
+    from .services import shutdown as hook
+    return await hook(context)
 
 
 def build_routes(context: PluginContext):
@@ -36,6 +43,7 @@ def build_plugin() -> PluginSpec:
         service_factory=setup_services,
         route_factory=build_routes,
         startup=startup,
+        shutdown=shutdown,
         template_dir=PLUGIN_DIR / "templates",
         account_panels=(
             AccountPanel(
