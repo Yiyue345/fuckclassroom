@@ -15,6 +15,14 @@ from fastapi.responses import JSONResponse, Response
 
 from ..core.config import PROJECT_ROOT
 from ..core.plugins import PluginContext, PluginSpec
+from .rpc import (
+    PLUGIN_RPC_API_VERSION,
+    PluginRpcError,
+    PluginRpcRegistry,
+)
+
+
+_PARENT_RPC_MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 
 
 _HOP_BY_HOP_HEADERS = {
@@ -42,16 +50,27 @@ class ProcessPluginHost:
         root: Path,
         entry: str,
         data_dir: Path,
+        rpc_registry: PluginRpcRegistry,
+        rpc_api_version: int,
+        rpc_permissions: tuple[str, ...],
     ) -> None:
         self.plugin_id = plugin_id
         self.root = root
         self.entry = entry
         self.data_dir = data_dir
+        self.rpc_registry = rpc_registry
+        self.rpc_api_version = int(rpc_api_version)
+        self.rpc_permissions = tuple(rpc_permissions)
         self._token = secrets.token_urlsafe(32)
+        self._parent_rpc_token = secrets.token_urlsafe(32)
         self._process: asyncio.subprocess.Process | None = None
         self._port = 0
         self._pid = 0
         self._stderr_task: asyncio.Task[None] | None = None
+        self._watch_task: asyncio.Task[None] | None = None
+        self._parent_rpc_server: asyncio.AbstractServer | None = None
+        self._parent_rpc_port = 0
+        self._cleanup_notified = False
         self._stderr_lines: list[str] = []
 
     @property
@@ -75,10 +94,130 @@ class ProcessPluginHost:
     def _error_detail(self) -> str:
         return "\n".join(self._stderr_lines[-8:])
 
+    async def _send_parent_rpc_response(
+        self,
+        writer: asyncio.StreamWriter,
+        payload: dict[str, object],
+    ) -> None:
+        encoded = (
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            + b"\n"
+        )
+        writer.write(encoded)
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    async def _handle_parent_rpc(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            raw = await asyncio.wait_for(
+                reader.readline(),
+                timeout=65,
+            )
+            if not raw or len(raw) > _PARENT_RPC_MAX_MESSAGE_BYTES:
+                await self._send_parent_rpc_response(
+                    writer,
+                    {"ok": False, "error": {"code": "request_too_large", "message": "RPC 请求为空或过大"}},
+                )
+                return
+            message = json.loads(raw.decode("utf-8"))
+            if message.get("token") != self._parent_rpc_token:
+                await self._send_parent_rpc_response(
+                    writer,
+                    {"ok": False, "error": {"code": "unauthorized", "message": "RPC token 无效"}},
+                )
+                return
+            if int(message.get("rpc_api_version") or 0) != self.rpc_api_version:
+                await self._send_parent_rpc_response(
+                    writer,
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "rpc_version_mismatch",
+                            "message": (
+                                f"Plugin RPC API {message.get('rpc_api_version')} 与 Host "
+                                f"{self.rpc_api_version} 不匹配"
+                            ),
+                        },
+                    },
+                )
+                return
+            result = await self.rpc_registry.call(
+                plugin_id=self.plugin_id,
+                permissions=self.rpc_permissions,
+                method=str(message.get("method") or ""),
+                params=message.get("params"),
+            )
+            await self._send_parent_rpc_response(writer, {"ok": True, "result": result})
+        except PluginRpcError as exc:
+            await self._send_parent_rpc_response(
+                writer,
+                {
+                    "ok": False,
+                    "error": {
+                        "code": getattr(exc, "code", "rpc_error"),
+                        "message": str(exc),
+                    },
+                },
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            await self._send_parent_rpc_response(
+                writer,
+                {
+                    "ok": False,
+                    "error": {"code": "invalid_request", "message": str(exc)},
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - isolate parent API failures from plugin process.
+            await self._send_parent_rpc_response(
+                writer,
+                {
+                    "ok": False,
+                    "error": {"code": "internal_error", "message": f"{type(exc).__name__}: {exc}"},
+                },
+            )
+
+    async def _close_parent_rpc_server(self) -> None:
+        server = self._parent_rpc_server
+        self._parent_rpc_server = None
+        self._parent_rpc_port = 0
+        if server is not None:
+            server.close()
+            await server.wait_closed()
+
+    async def _notify_stopped(self) -> None:
+        if self._cleanup_notified:
+            return
+        self._cleanup_notified = True
+        await self.rpc_registry.plugin_stopped(self.plugin_id)
+
+    async def _watch_process(self, process: asyncio.subprocess.Process) -> None:
+        await process.wait()
+        await self._close_parent_rpc_server()
+        await self._notify_stopped()
+
     async def start(self) -> None:
         if self.running:
             return
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._cleanup_notified = False
+        await self._close_parent_rpc_server()
+        self._parent_rpc_server = await asyncio.start_server(
+            self._handle_parent_rpc,
+            "127.0.0.1",
+            0,
+            limit=_PARENT_RPC_MAX_MESSAGE_BYTES + 1,
+        )
+        sockets = self._parent_rpc_server.sockets or []
+        if not sockets:
+            await self._close_parent_rpc_server()
+            raise ProcessPluginError(f"无法为隔离插件 {self.plugin_id} 创建主进程 RPC 端口")
+        self._parent_rpc_port = int(sockets[0].getsockname()[1])
+
         creationflags = 0
         if os.name == "nt":
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -96,6 +235,14 @@ class ProcessPluginHost:
             str(self.data_dir),
             "--token",
             self._token,
+            "--rpc-host",
+            "127.0.0.1",
+            "--rpc-port",
+            str(self._parent_rpc_port),
+            "--rpc-token",
+            self._parent_rpc_token,
+            "--rpc-api-version",
+            str(self.rpc_api_version),
             cwd=str(PROJECT_ROOT),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -104,6 +251,7 @@ class ProcessPluginHost:
         assert self._process.stdout is not None
         assert self._process.stderr is not None
         self._stderr_task = asyncio.create_task(self._drain_stderr(self._process.stderr))
+        self._watch_task = asyncio.create_task(self._watch_process(self._process))
         try:
             raw = await asyncio.wait_for(self._process.stdout.readline(), timeout=12)
         except asyncio.TimeoutError as exc:
@@ -121,6 +269,8 @@ class ProcessPluginHost:
             ready = json.loads(raw.decode("utf-8"))
             self._port = int(ready["port"])
             self._pid = int(ready["pid"])
+            if int(ready.get("rpc_api_version") or 0) != self.rpc_api_version:
+                raise ValueError("RPC API handshake mismatch")
         except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             await self.stop()
             raise ProcessPluginError(f"隔离插件 {self.plugin_id} 返回了无效启动握手") from exc
@@ -203,10 +353,15 @@ class ProcessPluginHost:
                 except asyncio.TimeoutError:
                     process.kill()
                     await process.wait()
+        if self._watch_task is not None:
+            await asyncio.gather(self._watch_task, return_exceptions=True)
         if self._stderr_task is not None:
             await asyncio.gather(self._stderr_task, return_exceptions=True)
+        await self._close_parent_rpc_server()
+        await self._notify_stopped()
         self._process = None
         self._stderr_task = None
+        self._watch_task = None
         self._port = 0
         self._pid = 0
 
@@ -217,6 +372,7 @@ def build_process_plugin_spec(descriptor: Any) -> PluginSpec:
     service_key = f"process-plugin:{descriptor.id}"
 
     def setup_services(context: PluginContext) -> None:
+        rpc_registry: PluginRpcRegistry = context.services.get("plugin_rpc")
         context.services.add(
             service_key,
             ProcessPluginHost(
@@ -224,6 +380,9 @@ def build_process_plugin_spec(descriptor: Any) -> PluginSpec:
                 root=descriptor.root,
                 entry=descriptor.entry,
                 data_dir=Path(context.config.data_dir) / "plugin-process-data" / descriptor.id,
+                rpc_registry=rpc_registry,
+                rpc_api_version=descriptor.rpc_api_version,
+                rpc_permissions=tuple(descriptor.rpc_permissions),
             ),
         )
 

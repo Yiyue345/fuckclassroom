@@ -19,6 +19,7 @@ from .process_api import (
     ProcessPluginContext,
     ProcessPluginRequest,
     ProcessPluginResponse,
+    ProcessPluginRpcClient,
     json_response,
 )
 
@@ -183,6 +184,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--entry", required=True)
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--token", required=True)
+    parser.add_argument("--rpc-host", required=True)
+    parser.add_argument("--rpc-port", required=True, type=int)
+    parser.add_argument("--rpc-token", required=True)
+    parser.add_argument("--rpc-api-version", required=True, type=int)
     return parser.parse_args()
 
 
@@ -198,6 +203,12 @@ def main() -> int:
         plugin_id=args.plugin_id,
         plugin_root=root,
         data_dir=data_dir,
+        rpc=ProcessPluginRpcClient(
+            host=args.rpc_host,
+            port=args.rpc_port,
+            token=args.rpc_token,
+            api_version=args.rpc_api_version,
+        ),
     )
 
     try:
@@ -221,7 +232,12 @@ def main() -> int:
     port = int(server.server_address[1])
     protocol_out.write(
         json.dumps(
-            {"type": "ready", "port": port, "pid": os.getpid()},
+            {
+                "type": "ready",
+                "port": port,
+                "pid": os.getpid(),
+                "rpc_api_version": args.rpc_api_version,
+            },
             separators=(",", ":"),
         )
         + "\n"
