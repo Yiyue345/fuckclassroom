@@ -200,6 +200,7 @@ class PluginCompositionTests(unittest.TestCase):
                 "verification_broker",
                 "login_lock",
                 "plugin_manager",
+                "plugin_rpc",
                 "templates",
             },
         )
