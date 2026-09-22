@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import ast
+import os
+import tempfile
 import unittest
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
+from fastapi.testclient import TestClient
 
+from fuckclassroom.core.config import AppConfig
 from fuckclassroom.core.plugins import PluginRegistry, PluginRuntime, PluginSpec
 from fuckclassroom.plugins import build_plugin_registry
 from fuckclassroom.web import create_app
@@ -152,6 +156,41 @@ class PluginCompositionTests(unittest.TestCase):
         self.assertFalse(services.has("ocr_service"))
         self.assertFalse(services.has("ai_summary_service"))
         self.assertFalse(services.has("ketangpai_client"))
+
+    def test_heavy_builtin_services_run_in_isolated_worker_processes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(
+                AppConfig(data_dir=Path(directory)),
+                enabled_plugins={"ocr", "transcription", "ai_summary"},
+            )
+            services = app.state.plugin_runtime.services
+            hosts = [
+                services.get("ocr_process_host"),
+                services.get("transcription_process_host"),
+                services.get("ai_summary_process_host"),
+            ]
+
+            with TestClient(app):
+                for host in hosts:
+                    self.assertTrue(host.running)
+                    self.assertGreater(host.pid, 0)
+                    self.assertNotEqual(host.pid, os.getpid())
+
+                self.assertEqual(
+                    type(services.get("ocr_service")).__name__,
+                    "OcrProcessProxy",
+                )
+                self.assertEqual(
+                    type(services.get("transcription_service")).__name__,
+                    "TranscriptionProcessProxy",
+                )
+                self.assertEqual(
+                    type(services.get("ai_summary_service")).__name__,
+                    "AiSummaryProcessProxy",
+                )
+
+            for host in hosts:
+                self.assertFalse(host.running)
 
     def test_attendance_plugin_owns_qr_and_ketangpai_routes(self) -> None:
         app = create_app(enabled_plugins={"attendance"})

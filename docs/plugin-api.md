@@ -630,6 +630,7 @@ keys = context.services.keys
 | `credential_store` | `SelectionCredentialStore` | 统一登录凭据存储 |
 | `verification_broker` | `LoginVerificationBroker` | 登录短信验证协调 |
 | `login_lock` | `threading.Lock` | 登录流程串行化 |
+| `plugin_rpc` | `PluginRpcRegistry` | 独立进程插件 RPC 注册与权限检查；进程插件应通过 `context.rpc` 使用 |
 | `templates` | `Jinja2Templates` | 页面模板渲染；仅 route 阶段及之后可用 |
 
 ### 稳定性建议
@@ -1182,9 +1183,9 @@ if context.registry.is_enabled("classroom"):
 | `classroom` | `auth_service` | `LoginSessionService` |
 | `classroom` | `download_library` | `DownloadLibrary` |
 | `processing` | `extraction_service` | `LessonExtractionService` |
-| `transcription` | `transcription_service` | `LocalTranscriptionService` |
-| `ocr` | `ocr_service` | `OcrService` |
-| `ai_summary` | `ai_summary_service` | `AIClient` |
+| `transcription` | `transcription_service` | `TranscriptionProcessProxy` |
+| `ocr` | `ocr_service` | `OcrProcessProxy` |
+| `ai_summary` | `ai_summary_service` | `AiSummaryProcessProxy` |
 | `attendance` | `ketangpai_client` | `KetangpaiClient` |
 | `course_selection` | `course_selection` | `CourseSelectionAssistant` |
 | `course_selection` | `auto_selection` | `AutoSelectionService` |
@@ -1207,6 +1208,35 @@ if classroom is not None:
 ```
 
 但是不要把这种可选探测代替 `requires` 用于核心功能依赖。
+
+### 内置重型插件的 Worker 迁移
+
+`transcription`、`ocr`、`ai_summary` 现在采用“进程内薄壳 + 独立 Worker”模式：
+
+```text
+PluginSpec / UI / routes（主进程）
+              │
+              ▼
+     *ProcessProxy service
+              │
+       Service Invoke IPC
+              │
+              ▼
+faster-whisper / RapidOCR / AIClient（子进程）
+```
+
+这样保留了原有页面、设置面板、`processing` 编排和 service key，同时把模型、ONNX Runtime、ASR 推理以及 AI 网络调用移出主 Python 进程。关闭对应插件或 Runtime 后，Worker 进程会退出并释放其模型/原生库资源。
+
+这三个 proxy 为兼容现有内置编排保留了原 service 的主要调用形状，但**具体 proxy Python 类型不是新的稳定第三方插件 API**。新的进程隔离第三方插件应优先使用前文的 Plugin RPC，而不是直接取得 `*_process_host`。
+
+Service Invoke 会桥接现有 `TaskProgressReporter` 的：
+
+- 总进度与 message；
+- detail progress；
+- task log；
+- 协作式取消检查。
+
+因此迁移到 Worker 后，现有任务中心的进度、日志和取消语义保持不变。
 
 ---
 
