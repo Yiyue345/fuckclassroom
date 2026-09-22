@@ -426,5 +426,46 @@ def build_plugin():
             self.assertFalse(plugin_root.exists())
 
 
+    def test_process_isolated_plugin_is_not_imported_in_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "isolated_demo"
+            plugin_root.mkdir(parents=True)
+            marker = plugin_root / "imported.txt"
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "isolated_demo",
+                        "name": "Isolated Demo",
+                        "api_version": PLUGIN_API_VERSION,
+                        "execution": "process",
+                        "route_prefix": "/plugins-runtime/isolated_demo",
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from pathlib import Path\n"
+                "Path(__file__).with_name('imported.txt').write_text('child', encoding='utf-8')\n"
+                "def handle_request(request, context):\n"
+                "    return {'ok': True}\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+            descriptor = manager.descriptor_map()["isolated_demo"]
+
+            spec = manager.load_spec(descriptor)
+
+            self.assertEqual(spec.id, "isolated_demo")
+            self.assertEqual(descriptor.execution, "process")
+            self.assertEqual(descriptor.source_label, "外部 · 独立进程")
+            self.assertFalse(marker.exists())
+            self.assertIsNotNone(spec.route_factory)
+            self.assertIsNotNone(spec.startup)
+            self.assertIsNotNone(spec.shutdown)
+
+
 if __name__ == "__main__":
     unittest.main()

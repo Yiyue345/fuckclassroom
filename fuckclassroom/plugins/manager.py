@@ -70,10 +70,14 @@ class PluginDescriptor:
     python_requirements: tuple[DependencySpec, ...] = ()
     api_version: int = PLUGIN_API_VERSION
     app_requires: str = ""
+    execution: str = "in_process"
+    route_prefix: str = ""
 
     @property
     def source_label(self) -> str:
-        return "内置" if self.builtin else "外部"
+        if self.builtin:
+            return "内置"
+        return "外部 · 独立进程" if self.execution == "process" else "外部"
 
 
 _PLAYWRIGHT = DependencySpec(
@@ -316,6 +320,10 @@ class PluginManager:
             raise PluginManagerError(
                 f"插件 {descriptor.name} 不兼容：{compatibility['message']}"
             )
+        if not descriptor.builtin and descriptor.execution == "process":
+            from .process_runtime import build_process_plugin_spec
+
+            return build_process_plugin_spec(descriptor)
         if descriptor.builtin:
             module = importlib.import_module(descriptor.module)
         else:
@@ -595,6 +603,9 @@ class PluginManager:
                     "dependents": dependents,
                     "builtin": item.builtin,
                     "source_label": item.source_label,
+                    "execution": item.execution,
+                    "isolated": item.execution == "process",
+                    "route_prefix": item.route_prefix,
                     "current_enabled": item.id in current,
                     "desired_enabled": item.id in desired,
                     "restart_required": (item.id in current) != (item.id in desired),
@@ -754,6 +765,27 @@ class PluginManager:
         python_requirements = self._parse_external_requirements(
             payload.get("python_requires", [])
         )
+
+        execution = str(payload.get("execution") or "in_process").strip().lower()
+        if execution not in {"in_process", "process"}:
+            raise PluginManagerError("plugin.json 的 execution 只支持 in_process 或 process")
+        route_prefix = str(payload.get("route_prefix") or "").strip()
+        if execution == "process":
+            route_prefix = route_prefix or f"/plugins-runtime/{plugin_id}"
+            if (
+                not route_prefix.startswith("/plugins-runtime/")
+                or "{" in route_prefix
+                or "}" in route_prefix
+                or "//" in route_prefix
+                or ".." in Path(route_prefix).parts
+            ):
+                raise PluginManagerError(
+                    "进程隔离插件 route_prefix 必须位于 /plugins-runtime/ 下且不能包含动态路径"
+                )
+            route_prefix = route_prefix.rstrip("/")
+        elif route_prefix:
+            raise PluginManagerError("route_prefix 仅适用于 execution=process 的插件")
+
         return PluginDescriptor(
             id=plugin_id,
             name=name,
@@ -767,6 +799,8 @@ class PluginManager:
             python_requirements=python_requirements,
             api_version=api_version,
             app_requires=app_requires,
+            execution=execution,
+            route_prefix=route_prefix,
         )
 
     @staticmethod

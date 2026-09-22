@@ -157,6 +157,59 @@ from fuckclassroom.core.plugins import (
 
 外部插件不能在 `python_requires` 中使用 URL、本地路径或 pip 参数。
 
+### 可选：独立进程执行
+
+外部插件可以选择第一版进程隔离模式：
+
+```json
+{
+  "id": "isolated_demo",
+  "name": "Isolated Demo",
+  "api_version": 1,
+  "execution": "process",
+  "route_prefix": "/plugins-runtime/isolated_demo",
+  "requires": [],
+  "entry": "plugin.py"
+}
+```
+
+此时主进程**不会 import 插件的 `plugin.py`**。FuckClassroom 只根据 `plugin.json` 创建代理 PluginSpec，插件入口由独立 Python 子进程加载。
+
+进程隔离 v1 的入口不使用 `build_plugin()`，而是提供：
+
+```python
+from fuckclassroom.plugins.process_api import json_response
+
+
+def startup(context):
+    ...
+
+
+def handle_request(request, context):
+    return json_response({"message": "hello"})
+
+
+def shutdown(context):
+    ...
+```
+
+请求统一代理到 `route_prefix` 下。例如浏览器访问：
+
+```text
+/plugins-runtime/isolated_demo/hello?x=1
+```
+
+子进程的 `request.path` 为 `/hello`。
+
+当前限制：
+
+- 只支持外部插件；内置插件仍使用进程内 PluginSpec。
+- 不共享主进程 `ServiceContainer`，因此不能直接 `services.get(...)`。
+- UI 面板、导航、模板注入等仍需后续增加“可序列化插件声明”才能安全跨进程注册。
+- IPC 当前用于普通 HTTP/API 请求，不适合超大视频文件流式传输。
+- 这是**故障隔离**，不是权限 sandbox；插件进程仍以当前用户权限访问文件、网络和系统资源。
+- 插件进程异常退出时，主应用保持运行，对应代理请求返回 502。
+
 ---
 
 ## 4. `build_plugin() -> PluginSpec`
@@ -1344,7 +1397,7 @@ async def shutdown(context: PluginContext) -> None:
 - `plugin.json.requires == PluginSpec.requires`
 - `plugin.json.api_version == PluginSpec.api_version == PLUGIN_API_VERSION`
 - `app_requires` 覆盖你真正测试过的 FuckClassroom 版本
-- 重型依赖没有在 `plugin.py` 顶层 import
+- 进程内插件的重型依赖没有在 `plugin.py` 顶层 import
 - 所需 Python 包已经写入 `python_requires`
 - service key 使用插件命名空间，避免碰撞
 - 使用其他插件 service 时声明了 `requires`
@@ -1356,6 +1409,7 @@ async def shutdown(context: PluginContext) -> None:
 - worker 定期检查 `progress.raise_if_cancelled()`
 - shutdown 能安全重复执行且不会因为单个资源关闭失败而卡死
 - 插件禁用时不会留下 import 阶段启动的线程、进程或全局副作用
+- 若插件使用 `execution: "process"`，确认所有公开 HTTP 路径都位于声明的 `route_prefix` 下
 
 ---
 
