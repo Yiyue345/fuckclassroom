@@ -1,8 +1,8 @@
 # 插件 API v1 开发手册
 
-本文面向 FuckClassroom 第三方插件作者，说明插件在 **Plugin API v1** 中可以使用的接口、运行顺序、服务容器、路由、模板、后台任务和兼容性约束。
+本文面向 FuckClassroom 第三方插件作者，说明插件在 **Plugin API v1** 中可以使用的接口、运行顺序、服务容器、路由、模板、后台任务、进程隔离与 Plugin RPC API。
 
-> 当前 `PLUGIN_API_VERSION = 1`。本文描述的是稳定插件契约，不等同于“仓库里所有 Python 对象都可以长期依赖”。
+> 当前 `PLUGIN_API_VERSION = 1`，独立进程插件使用单独版本化的 `PLUGIN_RPC_API_VERSION = 1`。RPC 是新增的独立稳定契约，因此这次没有提升主 Plugin API 版本。
 
 ## 1. 最小插件长什么样
 
@@ -122,6 +122,10 @@ from fuckclassroom.core.plugins import (
 | `python_requires` | array | Python 运行依赖 |
 | `entry` | string | 插件入口，默认 `plugin.py` |
 | `order` | integer | 插件管理页的展示顺序，默认 `100` |
+| `execution` | string | `in_process`（默认）或 `process` |
+| `route_prefix` | string | 仅进程隔离插件使用，必须位于 `/plugins-runtime/` 下 |
+| `rpc_api_version` | integer | 仅进程隔离插件使用；当前为 `1` |
+| `rpc_permissions` | string[] | 仅进程隔离插件使用；显式声明允许调用的 RPC method |
 
 `python_requires` 可以直接写 requirement：
 
@@ -168,6 +172,15 @@ from fuckclassroom.core.plugins import (
   "api_version": 1,
   "execution": "process",
   "route_prefix": "/plugins-runtime/isolated_demo",
+  "rpc_api_version": 1,
+  "rpc_permissions": [
+    "core.settings.get",
+    "core.storage.get",
+    "core.storage.set",
+    "core.tasks.create",
+    "core.tasks.update",
+    "core.tasks.complete"
+  ],
   "requires": [],
   "entry": "plugin.py"
 }
@@ -182,10 +195,19 @@ from fuckclassroom.plugins.process_api import json_response
 
 
 def startup(context):
-    ...
+    # 同步 hook 可以直接使用 call()
+    theme = context.rpc.call("core.settings.get", {"key": "ocr_engine"})
 
 
 def handle_request(request, context):
+    task = context.rpc.call(
+        "core.tasks.create",
+        {"title": "独立进程插件任务"},
+    )
+    context.rpc.call(
+        "core.tasks.complete",
+        {"task_id": task["task_id"], "result_url": "/plugins"},
+    )
     return json_response({"message": "hello"})
 
 
@@ -201,10 +223,94 @@ def shutdown(context):
 
 子进程的 `request.path` 为 `/hello`。
 
+
+### Plugin RPC API v1
+
+进程隔离插件通过 `context.rpc` 访问主进程能力。RPC 与主 Plugin API 分开版本化：
+
+```python
+from fuckclassroom.plugins.process_api import PLUGIN_RPC_API_VERSION
+
+assert PLUGIN_RPC_API_VERSION == 1
+```
+
+同步代码使用：
+
+```python
+value = context.rpc.call("core.settings.get", {"key": "ocr_workers"})
+```
+
+异步代码可以避免阻塞子进程自己的 event loop：
+
+```python
+async def handle_request(request, context):
+    courses = await context.rpc.call_async(
+        "classroom.courses.list",
+        {"page": 1, "page_size": 50},
+    )
+    return {"courses": courses}
+```
+
+每个 method 必须同时满足：
+
+1. 当前 FuckClassroom Runtime 已注册该 method；
+2. 插件在 `plugin.json.rpc_permissions` 中**精确声明**该 method。
+
+v1 不支持 `*` 通配权限。未声明会返回 `permission_denied`。插件可捕获：
+
+```python
+from fuckclassroom.plugins.process_api import ProcessPluginRpcError
+
+try:
+    context.rpc.call("classroom.courses.list")
+except ProcessPluginRpcError as exc:
+    print(exc.code, str(exc))
+```
+
+#### Core RPC methods
+
+| Method | Params | 返回值 / 说明 |
+| --- | --- | --- |
+| `core.settings.get` | 可选 `key` | 读取公开设置；不返回 AI API key 等秘密 |
+| `core.plugins.enabled` | 无 | 当前 Runtime 已启用插件 ID 数组 |
+| `core.plugins.has` | `plugin_id` | 指定插件是否已启用 |
+| `core.storage.get` | `key`, 可选 `default` | 读取当前插件私有 JSON KV |
+| `core.storage.set` | `key`, `value` | 写入当前插件私有 JSON KV |
+| `core.storage.delete` | `key` | 删除 key |
+| `core.storage.list` | 无 | 列出当前插件自己的 key |
+| `core.tasks.create` | `title`, 可选 `auto_open_result` | 在主任务中心创建 RPC 任务 |
+| `core.tasks.update` | `task_id` + progress/message/detail 字段 | 更新进度 |
+| `core.tasks.log` | `task_id`, `message`, 可选 `level` | 写任务日志 |
+| `core.tasks.complete` | `task_id`, 可选 `result_url/message` | 标记成功 |
+| `core.tasks.fail` | `task_id`, `error` | 标记失败 |
+| `core.tasks.cancelled` | `task_id` | 插件确认已响应取消并标记 cancelled |
+| `core.tasks.status` | `task_id` | 读取本插件创建的任务 |
+| `core.tasks.cancel_requested` | `task_id` | 用户是否请求取消 |
+
+RPC 任务有所有权隔离：插件 A 不能读取、完成或修改插件 B 通过 RPC 创建的任务。插件进程停止时，仍处于 `running` 的 RPC 任务会自动标记失败。
+
+私有 storage 位于 FuckClassroom data 目录，由主进程持久化；每个插件独立命名空间，当前单插件上限为 512 KiB。值必须能被 JSON 序列化。
+
+#### Classroom RPC methods
+
+这些方法只在 `classroom` 插件启用时注册。依赖课程能力的隔离插件应同时在 `requires` 声明 `classroom`。
+
+| Method | Params | 返回值 / 说明 |
+| --- | --- | --- |
+| `classroom.session.status` | 无 | 课程录播登录状态；不返回 cookie |
+| `classroom.terms.list` | 可选 `force_refresh` | 学期 DTO 数组 |
+| `classroom.courses.list` | `page/page_size/term_id/force_refresh` | 课程 DTO 数组，`page_size` 最大 200 |
+| `classroom.course.get` | `course_id`, 可选 `force_refresh` | 课程与课次 DTO |
+
+Classroom DTO 是稳定的收敛视图，不返回内部 `raw`、cookie、资源 token，也不暴露资源鉴权 URL。需要下载/媒体流能力时应增加专门 RPC，而不是依赖主进程内部 Python 对象。
+
+RPC transport 仅绑定本机 `127.0.0.1`，每个插件 Host 使用随机 token。它提供调用隔离与权限白名单，但仍然不是 OS 权限 sandbox。
+
+
 当前限制：
 
 - 只支持外部插件；内置插件仍使用进程内 PluginSpec。
-- 不共享主进程 `ServiceContainer`，因此不能直接 `services.get(...)`。
+- 不共享主进程 `ServiceContainer`，因此不能直接 `services.get(...)`；需要主程序能力时使用下述 Plugin RPC API。
 - UI 面板、导航、模板注入等仍需后续增加“可序列化插件声明”才能安全跨进程注册。
 - IPC 当前用于普通 HTTP/API 请求，不适合超大视频文件流式传输。
 - 这是**故障隔离**，不是权限 sandbox；插件进程仍以当前用户权限访问文件、网络和系统资源。
@@ -1106,7 +1212,7 @@ if classroom is not None:
 
 ## 19. 兼容性规则
 
-Plugin API v1 使用两层兼容检查。
+Plugin API v1 使用主 Plugin API、应用版本和（进程插件）Plugin RPC API 三层兼容检查。
 
 ### API 版本
 
@@ -1128,6 +1234,18 @@ PluginSpec(
 ```
 
 两者必须一致，并且必须等于 runtime 当前的 `PLUGIN_API_VERSION`。
+
+### Plugin RPC API 版本
+
+仅 `execution: "process"` 插件检查：
+
+```json
+{
+  "rpc_api_version": 1
+}
+```
+
+它必须等于当前 `PLUGIN_RPC_API_VERSION`。RPC API 不兼容时插件不会启动，也不会 import 第三方入口。
 
 ### FuckClassroom 应用版本
 
@@ -1410,6 +1528,9 @@ async def shutdown(context: PluginContext) -> None:
 - shutdown 能安全重复执行且不会因为单个资源关闭失败而卡死
 - 插件禁用时不会留下 import 阶段启动的线程、进程或全局副作用
 - 若插件使用 `execution: "process"`，确认所有公开 HTTP 路径都位于声明的 `route_prefix` 下
+- 进程插件的 `rpc_api_version` 与当前 Plugin RPC API 一致
+- `rpc_permissions` 只声明插件实际需要的方法，不使用未授权主进程能力
+- RPC 长任务使用 `core.tasks.*` 汇报进度并轮询 `core.tasks.cancel_requested`
 
 ---
 
@@ -1422,7 +1543,8 @@ Plugin API v1 目前有几个明确限制：
 3. Navigation API 只能使用 core SVG sprite 中已有图标。
 4. 默认启动器支持“整应用 Runtime 热重载”：启用/停用插件后会在同一 Python 进程内构造新 FastAPI/PluginRuntime 并切换；这不等同于安全卸载单个 Python 模块。
 5. 内置功能插件 service 的具体 Python 类型尚未纳入与 core API 同级的稳定性保证。
-6. 外部插件安装后会执行 Python 代码，目前没有进程级 sandbox。
+6. 进程隔离插件已有 Plugin RPC v1，但 UI 声明、文件流、WebSocket/SSE 尚未跨进程标准化。
+7. 进程隔离是故障隔离和 RPC 权限白名单，不是 OS 权限 sandbox；子进程仍具有当前用户的系统权限。
 
 这些限制如果在未来版本中通过新的稳定接口解决，会同步更新 Plugin API 版本和本文档。
 

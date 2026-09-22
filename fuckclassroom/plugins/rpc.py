@@ -493,7 +493,6 @@ def _lesson_dto(lesson: Any) -> dict[str, object]:
             {
                 "kind": resource.kind,
                 "title": resource.title,
-                "url": resource.url,
                 "file_type": resource.file_type,
                 "status": resource.status,
                 "is_downloadable": bool(resource.is_downloadable),

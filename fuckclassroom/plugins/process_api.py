@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from .rpc import PLUGIN_RPC_API_VERSION
+
 
 _RPC_MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 
@@ -124,6 +126,7 @@ def json_response(
 
 
 __all__ = [
+    "PLUGIN_RPC_API_VERSION",
     "ProcessPluginContext",
     "ProcessPluginRequest",
     "ProcessPluginResponse",

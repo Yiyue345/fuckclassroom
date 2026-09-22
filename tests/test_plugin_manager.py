@@ -10,6 +10,7 @@ from fuckclassroom.core.config import AppConfig
 from fuckclassroom.core.plugins import PLUGIN_API_VERSION
 from fuckclassroom.plugins import build_plugin_registry
 from fuckclassroom.plugins.manager import PluginManager, PluginManagerError
+from fuckclassroom.plugins.rpc import PLUGIN_RPC_API_VERSION
 from fuckclassroom.web import create_app
 
 
@@ -493,6 +494,105 @@ def build_plugin():
             self.assertNotIn("ocr", payload["desired_enabled"])
             self.assertTrue(payload["reload_scheduled"])
             self.assertEqual(reload_calls, [True])
+
+
+    def test_process_plugin_rpc_manifest_is_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "rpc_demo"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "rpc_demo",
+                        "name": "RPC Demo",
+                        "execution": "process",
+                        "rpc_api_version": PLUGIN_RPC_API_VERSION,
+                        "rpc_permissions": [
+                            "core.settings.get",
+                            "core.storage.get",
+                        ],
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "def handle_request(request, context):\n"
+                "    return {'ok': True}\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+            descriptor = manager.descriptor_map()["rpc_demo"]
+
+            self.assertEqual(descriptor.rpc_api_version, PLUGIN_RPC_API_VERSION)
+            self.assertEqual(
+                descriptor.rpc_permissions,
+                ("core.settings.get", "core.storage.get"),
+            )
+            self.assertTrue(manager.compatibility_status(descriptor)["compatible"])
+
+    def test_future_process_plugin_rpc_api_is_incompatible(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "future_rpc"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "future_rpc",
+                        "name": "Future RPC",
+                        "execution": "process",
+                        "rpc_api_version": PLUGIN_RPC_API_VERSION + 1,
+                        "rpc_permissions": [],
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "def handle_request(request, context):\n"
+                "    return {'ok': True}\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+            descriptor = manager.descriptor_map()["future_rpc"]
+            compatibility = manager.compatibility_status(descriptor)
+
+            self.assertFalse(compatibility["compatible"])
+            self.assertIn("Plugin RPC API", compatibility["message"])
+            with self.assertRaisesRegex(PluginManagerError, "不兼容"):
+                manager.enable("future_rpc")
+
+    def test_rpc_fields_are_rejected_for_in_process_plugins(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "bad_rpc"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "bad_rpc",
+                        "name": "Bad RPC",
+                        "rpc_permissions": ["core.settings.get"],
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='bad_rpc', name='Bad RPC')\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+
+            with self.assertRaisesRegex(PluginManagerError, "仅适用于 execution=process"):
+                manager.descriptor_map()
 
 
 if __name__ == "__main__":
