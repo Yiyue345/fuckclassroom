@@ -165,6 +165,7 @@ class PluginCompositionTests(unittest.TestCase):
             )
             services = app.state.plugin_runtime.services
             hosts = [
+                services.get("classroom_process_host"),
                 services.get("ocr_process_host"),
                 services.get("transcription_process_host"),
                 services.get("ai_summary_process_host"),
@@ -176,6 +177,10 @@ class PluginCompositionTests(unittest.TestCase):
                     self.assertGreater(host.pid, 0)
                     self.assertNotEqual(host.pid, os.getpid())
 
+                self.assertEqual(
+                    type(services.get("classroom_client")).__name__,
+                    "ClassroomClientProcessProxy",
+                )
                 self.assertEqual(
                     type(services.get("ocr_service")).__name__,
                     "OcrProcessProxy",
@@ -191,6 +196,36 @@ class PluginCompositionTests(unittest.TestCase):
 
             for host in hosts:
                 self.assertFalse(host.running)
+
+    def test_stateful_selection_keeps_session_state_main_and_runs_business_loop_in_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(
+                AppConfig(data_dir=Path(directory)),
+                enabled_plugins={"course_selection"},
+            )
+            services = app.state.plugin_runtime.services
+            host = services.get("course_selection_process_host")
+
+            self.assertEqual(
+                type(services.get("course_selection")).__name__,
+                "CourseSelectionProcessFacade",
+            )
+            self.assertEqual(
+                type(services.get("course_selection_local")).__name__,
+                "CourseSelectionAssistant",
+            )
+            self.assertEqual(
+                type(services.get("auto_selection")).__name__,
+                "AutoSelectionProcessProxy",
+            )
+
+            with TestClient(app):
+                self.assertTrue(host.running)
+                self.assertGreater(host.pid, 0)
+                self.assertNotEqual(host.pid, os.getpid())
+                self.assertEqual(services.get("auto_selection").list_jobs(), [])
+
+            self.assertFalse(host.running)
 
     def test_attendance_plugin_owns_qr_and_ketangpai_routes(self) -> None:
         app = create_app(enabled_plugins={"attendance"})
