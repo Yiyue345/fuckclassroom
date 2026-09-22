@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .atomic import atomic_write_text
+
 
 @dataclass(frozen=True)
 class CacheInfo:
@@ -35,9 +37,9 @@ class JsonCache:
             "updated_at": datetime.now().isoformat(timespec="seconds"),
             "data": data,
         }
-        self._path(name).write_text(
+        atomic_write_text(
+            self._path(name),
             json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
     def clear(self) -> None:

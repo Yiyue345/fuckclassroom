@@ -15,6 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
+from ..core.atomic import atomic_write_text
 from ..core.cache import JsonCache
 from ..core.config import AppConfig
 
@@ -397,14 +398,11 @@ class ClassroomClient:
                 pass
 
             value = str(uuid.uuid4())
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_name(path.name + ".tmp")
-            temporary.write_text(
+            atomic_write_text(
+                path,
                 json.dumps({"schema": 1, "device_id": value}, ensure_ascii=False, indent=2)
                 + "\n",
-                encoding="utf-8",
             )
-            temporary.replace(path)
             return value
 
     def answer_qr_rollcall(
@@ -523,14 +521,10 @@ class ClassroomClient:
 
                 session_id = _changke_session_from_state(updated_state)
                 if session_id:
-                    temporary = self.config.storage_state_path.with_name(
-                        self.config.storage_state_path.name + ".tmp"
-                    )
-                    temporary.write_text(
+                    atomic_write_text(
+                        self.config.storage_state_path,
                         json.dumps(updated_state, ensure_ascii=False, indent=2) + "\n",
-                        encoding="utf-8",
                     )
-                    temporary.replace(self.config.storage_state_path)
                     return session_id
                 if recovery_attempt == 0 and self._recover_guet_session():
                     continue
@@ -800,7 +794,6 @@ class ClassroomClient:
         status: str,
     ) -> None:
         meta_path = self._ppt_cache_meta_path(path)
-        meta_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "schema": _PPT_CACHE_META_SCHEMA,
             "course_id": str(course_id),
@@ -808,12 +801,10 @@ class ClassroomClient:
             "provisional": bool(provisional),
             "ppt_status": status,
         }
-        temporary = meta_path.with_name(meta_path.name + ".tmp")
-        temporary.write_text(
+        atomic_write_text(
+            meta_path,
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
         )
-        temporary.replace(meta_path)
 
     def _get_json(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         url = self._absolute_url(path, params)

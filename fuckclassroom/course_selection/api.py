@@ -22,6 +22,7 @@ from ..auth.cas import (
     submit_saved_credentials,
 )
 from ..auth.credentials import CredentialStoreError, SelectionCredentialStore, SelectionCredentials
+from ..core.atomic import atomic_write_text
 from ..core.config import AppConfig
 from .proxy import Hy2ProxyError, Hy2ProxyManager
 from .helpers import *
@@ -492,12 +493,13 @@ class SelectionApiMixin:
                 }
             )
         state["cookies"] = rows
-        temporary = self.storage_state_path.with_suffix(".tmp")
         try:
-            temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-            temporary.replace(self.storage_state_path)
+            atomic_write_text(
+                self.storage_state_path,
+                json.dumps(state, ensure_ascii=False, indent=2),
+            )
         except OSError:
-            temporary.unlink(missing_ok=True)
+            pass
 
     def refresh_selection_info_for_web(
         self,

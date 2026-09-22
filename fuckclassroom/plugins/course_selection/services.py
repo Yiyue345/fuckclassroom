@@ -7,6 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from ...core.atomic import atomic_write_text
 from ...core.plugins import PluginContext
 from ...course_selection import (
     CourseSelectionApiError,
@@ -243,13 +244,10 @@ class CourseSelectionProcessFacade:
                 cache[str(lesson_id)] = dict(course)
             if len(cache) > 2_000:
                 cache = dict(list(cache.items())[-1_500:])
-            self._catalog_cache_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self._catalog_cache_path.with_suffix(".tmp")
-            temporary.write_text(
+            atomic_write_text(
+                self._catalog_cache_path,
                 json.dumps({"courses": cache}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
-            temporary.replace(self._catalog_cache_path)
 
     def run_catalog_lesson_action_for_web(
         self,

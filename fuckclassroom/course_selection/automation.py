@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
+from ..core.atomic import atomic_write_text
 from .assistant import CourseSelectionAssistant
 from .models import SelectionBatch
 
@@ -612,13 +613,14 @@ class AutoSelectionService:
         return result
 
     def _save_jobs(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps({"jobs": [job.to_dict() for job in self._jobs.values()]}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        atomic_write_text(
+            self.path,
+            json.dumps(
+                {"jobs": [job.to_dict() for job in self._jobs.values()]},
+                ensure_ascii=False,
+                indent=2,
+            ),
         )
-        temporary.replace(self.path)
 
     def _now(self) -> datetime:
         value = self._now_provider()
