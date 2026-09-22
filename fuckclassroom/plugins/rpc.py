@@ -221,6 +221,7 @@ class PluginRpcBuiltins:
 
         if self.services.has("auth_service"):
             registry.register("classroom.session.status", self.classroom_session_status)
+            registry.register("classroom.session.ensure", self.classroom_session_ensure)
         if self.services.has("classroom_client"):
             registry.register("classroom.terms.list", self.classroom_terms_list)
             registry.register("classroom.courses.list", self.classroom_courses_list)
@@ -366,6 +367,13 @@ class PluginRpcBuiltins:
         self, _context: PluginRpcCallContext, _params: Mapping[str, object]
     ) -> object:
         return asdict(self.services.get("auth_service").get_session_status())
+
+    def classroom_session_ensure(
+        self, _context: PluginRpcCallContext, _params: Mapping[str, object]
+    ) -> object:
+        return asdict(
+            self.services.get("auth_service").verify_saved_session(auto_relogin=True)
+        )
 
     def classroom_terms_list(
         self, _context: PluginRpcCallContext, params: Mapping[str, object]
