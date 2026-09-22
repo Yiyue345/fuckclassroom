@@ -101,7 +101,11 @@
 
     <div class="plugin-manager-grid">
       {% for plugin in plugins %}
-        <article class="surface account-session-panel plugin-manager-card">
+        <article class="surface account-session-panel plugin-manager-card"
+          data-plugin-card="{{ plugin.id }}"
+          data-plugin-locked="{{ 'true' if plugin.locked else 'false' }}"
+          data-plugin-compatible="{{ 'true' if plugin.compatible else 'false' }}"
+          data-plugin-mutable="{{ 'true' if plugin_config_mutable else 'false' }}">
           <header class="account-session-header plugin-manager-card-header">
             <div class="account-session-name">
               <span class="workspace-icon">
@@ -118,7 +122,7 @@
             <div class="plugin-manager-controls">
               <span class="status {{ 'blue' if plugin.builtin else 'gray' }}">{{ plugin.source_label }}</span>
 
-              <form class="plugin-toggle-form" method="post" action="/plugins/{{ plugin.id }}/{{ 'disable' if plugin.desired_enabled else 'enable' }}">
+              <form class="plugin-toggle-form" method="post" action="/plugins/{{ plugin.id }}/{{ 'disable' if plugin.desired_enabled else 'enable' }}" data-plugin-id="{{ plugin.id }}">
                 <label class="toggle-control plugin-toggle-control"
                   title="{% if plugin.locked %}基础插件始终启用{% elif not plugin_config_mutable %}当前插件配置为只读{% elif not plugin.compatible and not plugin.desired_enabled %}插件不兼容，无法启用{% elif hot_reload_available %}切换后自动应用{% else %}切换后重启应用生效{% endif %}">
                   <input
@@ -132,9 +136,9 @@
                 </label>
               </form>
 
-              {% if plugin.restart_required %}
-                <span class="status amber">{{ "待自动应用" if hot_reload_available else "重启后生效" }}</span>
-              {% endif %}
+              <span class="status amber{% if not plugin.restart_required %} hidden{% endif %}" data-plugin-runtime-state>
+                {{ "待自动应用" if hot_reload_available else "重启后生效" }}
+              </span>
             </div>
           </header>
 
@@ -257,6 +261,118 @@
 {% block scripts %}
 <script>
 (() => {
+  const toggleForms = Array.from(document.querySelectorAll('.plugin-toggle-form[data-plugin-id]'));
+
+  function cardFor(id) {
+    return document.querySelector(`[data-plugin-card="${CSS.escape(id)}"]`);
+  }
+
+  function setCardState(id, desiredEnabled, currentEnabled, message = '') {
+    const card = cardFor(id);
+    if (!card) return;
+    const form = card.querySelector('.plugin-toggle-form');
+    const input = form && form.querySelector('input[type="checkbox"]');
+    const badge = card.querySelector('[data-plugin-runtime-state]');
+    if (!form || !input || !badge) return;
+
+    const locked = card.dataset.pluginLocked === 'true';
+    const mutable = card.dataset.pluginMutable === 'true';
+    const compatible = card.dataset.pluginCompatible === 'true';
+
+    input.checked = desiredEnabled;
+    form.action = `/plugins/${encodeURIComponent(id)}/${desiredEnabled ? 'disable' : 'enable'}`;
+    input.setAttribute('aria-label', `${desiredEnabled ? '停用' : '启用'} ${card.querySelector('h2')?.textContent || id}`);
+
+    const pending = desiredEnabled !== currentEnabled;
+    card.classList.toggle('is-applying', pending);
+    form.classList.toggle('is-busy', pending);
+    badge.classList.toggle('hidden', !pending && !message);
+    badge.className = `status ${message ? 'red' : 'amber'}${(!pending && !message) ? ' hidden' : ''}`;
+    badge.textContent = message || (pending ? '应用中…' : '');
+
+    input.disabled = locked || !mutable || (!desiredEnabled && !compatible) || pending;
+  }
+
+  function syncCards(status) {
+    const desired = new Set(status.desired_enabled || []);
+    const current = new Set(status.current_enabled || []);
+    document.querySelectorAll('[data-plugin-card]').forEach((card) => {
+      const id = card.dataset.pluginCard;
+      setCardState(id, desired.has(id), current.has(id), status.last_error || '');
+    });
+  }
+
+  async function waitForRuntime() {
+    const response = await fetch('/api/plugins/runtime-status', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+    if (!response.ok) throw new Error(`读取插件运行状态失败（${response.status}）`);
+    const status = await response.json();
+    syncCards(status);
+    return status;
+  }
+
+  toggleForms.forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const id = form.dataset.pluginId;
+      const input = form.querySelector('input[type="checkbox"]');
+      if (!id || !input || input.disabled) return;
+
+      const requestedEnabled = input.checked;
+      const card = cardFor(id);
+      const badge = card && card.querySelector('[data-plugin-runtime-state]');
+      input.disabled = true;
+      card?.classList.add('is-applying');
+      form.classList.add('is-busy');
+      if (badge) {
+        badge.className = 'status amber';
+        badge.textContent = '应用中…';
+      }
+
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || '插件状态修改失败');
+
+        const desired = new Set(payload.desired_enabled || []);
+        document.querySelectorAll('[data-plugin-card]').forEach((item) => {
+          const pluginId = item.dataset.pluginCard;
+          const currentInput = item.querySelector('.plugin-toggle-form input[type="checkbox"]');
+          if (currentInput && desired.has(pluginId) !== currentInput.checked) {
+            currentInput.checked = desired.has(pluginId);
+          }
+        });
+
+        if (payload.reload_scheduled) {
+          const status = await waitForRuntime();
+          if (status.last_error) throw new Error(status.last_error);
+        } else {
+          const status = await waitForRuntime();
+          syncCards(status);
+        }
+      } catch (error) {
+        input.checked = !requestedEnabled;
+        const message = error instanceof Error ? error.message : String(error);
+        if (badge) {
+          badge.className = 'status red';
+          badge.textContent = '应用失败';
+          badge.title = message;
+        }
+        card?.classList.remove('is-applying');
+        form.classList.remove('is-busy');
+        input.disabled = false;
+        window.setTimeout(() => {
+          if (badge) badge.title = '';
+        }, 4000);
+      }
+    });
+  });
+
   const input = document.getElementById('plugin-zip-file');
   const button = document.getElementById('plugin-zip-button');
   const status = document.getElementById('plugin-upload-status');

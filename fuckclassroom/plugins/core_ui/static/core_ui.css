@@ -72,6 +72,8 @@
 .plugin-toggle-form { display: inline-flex; }
 .plugin-toggle-control { min-height: 28px; }
 .plugin-toggle-control input:disabled + .toggle-track { opacity: .55; }
+.plugin-manager-card.is-applying { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); }
+.plugin-toggle-form.is-busy .toggle-track { cursor: progress; }
 .plugin-manager-card-body { display: flex; flex: 1 1 auto; flex-direction: column; padding-top: 10px; }
 .plugin-manager-description { display: -webkit-box; overflow: hidden; min-height: 0; margin: 0; color: var(--text-soft); font-size: var(--font-xs); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .plugin-manager-inline-notice { margin: 9px 0 0; padding: 8px 10px; font-size: var(--font-xs); }

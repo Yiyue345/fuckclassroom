@@ -110,42 +110,77 @@ def build_router(context: PluginContext) -> APIRouter:
             },
         )
 
-    @router.post("/plugins/{plugin_id}/enable")
-    async def enable_plugin(plugin_id: str) -> RedirectResponse:
-        try:
-            plugin_manager.enable(plugin_id)
-        except PluginManagerError as exc:
-            return RedirectResponse(
-                f"/plugins?error={quote(str(exc))}",
-                status_code=303,
-            )
-        if await request_plugin_reload():
-            return RedirectResponse(
-                f"/plugins?notice={quote('已保存启用配置并自动应用，无需手动重启')}",
-                status_code=303,
+    def plugin_action_response(
+        request: Request,
+        *,
+        plugin_id: str,
+        action: str,
+        desired: set[str],
+        reload_scheduled: bool,
+    ) -> Response:
+        message = (
+            "已保存启用配置并自动应用"
+            if action == "enable" and reload_scheduled
+            else "已保存停用配置并自动应用；依赖插件也已同步处理"
+            if action == "disable" and reload_scheduled
+            else "已保存启用配置，重启应用后生效"
+            if action == "enable"
+            else "已保存停用配置；依赖该插件的功能也会在重启后停用"
+        )
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "plugin_id": plugin_id,
+                    "action": action,
+                    "desired_enabled": sorted(desired),
+                    "reload_scheduled": reload_scheduled,
+                    "message": message,
+                }
             )
         return RedirectResponse(
-            f"/plugins?restart=1&notice={quote('已保存启用配置，重启应用后生效')}",
+            f"/plugins?{'notice' if reload_scheduled else 'restart=1&notice'}={quote(message)}",
             status_code=303,
         )
 
-    @router.post("/plugins/{plugin_id}/disable")
-    async def disable_plugin(plugin_id: str) -> RedirectResponse:
+    @router.post("/plugins/{plugin_id}/enable")
+    async def enable_plugin(plugin_id: str, request: Request) -> Response:
         try:
-            plugin_manager.disable(plugin_id)
+            desired = plugin_manager.enable(plugin_id)
         except PluginManagerError as exc:
+            if "application/json" in request.headers.get("accept", ""):
+                return JSONResponse({"detail": str(exc)}, status_code=409)
             return RedirectResponse(
                 f"/plugins?error={quote(str(exc))}",
                 status_code=303,
             )
-        if await request_plugin_reload():
+        reload_scheduled = await request_plugin_reload()
+        return plugin_action_response(
+            request,
+            plugin_id=plugin_id,
+            action="enable",
+            desired=desired,
+            reload_scheduled=reload_scheduled,
+        )
+
+    @router.post("/plugins/{plugin_id}/disable")
+    async def disable_plugin(plugin_id: str, request: Request) -> Response:
+        try:
+            desired = plugin_manager.disable(plugin_id)
+        except PluginManagerError as exc:
+            if "application/json" in request.headers.get("accept", ""):
+                return JSONResponse({"detail": str(exc)}, status_code=409)
             return RedirectResponse(
-                f"/plugins?notice={quote('已保存停用配置并自动应用；依赖插件也已同步处理')}",
+                f"/plugins?error={quote(str(exc))}",
                 status_code=303,
             )
-        return RedirectResponse(
-            f"/plugins?restart=1&notice={quote('已保存停用配置；依赖该插件的功能也会在重启后停用')}",
-            status_code=303,
+        reload_scheduled = await request_plugin_reload()
+        return plugin_action_response(
+            request,
+            plugin_id=plugin_id,
+            action="disable",
+            desired=desired,
+            reload_scheduled=reload_scheduled,
         )
 
     @router.get("/api/plugins/runtime-status")
