@@ -16,6 +16,9 @@
 | `ai_summary` | AI 课程总结 | ai_summary | 无 |
 | `attendance` | 畅课/课堂派二维码签到 | ketangpai/QR scanner | 启动时验证课堂派会话 |
 | `course_selection` | 本科选课、全校开课、定时选课、Hy2 | course_selection/auto_selection/hy2 | 启动时验证会话并启动自动选课；退出时停止后台服务 |
+| `lab_selection` | 实验课程、整组与时间段选课、候补 | lab_selection/lab_waitlist/academic_session | 共享教务会话；启动候补，退出时停止 |
+
+实验课插件的接口来源、验证范围与会话约定见 [`docs/lab-selection.md`](lab-selection.md)。
 
 ## 启用插件
 

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% set active_system = "lab_selection" %}
+{% set active_nav = "lab_selection" %}
+{% block title %}实验课选课 · 学业助手{% endblock %}
+{% block page_title %}实验课选课{% endblock %}
+{% block content %}
+<div class="lab-page">
+<div class="page-head">
+  <div><h1>实验课选课</h1><p>与本科选课共用教务登录会话，可独立启用。</p></div>
+  <form method="post" action="/lab-selection/login"><button class="btn primary" type="submit">登录本科教务</button></form>
+</div>
+<p>{{ session.message }}</p>
+<section class="card" id="lab-app">
+  <div class="head-actions">
+    <label for="lab-semester">学年学期</label>
+    <select id="lab-semester" aria-label="学年学期"><option value="">当前学期</option></select>
+    <button class="btn primary" id="lab-refresh" type="button">查询课程</button>
+  </div>
+  <p id="lab-message" role="status" aria-live="polite">点击查询课程，查看实验项目、分组与可选时间。</p>
+  <div id="lab-courses"></div>
+  <div class="head-actions" id="lab-pagination" hidden>
+    <button class="btn" id="lab-prev" type="button">上一页</button>
+    <span id="lab-page"></span>
+    <button class="btn" id="lab-next" type="button">下一页</button>
+  </div>
+  <section id="lab-subjects" aria-label="实验项目"></section>
+</section>
+<section class="card" aria-label="实验课候补">
+  <h2>实验课候补</h2>
+  <p>候补期间需保持应用运行。有空位后自动尝试选课；关闭应用后停止，重启后继续。提交结果不明时会暂停等待核对。</p>
+  <p id="lab-waitlist-message" role="status"></p>
+  <button class="btn" id="lab-waitlist-refresh" type="button">刷新候补任务</button>
+  <div id="lab-waitlist"></div>
+</section>
+<dialog id="lab-confirm" aria-labelledby="lab-confirm-title">
+  <h2 id="lab-confirm-title">确认实验选课</h2>
+  <p id="lab-confirm-description"></p>
+  <p id="lab-waitlist-options" hidden>
+    <label for="lab-waitlist-interval">检查间隔（秒）</label>
+    <input id="lab-waitlist-interval" type="number" min="15" max="3600" value="30">
+    <span>有空位后自动尝试，直到成功、结束或取消。</span>
+  </p>
+  <div class="head-actions">
+    <button class="btn" id="lab-confirm-cancel" type="button">取消</button>
+    <button class="btn primary" id="lab-confirm-submit" type="button">确认选课</button>
+  </div>
+</dialog>
+</div>
+{% endblock %}

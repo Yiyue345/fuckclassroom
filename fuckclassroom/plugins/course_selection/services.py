@@ -15,7 +15,6 @@ from ...course_selection import (
     SelectionBatch,
 )
 from ...course_selection.automation import AutoSelectionJob
-from ...course_selection.proxy import Hy2ProxyManager
 from ..process_runtime import ProcessPluginError, ProcessPluginHost
 from ..rpc import PLUGIN_RPC_API_VERSION
 
@@ -483,16 +482,11 @@ def _clean_worker_error(message: str) -> str:
 
 
 def setup_services(context: PluginContext) -> None:
+    from ...auth.academic import get_academic_session
+
     config = context.config
     services = context.services
-    hy2_proxy = Hy2ProxyManager(config)
-    local = CourseSelectionAssistant(
-        config,
-        hy2_proxy=hy2_proxy,
-        credential_store=services.get("credential_store"),
-        verification_broker=services.get("verification_broker"),
-        login_lock=services.get("login_lock"),
-    )
+    local = get_academic_session(context)
     host = ProcessPluginHost(
         plugin_id="course-selection-worker",
         root=Path(__file__).resolve().parent,
@@ -509,7 +503,6 @@ def setup_services(context: PluginContext) -> None:
     facade = CourseSelectionProcessFacade(local, host)
     auto_selection = AutoSelectionProcessProxy(host)
 
-    services.add("hy2_proxy", hy2_proxy)
     services.add("course_selection_process_host", host)
     services.add("course_selection_local", local)
     services.add("course_selection", facade)
