@@ -1,0 +1,7 @@
+-r core.txt
+-r classroom.txt
+-r processing.txt
+-r transcription.txt
+-r ocr.txt
+-r attendance.txt
+-r course_selection.txt

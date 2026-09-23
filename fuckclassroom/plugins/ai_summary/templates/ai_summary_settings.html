@@ -1,0 +1,7 @@
+{% import "ui/components.html" as ui %}
+{% call ui.section("ai", "AI 总结", "配置课程文本总结服务；密钥只保存在本机。") %}
+    {{ ui.field("ai_base_url", "服务地址", settings.ai_base_url) }}
+    {{ ui.field("ai_model", "总结模型", settings.ai_model) }}
+    <div class="field"><label for="ai_api_key">API Key</label><input class="input mono" id="ai_api_key" name="ai_api_key" type="password" autocomplete="off" placeholder="{% if settings.has_ai_api_key %}已保存，留空保持不变{% else %}未设置{% endif %}"></div>
+    {{ ui.checkbox("auto_summarize_after_extract", "文字提取完成后自动生成 AI 总结", settings.auto_summarize_after_extract) }}
+{% endcall %}

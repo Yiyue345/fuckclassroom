@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from .client import ClassroomClient, ClassroomClientError, Term
+from ..core.atomic import atomic_write_text
 
 
 SEMESTER_CACHE_TTL_SECONDS = 6 * 60 * 60
@@ -94,18 +95,15 @@ class SemesterSyncService:
         )
 
     def _save_cache(self, snapshot: SemesterSnapshot) -> None:
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "updated_at": snapshot.updated_at.isoformat(),
             "current_term_id": snapshot.current_term_id,
             "terms": [asdict(term) for term in snapshot.terms],
         }
-        temporary = self.cache_path.with_name(f"{self.cache_path.name}.tmp")
-        temporary.write_text(
+        atomic_write_text(
+            self.cache_path,
             json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
-        temporary.replace(self.cache_path)
 
 
 def _current_term_id(terms: tuple[Term, ...], now: datetime) -> str:

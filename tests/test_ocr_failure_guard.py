@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from fuckclassroom.classroom.extraction import ExtractionError, _run_ocr_jobs
+from fuckclassroom.plugins.processing.extraction import ExtractionError, _run_ocr_jobs
 
 
 class OcrFailureGuardTests(unittest.TestCase):

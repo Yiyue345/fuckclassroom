@@ -8,7 +8,7 @@ from pathlib import Path
 class ThemeTransitionTests(unittest.TestCase):
     def test_theme_changes_use_one_visible_color_transition_duration(self) -> None:
         script = Path("static/app.js").read_text(encoding="utf-8")
-        styles = Path("static/app.css").read_text(encoding="utf-8")
+        styles = Path("static/tokens.css").read_text(encoding="utf-8") + Path("static/app.css").read_text(encoding="utf-8")
         template = Path("templates/base.html").read_text(encoding="utf-8")
 
         self.assertNotIn('window.matchMedia("(prefers-reduced-motion: reduce)")', script)

@@ -11,8 +11,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from fuckclassroom.classroom import LivePptSlide
-from fuckclassroom.classroom.ketangpai import KetangpaiAuthenticationError
-from fuckclassroom.classroom.qr_scan import (
+from fuckclassroom.plugins.attendance.ketangpai import KetangpaiAuthenticationError
+from fuckclassroom.plugins.attendance.scanner import (
     QRScannerUnavailable,
     WxScanService,
     analyze_qr_payload,
@@ -20,7 +20,7 @@ from fuckclassroom.classroom.qr_scan import (
     parse_changke_sign_payload,
 )
 from fuckclassroom.core.config import AppConfig
-from fuckclassroom.web.qr_assistant import (
+from fuckclassroom.plugins.attendance.qr import (
     register_qr_assistant_routes,
     submit_changke_qr,
     submit_ketangpai_qr,
@@ -87,8 +87,8 @@ class QrAssistantTests(unittest.TestCase):
         self.assertEqual(match.raw, "hello world")
 
     def test_frontend_wires_live_lessons_to_qr_endpoint(self) -> None:
-        template = Path("templates/course_detail.html").read_text(encoding="utf-8")
-        script = Path("static/qr_assistant.js").read_text(encoding="utf-8")
+        template = Path("fuckclassroom/plugins/classroom/templates/classroom/course_detail.html").read_text(encoding="utf-8")
+        script = Path("fuckclassroom/plugins/attendance/static/qr_assistant.js").read_text(encoding="utf-8")
 
         self.assertIn('data-live-ppt-url="/api/courses/', template)
         self.assertIn("row.dataset.livePptUrl", script)
@@ -168,7 +168,7 @@ class QrAssistantTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             service = WxScanService(AppConfig(data_dir=Path(directory)))
             with patch(
-                "fuckclassroom.classroom.qr_scan.importlib.import_module",
+                "fuckclassroom.plugins.attendance.scanner.importlib.import_module",
                 side_effect=ImportError("wxscan is not installed"),
             ):
                 decoded = service.scan_image(png.tobytes())
@@ -265,7 +265,7 @@ class QrAssistantTests(unittest.TestCase):
                 scanner=WxScanService(AppConfig(data_dir=Path(directory))),
             )
             with patch(
-                "fuckclassroom.classroom.qr_scan.importlib.import_module",
+                "fuckclassroom.plugins.attendance.scanner.importlib.import_module",
                 side_effect=ImportError("wxscan is not installed"),
             ):
                 response = TestClient(app).post(

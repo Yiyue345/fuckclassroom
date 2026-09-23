@@ -10,7 +10,7 @@ import uvicorn
 
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.course_selection.hy2_prebuilt import Hy2PrebuiltError, install_prebuilt_runner
-from fuckclassroom.web import create_app
+from fuckclassroom.web import create_reloadable_app
 
 
 _config = AppConfig()
@@ -22,7 +22,7 @@ if _config.hy2_enabled:
         # pinned local Cargo build when a packaged runner is unavailable/invalid.
         print(f"Hy2 预编译组件不可用，将回退本地构建：{exc}", flush=True)
 
-app = create_app(_config)
+app = create_reloadable_app(_config)
 
 
 DEFAULT_PORT = 8765

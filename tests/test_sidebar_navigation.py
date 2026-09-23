@@ -5,39 +5,220 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
+from fuckclassroom.plugins import build_plugin_registry
+
 
 class SidebarNavigationTests(unittest.TestCase):
-    def test_all_product_areas_are_visible_without_a_workspace_menu(self) -> None:
+    def test_navigation_is_registered_by_plugins(self) -> None:
+        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
+        groups = {group.aria_label: group for group in registry.navigation_groups}
+
+        self.assertEqual(
+            set(groups),
+            {"课程录播导航", "本科选课导航", "通用导航"},
+        )
+        hrefs = {
+            item.href
+            for group in registry.navigation_groups
+            for item in group.items
+        }
+        self.assertEqual(
+            hrefs,
+            {
+                "/classroom",
+                "/courses",
+                "/tasks",
+                "/downloads",
+                "/selection/info",
+                "/selection/catalog",
+                "/selection/info/selected",
+                "/selection/auto",
+                "/selection/captures",
+                "/accounts",
+                "/plugins",
+                "/settings",
+            },
+        )
+
+        by_key = {group.key: group for group in registry.navigation_groups}
+        self.assertIn("/tasks", {item.href for item in by_key["common"].items})
+        self.assertNotIn("/tasks", {item.href for item in by_key["classroom"].items})
+
         template = Path("templates/base.html").read_text(encoding="utf-8")
+        self.assertIn("plugin_registry.navigation_groups", template)
+        self.assertNotIn('aria-label="课程录播导航"', template)
+        self.assertNotIn('aria-label="本科选课导航"', template)
 
-        self.assertNotIn("data-workspace-switcher", template)
-        for label in ("课程录播导航", "本科选课导航", "通用导航"):
-            self.assertIn(f'aria-label="{label}"', template)
-        for href in (
-            "/classroom",
-            "/courses",
-            "/tasks",
-            "/downloads",
-            "/selection/info",
-            "/selection/catalog",
-            "/selection/info/selected",
-            "/selection/auto",
-            "/selection/captures",
-            "/accounts",
-            "/settings",
-        ):
-            self.assertIn(f'href="{href}"', template)
+    def test_settings_panels_and_plugin_templates_are_registered(self) -> None:
+        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
+        panel_keys = [panel.key for panel in registry.settings_panels]
 
-    def test_settings_use_the_common_navigation_context(self) -> None:
-        settings = Path("templates/settings.html").read_text(encoding="utf-8")
+        self.assertEqual(
+            panel_keys,
+            [
+                "appearance",
+                "courses",
+                "processing",
+                "auto-selection",
+                "selection-network",
+                "network",
+                "transcription",
+                "ocr",
+                "ai",
+                "settings-actions",
+                "storage",
+            ],
+        )
+
+        settings = Path("fuckclassroom/plugins/core_ui/templates/core/settings.html").read_text(encoding="utf-8")
         base = Path("templates/base.html").read_text(encoding="utf-8")
-        environment = Environment(loader=FileSystemLoader("templates"))
+        environment = Environment(
+            loader=FileSystemLoader(
+                registry.template_directories(Path("templates"))
+            )
+        )
 
         environment.get_template("base.html")
-        environment.get_template("settings.html")
+        environment.get_template("core/settings.html")
+        environment.get_template("core/plugin_manager.html")
+        for panel in registry.settings_panels:
+            environment.get_template(panel.template)
+
         self.assertIn('{% set active_system = "common" %}', settings)
-        self.assertIn('active_system == "common"', base)
-        self.assertIn("通用", base)
+        self.assertIn("settings_panels", settings)
+        self.assertNotIn("plugin_registry.settings_panels", settings)
+
+        panels = {panel.key: panel for panel in registry.settings_panels}
+        self.assertIsNotNone(panels["courses"].context_factory)
+        self.assertIsNotNone(panels["selection-network"].context_factory)
+        self.assertIsNotNone(panels["network"].context_factory)
+        self.assertIsNotNone(panels["storage"].context_factory)
+        self.assertIn("plugin_registry.system_label(active_system)", base)
+        self.assertEqual(registry.system_label("selection"), "本科选课")
+
+    def test_account_panels_are_registered_by_plugins(self) -> None:
+        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
+        panels = {panel.key: panel for panel in registry.account_panels}
+
+        self.assertEqual(
+            list(panels),
+            ["classroom", "course_selection", "attendance"],
+        )
+        self.assertEqual(panels["classroom"].template, "classroom/account_panel.html")
+        self.assertEqual(panels["course_selection"].template, "selection/account_panel.html")
+        self.assertEqual(panels["attendance"].template, "attendance/account_panel.html")
+
+        environment = Environment(
+            loader=FileSystemLoader(registry.template_directories(Path("templates")))
+        )
+        for panel in registry.account_panels:
+            environment.get_template(panel.template)
+
+        classroom_only = build_plugin_registry({"classroom"})
+        self.assertEqual(
+            [panel.key for panel in classroom_only.account_panels],
+            ["classroom"],
+        )
+
+    def test_plugin_manager_reuses_existing_card_spacing(self) -> None:
+        template = Path(
+            "fuckclassroom/plugins/core_ui/templates/core/plugin_manager.html"
+        ).read_text(encoding="utf-8")
+        styles = Path("fuckclassroom/plugins/core_ui/static/core_ui.css").read_text(encoding="utf-8")
+        base = Path("templates/base.html").read_text(encoding="utf-8")
+
+        self.assertIn("account-session-panel plugin-manager-card", template)
+        self.assertIn("account-session-header plugin-manager-card-header", template)
+        self.assertIn("detail-grid plugin-manager-details", template)
+        self.assertIn('<details class="plugin-manager-dependencies">', template)
+        self.assertIn("grid-template-columns: repeat(4, minmax(0, 1fr))", styles)
+        self.assertIn(".plugin-manager-card { min-height: 0; padding: 16px; }", styles)
+        self.assertIn(".account-session-panel {", styles)
+        self.assertIn(".plugin-install-option {", styles)
+        self.assertIn(".plugin-manager-grid {", styles)
+        self.assertIn('class="toggle-control plugin-toggle-control"', template)
+        self.assertIn('role="switch"', template)
+        self.assertIn('onchange="this.form.requestSubmit()"', template)
+        self.assertIn("data-plugin-card", template)
+        self.assertIn("data-plugin-runtime-state", template)
+        self.assertIn("form.addEventListener('submit'", template)
+        self.assertIn("fetch('/api/plugins/runtime-status'", template)
+        self.assertNotIn("plugin-toggle-state", template)
+        self.assertNotIn("account-session-actions plugin-manager-actions", template)
+        self.assertNotIn(">停用</button>", template)
+        self.assertNotIn(">启用</button>", template)
+        self.assertIn("/static/app.css?v=20260921-6", base)
+
+    def test_plugin_ui_assets_are_registered_by_enabled_plugins(self) -> None:
+        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
+
+        self.assertIn(
+            "/plugins/core_ui/static/core_ui.css?v=20260922-2",
+            registry.stylesheets,
+        )
+        self.assertIn(
+            "/plugins/classroom/static/classroom.css?v=20260922-1",
+            registry.stylesheets,
+        )
+        self.assertIn(
+            "/plugins/attendance/static/attendance.css?v=20260922-1",
+            registry.stylesheets,
+        )
+        self.assertIn(
+            "/plugins/processing/static/processing.css?v=20260922-1",
+            registry.stylesheets,
+        )
+        self.assertIn(
+            "/plugins/course_selection/static/selection.css?v=20260922-1",
+            registry.stylesheets,
+        )
+        self.assertIn(
+            "/plugins/classroom/static/downloads.js?v=20260921-1",
+            registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
+        )
+        self.assertIn(
+            "/plugins/course_selection/static/selection_ui.js?v=20260921-1",
+            registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
+        )
+
+        classroom_only = build_plugin_registry({"classroom"})
+        self.assertIn(
+            "/plugins/classroom/static/classroom.css?v=20260922-1",
+            classroom_only.stylesheets,
+        )
+        self.assertNotIn(
+            "/plugins/course_selection/static/selection.css?v=20260922-1",
+            classroom_only.stylesheets,
+        )
+        self.assertNotIn(
+            "/plugins/course_selection/static/selection_ui.js?v=20260921-1",
+            classroom_only.scripts,
+        )
+
+        base = Path("templates/base.html").read_text(encoding="utf-8")
+        self.assertIn('plugin_registry.page_assets(ui_page, "style")', base)
+        self.assertIn('plugin_registry.page_assets(ui_page, "script")', base)
+
+    def test_plugin_static_mounts_are_isolated(self) -> None:
+        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
+        mounts = {mount.plugin_id: mount for mount in registry.static_mounts}
+
+        self.assertEqual(
+            mounts["classroom"].path,
+            "/plugins/classroom/static",
+        )
+        self.assertEqual(
+            mounts["course_selection"].path,
+            "/plugins/course_selection/static",
+        )
+        self.assertEqual(
+            mounts["attendance"].path,
+            "/plugins/attendance/static",
+        )
+        self.assertEqual(
+            mounts["core_ui"].path,
+            "/plugins/core_ui/static",
+        )
 
     def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:
         template = Path("templates/base.html").read_text(encoding="utf-8")

@@ -1,0 +1,85 @@
+@property --bg { syntax: "<color>"; inherits: true; initial-value: #f5f7fa; }
+@property --surface { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+@property --surface-subtle { syntax: "<color>"; inherits: true; initial-value: #f8fafb; }
+@property --surface-hover { syntax: "<color>"; inherits: true; initial-value: #f1f5f9; }
+@property --text { syntax: "<color>"; inherits: true; initial-value: #192638; }
+@property --text-soft { syntax: "<color>"; inherits: true; initial-value: #53606d; }
+@property --text-muted { syntax: "<color>"; inherits: true; initial-value: #657487; }
+@property --border { syntax: "<color>"; inherits: true; initial-value: #dde3e8; }
+@property --border-strong { syntax: "<color>"; inherits: true; initial-value: #cbd4dc; }
+@property --primary { syntax: "<color>"; inherits: true; initial-value: #375bd2; }
+@property --primary-soft { syntax: "<color>"; inherits: true; initial-value: #edf1ff; }
+@property --primary-hover { syntax: "<color>"; inherits: true; initial-value: #1d58b8; }
+@property --primary-on { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+@property --green { syntax: "<color>"; inherits: true; initial-value: #21865c; }
+@property --green-soft { syntax: "<color>"; inherits: true; initial-value: #e9f7f0; }
+@property --amber { syntax: "<color>"; inherits: true; initial-value: #a46612; }
+@property --amber-soft { syntax: "<color>"; inherits: true; initial-value: #fff6df; }
+@property --red { syntax: "<color>"; inherits: true; initial-value: #bd3d45; }
+@property --red-soft { syntax: "<color>"; inherits: true; initial-value: #fff0f1; }
+
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  --bg: #f5f7fa;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafb;
+  --surface-hover: #f1f5f9;
+  --text: #192638;
+  --text-soft: #53606d;
+  --text-muted: #657487;
+  --border: #dde3e8;
+  --border-strong: #cbd4dc;
+  --primary: #375bd2;
+  --primary-soft: #edf1ff;
+  --primary-hover: #1d58b8;
+  --primary-on: #ffffff;
+  --green: #21865c;
+  --green-soft: #e9f7f0;
+  --amber: #a46612;
+  --amber-soft: #fff6df;
+  --red: #bd3d45;
+  --red-soft: #fff0f1;
+  --shadow: 0 1px 2px rgba(18, 29, 39, 0.04), 0 10px 30px rgba(18, 29, 39, 0.04);
+  --theme-transition-duration: 220ms;
+  --font-xs: 12px;
+  --font-sm: 13px;
+  --font-md: 14px;
+  --font-lg: 16px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --sidebar-width: 240px;
+  --header-height: 72px;
+  --control-height: 42px;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111416;
+  --surface: #191d20;
+  --surface-subtle: #202529;
+  --surface-hover: #252b30;
+  --text: #edf1f3;
+  --text-soft: #b1bbc3;
+  --text-muted: #818c95;
+  --border: #30373d;
+  --border-strong: #414a52;
+  --primary: #72a7ff;
+  --primary-soft: #1c3150;
+  --primary-hover: #93bbff;
+  --primary-on: #102039;
+  --green: #70d1a7;
+  --green-soft: #19372c;
+  --amber: #efbe68;
+  --amber-soft: #3b301e;
+  --red: #ff8c94;
+  --red-soft: #442529;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 14px 36px rgba(0, 0, 0, 0.16);
+}

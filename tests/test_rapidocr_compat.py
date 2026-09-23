@@ -5,7 +5,7 @@ import unittest
 
 from PIL import Image
 
-from fuckclassroom.classroom.rapidocr_compat import _resize_byte_image, install_rapidocr_compat
+from fuckclassroom.plugins.ocr.compat import _resize_byte_image, install_rapidocr_compat
 
 
 class RapidOcrCompatTests(unittest.TestCase):

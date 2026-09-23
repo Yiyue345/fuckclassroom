@@ -1,0 +1,7 @@
+<section class="settings-section" id="storage">
+  <div><h2>缓存与存储</h2><p>课程名、资源链接和选课数据会在本机缓存；本地转写导出文件可在“文件管理”中查看。</p></div>
+  <div class="fields">
+    <div class="detail-grid"><div class="detail-item"><label>缓存文件</label><strong>{{ panel_context.cache_info.file_count }} 个</strong></div><div class="detail-item"><label>缓存大小</label><strong>{% if panel_context.cache_info.total_bytes >= 1048576 %}{{ "%.1f"|format(panel_context.cache_info.total_bytes / 1048576) }} MB{% elif panel_context.cache_info.total_bytes >= 1024 %}{{ "%.1f"|format(panel_context.cache_info.total_bytes / 1024) }} KB{% else %}{{ panel_context.cache_info.total_bytes }} B{% endif %}</strong></div></div>
+    <form method="post" action="/settings/cache/clear" data-confirm="确认清除课程与资源缓存？"><button class="btn danger" type="submit"><svg class="icon"><use href="/static/icons.svg#trash-2"></use></svg>清除缓存</button></form>
+  </div>
+</section>

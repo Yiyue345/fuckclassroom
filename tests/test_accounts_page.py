@@ -35,7 +35,7 @@ class AccountsPageTests(unittest.TestCase):
             body = response.body.decode("utf-8")
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.template.name, "accounts.html")
+            self.assertEqual(response.template.name, "core/accounts.html")
             self.assertIn('id="classroom-session"', body)
             self.assertIn('id="selection-session"', body)
             self.assertIn('id="ketangpai-session"', body)
@@ -45,6 +45,35 @@ class AccountsPageTests(unittest.TestCase):
             self.assertIn('action="/selection/login"', body)
             self.assertIn('action="/accounts/ketangpai/login"', body)
             self.assertIn('action="/accounts/ketangpai/sms/start"', body)
+
+    def test_accounts_page_only_renders_enabled_plugin_panels(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            app = create_app(
+                AppConfig(data_dir=Path(directory)),
+                enabled_plugins={"classroom"},
+            )
+            route = next(item for item in app.routes if getattr(item, "path", "") == "/accounts")
+            request = Request(
+                {
+                    "type": "http",
+                    "app": app,
+                    "method": "GET",
+                    "path": "/accounts",
+                    "raw_path": b"/accounts",
+                    "query_string": b"",
+                    "headers": [],
+                    "client": ("test", 123),
+                    "server": ("test", 80),
+                    "scheme": "http",
+                    "root_path": "",
+                }
+            )
+
+            body = route.endpoint(request).body.decode("utf-8")
+
+            self.assertIn('id="classroom-session"', body)
+            self.assertNotIn('id="selection-session"', body)
+            self.assertNotIn('id="ketangpai-session"', body)
 
     def test_legacy_selection_session_page_redirects_to_accounts(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:

@@ -1,0 +1,73 @@
+.lab-semester-switcher { display: grid; width: min(460px, 42vw); grid-template-columns: minmax(220px, 1fr) auto; gap: 8px; }
+.lab-session-summary { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 24px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-subtle); padding: 11px 15px; margin-bottom: 16px; }
+.lab-session-copy { min-width: 0; }
+.lab-session-copy > span, .lab-session-meta small { display: block; color: var(--text-muted); font-size: var(--font-xs); line-height: 1.4; }
+.lab-session-copy strong { display: block; overflow: hidden; max-width: 600px; margin-top: 4px; color: var(--text); font-size: var(--font-sm); text-overflow: ellipsis; white-space: nowrap; }
+.lab-session-meta { display: flex; flex: 0 0 auto; align-items: center; gap: 24px; }
+.lab-session-meta strong { display: block; max-width: 220px; overflow: hidden; margin-top: 3px; color: var(--text); font-size: var(--font-sm); text-overflow: ellipsis; white-space: nowrap; }
+.lab-panel { padding-top: 16px; }
+.lab-toolbar { margin-bottom: 12px; }
+.lab-pagination { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 16px; color: var(--text-soft); font-size: var(--font-sm); }
+.lab-next-icon { transform: rotate(180deg); }
+.selection-course-list { display: grid; gap: 10px; }
+.selection-course-group { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow); }
+.selection-course-summary { display: grid; min-height: 66px; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; list-style: none; }
+.selection-course-summary::-webkit-details-marker { display: none; }
+.selection-course-summary:hover { background: var(--surface-subtle); }
+.selection-course-chevron { display: grid; width: 26px; height: 26px; place-items: center; color: var(--text-muted); transition: transform .16s ease; }
+.selection-course-group[open] .selection-course-chevron { transform: rotate(180deg); }
+.selection-course-copy { min-width: 0; }
+.selection-course-copy strong { display: block; overflow: hidden; color: var(--text); font-size: var(--font-md); text-overflow: ellipsis; white-space: nowrap; }
+.selection-course-copy > span { display: block; overflow: hidden; margin-top: 4px; color: var(--text-muted); font-size: var(--font-xs); text-overflow: ellipsis; white-space: nowrap; }
+.selection-course-count { border-radius: 999px; background: var(--surface-hover); color: var(--text-soft); padding: 5px 9px; font-size: var(--font-xs); font-weight: 650; white-space: nowrap; }
+.lab-course-group[hidden] { display: none; }
+.lab-course-body { border-top: 1px solid var(--border); }
+.lab-course-loading { min-height: 100px; }
+.lab-group-block + .lab-group-block { border-top: 1px solid var(--border); }
+.lab-group-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--surface-subtle); padding: 11px 16px 11px 54px; }
+.lab-group-head h3 { margin: 0; color: var(--text); font-size: var(--font-sm); }
+.lab-group-head p { margin: 3px 0 0; color: var(--text-muted); font-size: var(--font-xs); }
+.lab-group-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+.lab-subject-table, .lab-slot-table { min-width: 850px; }
+.lab-subject-table th:first-child, .lab-subject-table td:first-child, .lab-slot-table th:first-child, .lab-slot-table td:first-child { padding-left: 54px; }
+.lab-subject-table th:nth-child(1) { width: 48%; }
+.lab-subject-table th:nth-child(2) { width: 24%; }
+.lab-slot-table th:nth-child(1) { width: 52%; }
+.lab-slot-table th:nth-child(2) { width: 18%; }
+.lab-slot-table th:nth-child(3) { width: 15%; }
+.lab-slot-panel { border-top: 1px solid var(--border); background: var(--surface-subtle); }
+.lab-slot-panel .table-wrap { margin: 12px 16px 16px 54px; border-radius: var(--radius-md); box-shadow: none; }
+.lab-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.lab-waitlist-stats { grid-template-columns: repeat(3, 1fr); margin-bottom: 18px; }
+.lab-waitlist-toolbar { margin-bottom: 12px; }
+.lab-waitlist-table { min-width: 900px; }
+.lab-waitlist-table th:nth-child(1) { width: 34%; }
+.lab-waitlist-table th:nth-child(2) { width: 24%; }
+#lab-message .icon { flex: 0 0 auto; margin-top: 2px; }
+#lab-app[aria-busy="true"] { cursor: progress; }
+#lab-confirm { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); color: var(--text); padding: 0; box-shadow: 0 24px 70px rgba(10, 17, 23, .28); }
+#lab-confirm::backdrop { background: rgba(10, 17, 23, .48); }
+.lab-dialog-head { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); padding: 18px 20px; }
+.lab-dialog-head h2 { margin: 0; font-size: 15px; }
+.lab-dialog-head p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--font-xs); }
+.lab-dialog-icon { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 7px; background: var(--primary-soft); color: var(--primary); }
+.lab-dialog-body { overflow-y: auto; padding: 20px; }
+.lab-confirm-description { border-left: 3px solid var(--primary); background: var(--surface-subtle); color: var(--text); padding: 10px 12px; margin: 0 0 18px; font-size: var(--font-sm); line-height: 1.65; }
+.lab-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border); background: var(--surface-subtle); padding: 14px 20px; }
+#lab-waitlist-interval { width: 140px; }
+@media (max-width: 1000px) {
+  .lab-session-summary, .lab-session-meta { flex-wrap: wrap; gap: 14px; }
+}
+@media (max-width: 760px) {
+  .lab-semester-switcher { width: 100%; grid-template-columns: minmax(0, 1fr) auto; }
+  .lab-session-copy strong { white-space: normal; }
+  .lab-session-meta { width: 100%; }
+  .lab-session-meta > span:not(.status) { flex: 1 1 120px; }
+  .selection-course-summary { padding: 14px 12px; }
+  .selection-course-copy strong, .selection-course-copy > span { white-space: normal; }
+  .lab-group-head { align-items: flex-start; flex-direction: column; padding-left: 16px; }
+  .lab-slot-panel .table-wrap { margin-left: 16px; }
+  .lab-waitlist-stats { grid-template-columns: 1fr; }
+  .lab-waitlist-stats .stat { border-right: 0; border-bottom: 1px solid var(--border); }
+  .lab-waitlist-stats .stat:last-child { border-bottom: 0; }
+}

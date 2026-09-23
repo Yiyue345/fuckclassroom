@@ -1,0 +1,567 @@
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import os
+import secrets
+import socket
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, Response
+
+from ..core.config import PROJECT_ROOT
+from ..core.plugins import PluginContext, PluginSpec
+from .rpc import (
+    PLUGIN_RPC_API_VERSION,
+    PluginRpcError,
+    PluginRpcRegistry,
+)
+
+
+_PARENT_RPC_MAX_MESSAGE_BYTES = 4 * 1024 * 1024
+
+
+_HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+    "content-length",
+}
+
+
+class ProcessPluginError(RuntimeError):
+    pass
+
+
+class ProcessPluginHost:
+    def __init__(
+        self,
+        *,
+        plugin_id: str,
+        root: Path,
+        entry: str,
+        data_dir: Path,
+        rpc_registry: PluginRpcRegistry,
+        rpc_api_version: int,
+        rpc_permissions: tuple[str, ...],
+    ) -> None:
+        self.plugin_id = plugin_id
+        self.root = root
+        self.entry = entry
+        self.data_dir = data_dir
+        self.rpc_registry = rpc_registry
+        self.rpc_api_version = int(rpc_api_version)
+        self.rpc_permissions = tuple(rpc_permissions)
+        self._token = secrets.token_urlsafe(32)
+        self._parent_rpc_token = secrets.token_urlsafe(32)
+        self._process: asyncio.subprocess.Process | None = None
+        self._port = 0
+        self._pid = 0
+        self._stderr_task: asyncio.Task[None] | None = None
+        self._watch_task: asyncio.Task[None] | None = None
+        self._parent_rpc_server: asyncio.AbstractServer | None = None
+        self._parent_rpc_port = 0
+        self._cleanup_notified = False
+        self._stderr_lines: list[str] = []
+
+    @property
+    def pid(self) -> int:
+        return self._pid
+
+    @property
+    def running(self) -> bool:
+        return self._process is not None and self._process.returncode is None and self._port > 0
+
+    async def _drain_stderr(self, stream: asyncio.StreamReader) -> None:
+        while True:
+            line = await stream.readline()
+            if not line:
+                return
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                self._stderr_lines.append(text)
+                del self._stderr_lines[:-40]
+
+    def _error_detail(self) -> str:
+        return "\n".join(self._stderr_lines[-8:])
+
+    async def _send_parent_rpc_response(
+        self,
+        writer: asyncio.StreamWriter,
+        payload: dict[str, object],
+    ) -> None:
+        encoded = (
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            + b"\n"
+        )
+        writer.write(encoded)
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    async def _handle_parent_rpc(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            raw = await asyncio.wait_for(
+                reader.readline(),
+                timeout=65,
+            )
+            if not raw or len(raw) > _PARENT_RPC_MAX_MESSAGE_BYTES:
+                await self._send_parent_rpc_response(
+                    writer,
+                    {"ok": False, "error": {"code": "request_too_large", "message": "RPC 请求为空或过大"}},
+                )
+                return
+            message = json.loads(raw.decode("utf-8"))
+            if message.get("token") != self._parent_rpc_token:
+                await self._send_parent_rpc_response(
+                    writer,
+                    {"ok": False, "error": {"code": "unauthorized", "message": "RPC token 无效"}},
+                )
+                return
+            if int(message.get("rpc_api_version") or 0) != self.rpc_api_version:
+                await self._send_parent_rpc_response(
+                    writer,
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "rpc_version_mismatch",
+                            "message": (
+                                f"Plugin RPC API {message.get('rpc_api_version')} 与 Host "
+                                f"{self.rpc_api_version} 不匹配"
+                            ),
+                        },
+                    },
+                )
+                return
+            result = await self.rpc_registry.call(
+                plugin_id=self.plugin_id,
+                permissions=self.rpc_permissions,
+                method=str(message.get("method") or ""),
+                params=message.get("params"),
+            )
+            await self._send_parent_rpc_response(writer, {"ok": True, "result": result})
+        except PluginRpcError as exc:
+            await self._send_parent_rpc_response(
+                writer,
+                {
+                    "ok": False,
+                    "error": {
+                        "code": getattr(exc, "code", "rpc_error"),
+                        "message": str(exc),
+                    },
+                },
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            await self._send_parent_rpc_response(
+                writer,
+                {
+                    "ok": False,
+                    "error": {"code": "invalid_request", "message": str(exc)},
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - isolate parent API failures from plugin process.
+            await self._send_parent_rpc_response(
+                writer,
+                {
+                    "ok": False,
+                    "error": {"code": "internal_error", "message": f"{type(exc).__name__}: {exc}"},
+                },
+            )
+
+    async def _close_parent_rpc_server(self) -> None:
+        server = self._parent_rpc_server
+        self._parent_rpc_server = None
+        self._parent_rpc_port = 0
+        if server is not None:
+            server.close()
+            await server.wait_closed()
+
+    async def _notify_stopped(self) -> None:
+        if self._cleanup_notified:
+            return
+        self._cleanup_notified = True
+        await self.rpc_registry.plugin_stopped(self.plugin_id)
+
+    async def _watch_process(self, process: asyncio.subprocess.Process) -> None:
+        await process.wait()
+        await self._close_parent_rpc_server()
+        await self._notify_stopped()
+
+    async def start(self) -> None:
+        if self.running:
+            return
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._cleanup_notified = False
+        await self._close_parent_rpc_server()
+        self._parent_rpc_server = await asyncio.start_server(
+            self._handle_parent_rpc,
+            "127.0.0.1",
+            0,
+            limit=_PARENT_RPC_MAX_MESSAGE_BYTES + 1,
+        )
+        sockets = self._parent_rpc_server.sockets or []
+        if not sockets:
+            await self._close_parent_rpc_server()
+            raise ProcessPluginError(f"无法为隔离插件 {self.plugin_id} 创建主进程 RPC 端口")
+        self._parent_rpc_port = int(sockets[0].getsockname()[1])
+
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        self._process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "fuckclassroom.plugins.process_worker",
+            "--plugin-id",
+            self.plugin_id,
+            "--plugin-root",
+            str(self.root),
+            "--entry",
+            self.entry,
+            "--data-dir",
+            str(self.data_dir),
+            f"--token={self._token}",
+            "--rpc-host",
+            "127.0.0.1",
+            "--rpc-port",
+            str(self._parent_rpc_port),
+            f"--rpc-token={self._parent_rpc_token}",
+            "--rpc-api-version",
+            str(self.rpc_api_version),
+            cwd=str(PROJECT_ROOT),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            creationflags=creationflags,
+        )
+        assert self._process.stdout is not None
+        assert self._process.stderr is not None
+        self._stderr_task = asyncio.create_task(self._drain_stderr(self._process.stderr))
+        self._watch_task = asyncio.create_task(self._watch_process(self._process))
+        try:
+            raw = await asyncio.wait_for(self._process.stdout.readline(), timeout=12)
+        except asyncio.TimeoutError as exc:
+            await self.stop()
+            raise ProcessPluginError(f"隔离插件 {self.plugin_id} 启动超时") from exc
+        if not raw:
+            await self._process.wait()
+            if self._stderr_task is not None:
+                await asyncio.gather(self._stderr_task, return_exceptions=True)
+            detail = self._error_detail()
+            await self.stop()
+            raise ProcessPluginError(
+                f"隔离插件 {self.plugin_id} 启动失败"
+                + (f"：{detail}" if detail else "")
+            )
+        try:
+            ready = json.loads(raw.decode("utf-8"))
+            self._port = int(ready["port"])
+            self._pid = int(ready["pid"])
+            if int(ready.get("rpc_api_version") or 0) != self.rpc_api_version:
+                raise ValueError("RPC API handshake mismatch")
+        except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            await self.stop()
+            raise ProcessPluginError(f"隔离插件 {self.plugin_id} 返回了无效启动握手") from exc
+
+    async def _rpc(self, payload: dict[str, object], *, timeout: float = 60.0) -> dict[str, Any]:
+        if not self.running:
+            raise ProcessPluginError(
+                f"隔离插件 {self.plugin_id} 进程未运行"
+                + (f"：{self._error_detail()}" if self._error_detail() else "")
+            )
+        message = {"token": self._token, **payload}
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", self._port),
+                timeout=3,
+            )
+            writer.write(
+                json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                + b"\n"
+            )
+            await writer.drain()
+            raw = await asyncio.wait_for(reader.readline(), timeout=timeout)
+            writer.close()
+            await writer.wait_closed()
+        except (OSError, asyncio.TimeoutError, ConnectionError) as exc:
+            raise ProcessPluginError(
+                f"隔离插件 {self.plugin_id} IPC 失败"
+                + (f"：{self._error_detail()}" if self._error_detail() else "")
+            ) from exc
+        if not raw:
+            raise ProcessPluginError(f"隔离插件 {self.plugin_id} 已异常退出")
+        try:
+            response = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProcessPluginError(f"隔离插件 {self.plugin_id} 返回了无效 IPC 响应") from exc
+        if not response.get("ok"):
+            raise ProcessPluginError(str(response.get("error") or "隔离插件 IPC 调用失败"))
+        return response
+
+    @staticmethod
+    def _dispatch_call_event(progress: object | None, event: dict[str, object]) -> bool:
+        if progress is None:
+            return False
+        if bool(getattr(progress, "cancel_requested", False)):
+            return True
+        kind = str(event.get("kind") or "")
+        if kind == "progress" and callable(progress):
+            progress(int(event.get("progress") or 0), str(event.get("message") or ""))
+        elif kind == "detail":
+            detail = getattr(progress, "detail", None)
+            if callable(detail):
+                detail(int(event.get("progress") or 0), str(event.get("message") or ""))
+        elif kind == "clear_detail":
+            clear_detail = getattr(progress, "clear_detail", None)
+            if callable(clear_detail):
+                clear_detail()
+        elif kind == "log":
+            log = getattr(progress, "log", None)
+            if callable(log):
+                log(str(event.get("message") or ""), str(event.get("level") or "info"))
+        cancel_requested = getattr(progress, "cancel_requested", False)
+        return bool(cancel_requested)
+
+    def call_sync(
+        self,
+        method: str,
+        params: dict[str, object] | None = None,
+        *,
+        progress: object | None = None,
+        timeout: float = 60.0 * 60.0,
+    ) -> object:
+        if not self.running:
+            raise ProcessPluginError(
+                f"隔离插件 {self.plugin_id} 进程未运行"
+                + (f"：{self._error_detail()}" if self._error_detail() else "")
+            )
+        message = {
+            "token": self._token,
+            "op": "invoke",
+            "method": str(method),
+            "params": dict(params or {}),
+        }
+        encoded = (
+            json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            + b"\n"
+        )
+        try:
+            with socket.create_connection(("127.0.0.1", self._port), timeout=5) as connection:
+                connection.settimeout(timeout)
+                stream = connection.makefile("rwb")
+                stream.write(encoded)
+                stream.flush()
+                while True:
+                    raw = stream.readline(64 * 1024 * 1024 + 1)
+                    if not raw or len(raw) > 64 * 1024 * 1024:
+                        raise ProcessPluginError(
+                            f"隔离插件 {self.plugin_id} IPC 响应为空或过大"
+                        )
+                    payload = json.loads(raw.decode("utf-8"))
+                    if payload.get("type") == "event":
+                        event = payload.get("event")
+                        if not isinstance(event, dict):
+                            raise ProcessPluginError("隔离 Worker 返回无效进度事件")
+                        cancel_requested = self._dispatch_call_event(progress, event)
+                        stream.write(
+                            json.dumps(
+                                {
+                                    "ok": True,
+                                    "cancel_requested": cancel_requested,
+                                },
+                                separators=(",", ":"),
+                            ).encode("utf-8")
+                            + b"\n"
+                        )
+                        stream.flush()
+                        continue
+                    if payload.get("ok"):
+                        return payload.get("result")
+                    error = payload.get("error")
+                    code = ""
+                    if isinstance(error, dict):
+                        code = str(error.get("code") or "")
+                        message_text = str(error.get("message") or "隔离 Worker 调用失败")
+                    else:
+                        message_text = str(error or "隔离 Worker 调用失败")
+                    if code == "cancelled":
+                        raise_if_cancelled = getattr(progress, "raise_if_cancelled", None)
+                        if callable(raise_if_cancelled):
+                            raise_if_cancelled()
+                    raise ProcessPluginError(message_text)
+        except ProcessPluginError:
+            raise
+        except (OSError, TimeoutError, ConnectionError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProcessPluginError(
+                f"隔离插件 {self.plugin_id} Service IPC 失败"
+                + (f"：{self._error_detail()}" if self._error_detail() else "")
+            ) from exc
+
+    async def request(
+        self,
+        *,
+        method: str,
+        path: str,
+        query_string: str,
+        headers: dict[str, str],
+        body: bytes,
+    ) -> dict[str, Any]:
+        response = await self._rpc(
+            {
+                "op": "request",
+                "method": method,
+                "path": path,
+                "query_string": query_string,
+                "headers": headers,
+                "body_b64": base64.b64encode(body).decode("ascii"),
+            }
+        )
+        payload = response.get("response")
+        if not isinstance(payload, dict):
+            raise ProcessPluginError(f"隔离插件 {self.plugin_id} 响应缺少 response")
+        return payload
+
+    async def stop(self) -> None:
+        process = self._process
+        if process is None:
+            return
+        if process.returncode is None and self._port:
+            try:
+                await self._rpc({"op": "shutdown"}, timeout=4)
+            except ProcessPluginError:
+                pass
+        if process.returncode is None:
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=3)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+        if self._watch_task is not None:
+            await asyncio.gather(self._watch_task, return_exceptions=True)
+        if self._stderr_task is not None:
+            await asyncio.gather(self._stderr_task, return_exceptions=True)
+        await self._close_parent_rpc_server()
+        await self._notify_stopped()
+        self._process = None
+        self._stderr_task = None
+        self._watch_task = None
+        self._port = 0
+        self._pid = 0
+
+
+def build_process_plugin_spec(descriptor: Any) -> PluginSpec:
+    if descriptor.root is None:
+        raise ProcessPluginError(f"隔离插件 {descriptor.id} 缺少安装目录")
+    service_key = f"process-plugin:{descriptor.id}"
+
+    def setup_services(context: PluginContext) -> None:
+        rpc_registry: PluginRpcRegistry = context.services.get("plugin_rpc")
+        context.services.add(
+            service_key,
+            ProcessPluginHost(
+                plugin_id=descriptor.id,
+                root=descriptor.root,
+                entry=descriptor.entry,
+                data_dir=Path(context.config.data_dir) / "plugin-process-data" / descriptor.id,
+                rpc_registry=rpc_registry,
+                rpc_api_version=descriptor.rpc_api_version,
+                rpc_permissions=tuple(descriptor.rpc_permissions),
+            ),
+        )
+
+    async def startup(context: PluginContext) -> None:
+        await context.services.get(service_key).start()
+
+    async def shutdown(context: PluginContext) -> None:
+        await context.services.get(service_key).stop()
+
+    def build_routes(context: PluginContext) -> APIRouter:
+        host: ProcessPluginHost = context.services.get(service_key)
+        router = APIRouter()
+        methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
+
+        async def proxy(request: Request, path: str = "") -> Response:
+            request_headers = {
+                key.lower(): value
+                for key, value in request.headers.items()
+                if key.lower() not in _HOP_BY_HOP_HEADERS
+            }
+            try:
+                payload = await host.request(
+                    method=request.method,
+                    path="/" + path if path else "/",
+                    query_string=request.url.query,
+                    headers=request_headers,
+                    body=await request.body(),
+                )
+                body = base64.b64decode(str(payload.get("body_b64") or ""), validate=False)
+                headers = {
+                    str(key).lower(): str(value)
+                    for key, value in dict(payload.get("headers") or {}).items()
+                    if str(key).lower() not in _HOP_BY_HOP_HEADERS
+                }
+                return Response(
+                    content=body,
+                    status_code=int(payload.get("status_code") or 200),
+                    headers=headers,
+                )
+            except ProcessPluginError as exc:
+                return JSONResponse(
+                    {
+                        "detail": "隔离插件进程不可用",
+                        "plugin_id": descriptor.id,
+                        "error": str(exc),
+                    },
+                    status_code=502,
+                )
+
+        router.add_api_route(
+            descriptor.route_prefix,
+            proxy,
+            methods=methods,
+            include_in_schema=False,
+        )
+        router.add_api_route(
+            descriptor.route_prefix + "/{path:path}",
+            proxy,
+            methods=methods,
+            include_in_schema=False,
+        )
+        return router
+
+    return PluginSpec(
+        id=descriptor.id,
+        name=descriptor.name,
+        order=descriptor.order,
+        api_version=descriptor.api_version,
+        requires=tuple(descriptor.requires),
+        service_factory=setup_services,
+        route_factory=build_routes,
+        startup=startup,
+        shutdown=shutdown,
+        system_labels=((descriptor.id, descriptor.name),),
+    )
+
+
+__all__ = [
+    "ProcessPluginError",
+    "ProcessPluginHost",
+    "build_process_plugin_spec",
+]

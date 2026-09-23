@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% set active_system = "common" %}
+{% set active_nav = "settings" %}
+{% set plugin_registry = request.app.state.plugin_registry %}
+
+{% block title %}设置 · 学业助手{% endblock %}
+{% block breadcrumb_parent %}通用{% endblock %}
+{% block page_title %}设置{% endblock %}
+
+{% block content %}
+  {% from "ui/components.html" import page_header %}
+  {% call page_header("设置", "让学业助手更适合你的学习方式。所有更改保存在本机。") %}
+    <span class="meta" role="status" data-settings-status>按你的习惯调整</span>
+    <button class="btn primary" type="submit" form="settings-form">保存更改</button>
+  {% endcall %}
+
+  {% if saved %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>设置已保存。</span></div>{% endif %}
+  {% if settings_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>部分插件未能立即应用设置：{{ settings_error }}</span></div>{% endif %}
+  {% if cache_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>缓存已清除。</span></div>{% endif %}
+  {% if credentials_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>统一桂电自动登录凭据已清除。</span></div>{% endif %}
+  {% if login_state_cleared %}<div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>插件登录状态已清除。</span></div>{% endif %}
+  {% if cache_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>缓存清除失败：{{ cache_error }}</span></div>{% endif %}
+  {% if credential_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ credential_error }}</span></div>{% endif %}
+  {% if login_state_error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>登录状态清除失败：{{ login_state_error }}</span></div>{% endif %}
+  {% for item in settings_panels %}
+    {% for notice in item.context.get("notices", ()) %}
+      <div class="notice {{ notice.kind }}"><svg class="icon"><use href="/static/icons.svg#{{ notice.icon }}"></use></svg><span>{{ notice.message }}</span></div>
+    {% endfor %}
+  {% endfor %}
+
+  <div class="settings-layout">
+    <nav class="settings-nav" aria-label="设置分类" data-section-nav>
+      {% for item in settings_panels if item.panel.show_in_nav %}
+        <a{% if loop.first %} class="active"{% endif %} href="#{{ item.panel.key }}">{{ item.panel.label }}</a>
+      {% endfor %}
+    </nav>
+    <div>
+      <form class="settings-main" id="settings-form" method="post" action="/settings">
+        {% for item in settings_panels if item.panel.in_form %}
+          {% set panel_context = item.context %}
+          {% include item.panel.template %}
+        {% endfor %}
+      </form>
+      {% for item in settings_panels if not item.panel.in_form %}
+        {% set panel_context = item.context %}
+        {% include item.panel.template %}
+      {% endfor %}
+    </div>
+  </div>
+{% endblock %}

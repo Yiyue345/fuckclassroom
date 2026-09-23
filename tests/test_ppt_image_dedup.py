@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from fuckclassroom.classroom.extraction import extract_pptx_text
+from fuckclassroom.plugins.processing.extraction import extract_pptx_text
 
 
 class PptImageDedupTests(unittest.TestCase):

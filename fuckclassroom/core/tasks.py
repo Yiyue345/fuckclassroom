@@ -30,6 +30,7 @@ class TaskState:
     error: str | None
     created_at: str
     updated_at: str
+    auto_open_result: bool = False
     detail_progress: int | None = None
     detail_message: str | None = None
     cancel_requested: bool = False
@@ -88,6 +89,8 @@ class TaskManager:
         self,
         title: str,
         worker: Callable[[Callable[[int, str], None]], str | None],
+        *,
+        auto_open_result: bool = False,
     ) -> TaskState:
         task_id = uuid.uuid4().hex
         now = _now()
@@ -101,6 +104,7 @@ class TaskManager:
             error=None,
             created_at=now,
             updated_at=now,
+            auto_open_result=bool(auto_open_result),
             logs=[TaskLogEntry(now, "info", "任务已创建")],
         )
         with self._lock:
@@ -111,6 +115,118 @@ class TaskManager:
         thread = threading.Thread(target=self._run, args=(task_id, worker), daemon=True)
         thread.start()
         return state
+
+    def create_external(
+        self,
+        title: str,
+        *,
+        auto_open_result: bool = False,
+    ) -> TaskState:
+        task_id = uuid.uuid4().hex
+        now = _now()
+        state = TaskState(
+            id=task_id,
+            title=title,
+            status="running",
+            progress=0,
+            message="准备开始",
+            result_url=None,
+            error=None,
+            created_at=now,
+            updated_at=now,
+            auto_open_result=bool(auto_open_result),
+            logs=[TaskLogEntry(now, "info", "RPC 任务已创建")],
+        )
+        with self._lock:
+            self._tasks[task_id] = state
+        with _TASK_REGISTRY_LOCK:
+            _TASK_OWNERS[task_id] = self
+        return state
+
+    def update_external(
+        self,
+        task_id: str,
+        *,
+        progress: int | None = None,
+        message: str | None = None,
+        detail_progress: int | None = None,
+        detail_message: str | None = None,
+        clear_detail: bool = False,
+    ) -> TaskState:
+        self._require_running_external(task_id)
+        self._update(
+            task_id,
+            progress=progress,
+            message=message,
+            detail_progress=detail_progress,
+            detail_message=detail_message,
+            clear_detail=clear_detail,
+        )
+        state = self.get(task_id)
+        assert state is not None
+        return state
+
+    def log_external(self, task_id: str, message: str, *, level: str = "info") -> None:
+        self._require_running_external(task_id)
+        self._append_log(task_id, level, message)
+
+    def complete_external(
+        self,
+        task_id: str,
+        *,
+        result_url: str | None = None,
+        message: str = "任务完成",
+    ) -> TaskState:
+        self._require_running_external(task_id)
+        self._append_log(task_id, "info", message)
+        self._update(
+            task_id,
+            status="succeeded",
+            progress=100,
+            message=message,
+            result_url=result_url,
+            clear_detail=True,
+        )
+        state = self.get(task_id)
+        assert state is not None
+        return state
+
+    def fail_external(self, task_id: str, error: str) -> TaskState:
+        state = self.get(task_id)
+        if state is None:
+            raise KeyError(task_id)
+        if state.status != "running":
+            return state
+        self._append_log(task_id, "error", error)
+        self._update(
+            task_id,
+            status="failed",
+            progress=100,
+            message="任务失败",
+            error=error,
+            clear_detail=True,
+        )
+        state = self.get(task_id)
+        assert state is not None
+        return state
+
+    def cancel_external(self, task_id: str) -> TaskState:
+        state = self.get(task_id)
+        if state is None:
+            raise KeyError(task_id)
+        if state.status != "running":
+            return state
+        self._mark_cancelled(task_id)
+        state = self.get(task_id)
+        assert state is not None
+        return state
+
+    def _require_running_external(self, task_id: str) -> None:
+        state = self.get(task_id)
+        if state is None:
+            raise KeyError(task_id)
+        if state.status != "running":
+            raise RuntimeError(f"任务已结束：{state.status}")
 
     def get(self, task_id: str) -> TaskState | None:
         with self._lock:

@@ -1,7 +1,7 @@
-{% set active_system = active_system|default("classroom") %}
+{% set active_system = active_system|default("common") %}
 {% set active_nav = active_nav|default("") %}
-{% set classroom_session_status = request.app.state.get_classroom_session_status() %}
-{% set selection_session_status = request.app.state.get_selection_session_status() %}
+{% set ui_page = ui_page|default(active_nav) %}
+{% set plugin_registry = request.app.state.plugin_registry %}
 <!doctype html>
 <html lang="zh-CN" data-theme="light" data-theme-mode="auto">
   <head>
@@ -16,75 +16,36 @@
         document.documentElement.dataset.theme = mode === "auto" ? (dark ? "dark" : "light") : mode;
       })();
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=20260918-3">
+    <link rel="stylesheet" href="/static/tokens.css?v=20260921-6">
+    <link rel="stylesheet" href="/static/app.css?v=20260921-6">
+    {% for stylesheet in plugin_registry.page_assets(ui_page, "style") %}<link rel="stylesheet" href="{{ stylesheet }}">{% endfor %}
     {% block head_extra %}{% endblock %}
   </head>
   <body>
+    <a class="skip-link" href="#main-content">跳到页面内容</a>
     <div class="app-shell">
-      <aside class="sidebar">
-        <a class="brand" href="/classroom">
+      <aside class="sidebar" id="app-navigation" aria-label="主导航">
+        <a class="brand" href="/">
           <span class="brand-mark">GA</span>
           <span><span class="brand-name">学业助手</span><span class="brand-subtitle">GUET Academic</span></span>
         </a>
+        <button class="btn nav-close" type="button" data-nav-close aria-label="关闭导航">关闭导航 ×</button>
 
         <div class="sidebar-nav">
-          <nav class="nav" aria-label="课程录播导航">
-            <div class="nav-label">
-              <span>课程录播</span>
-              <span class="nav-label-status" title="{% if classroom_session_status.is_logged_in %}已连接{% else %}未登录{% endif %}">
-                <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}" data-session-indicator="classroom"></span>
-              </span>
-            </div>
-            <a class="nav-item{% if active_nav == 'overview' %} active{% endif %}" href="/classroom">
-              <svg class="icon"><use href="/static/icons.svg#layout-dashboard"></use></svg><span>概览</span>
-            </a>
-            <a class="nav-item{% if active_nav == 'courses' %} active{% endif %}" href="/courses">
-              <svg class="icon"><use href="/static/icons.svg#book-open"></use></svg><span>我的课程</span>
-              {% if courses is defined and courses %}<span class="nav-badge">{{ courses|length }}</span>{% endif %}
-            </a>
-            <a class="nav-item{% if active_nav == 'tasks' %} active{% endif %}" href="/tasks">
-              <svg class="icon"><use href="/static/icons.svg#list-todo"></use></svg><span>提取与总结</span>
-              {% if tasks is defined and tasks %}<span class="nav-badge">{{ tasks|selectattr('status', 'equalto', 'running')|list|length }}</span>{% endif %}
-            </a>
-            <a class="nav-item{% if active_nav == 'downloads' %} active{% endif %}" href="/downloads">
-              <svg class="icon"><use href="/static/icons.svg#folder"></use></svg><span>文件管理</span>
-            </a>
-          </nav>
-
-          <nav class="nav" aria-label="本科选课导航">
-            <div class="nav-label">
-              <span>本科选课</span>
-              <span class="nav-label-status" title="{% if selection_session_status.is_valid is sameas true %}会话有效{% elif selection_session_status.is_saved %}会话待验证{% else %}未登录{% endif %}">
-                <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}" data-session-indicator="selection"></span>
-              </span>
-            </div>
-            <a class="nav-item{% if active_nav == 'selection_info' and (info is not defined or info.active_view != 'selected') %} active{% endif %}" href="/selection/info">
-              <svg class="icon"><use href="/static/icons.svg#check-square"></use></svg><span>选课中心</span>
-            </a>
-            <a class="nav-item{% if active_nav == 'selection_catalog' %} active{% endif %}" href="/selection/catalog">
-              <svg class="icon"><use href="/static/icons.svg#book-open"></use></svg><span>全校开课</span>
-            </a>
-            <a class="nav-item{% if active_nav == 'selection_selected' or (info is defined and info.active_view == 'selected') %} active{% endif %}" href="/selection/info/selected">
-              <svg class="icon"><use href="/static/icons.svg#list-checks"></use></svg><span>已选课程</span>
-              {% if info is defined %}<span class="nav-badge">{{ info.sections.get('selected', [])|length }}</span>{% endif %}
-            </a>
-            <a class="nav-item{% if active_nav == 'selection_auto' %} active{% endif %}" href="/selection/auto">
-              <svg class="icon"><use href="/static/icons.svg#clock-3"></use></svg><span>定时选课</span>
-            </a>
-            <a class="nav-item{% if active_nav == 'selection_captures' %} active{% endif %}" href="/selection/captures">
-              <svg class="icon"><use href="/static/icons.svg#activity"></use></svg><span>接口记录</span>
-            </a>
-          </nav>
-
-          <nav class="nav" aria-label="通用导航">
-            <div class="nav-label"><span>通用</span></div>
-            <a class="nav-item{% if active_nav == 'accounts' %} active{% endif %}" href="/accounts">
-              <svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg><span>账户与认证</span>
-            </a>
-            <a class="nav-item{% if active_nav == 'settings' %} active{% endif %}" href="/settings">
-              <svg class="icon"><use href="/static/icons.svg#settings"></use></svg><span>设置</span>
-            </a>
-          </nav>
+          {% for group in plugin_registry.navigation_groups %}
+            <nav class="nav" aria-label="{{ group.aria_label }}">
+              <div class="nav-label">
+                <span>{{ group.label }}</span>
+                {% if group.status_template %}{% include group.status_template %}{% endif %}
+              </div>
+              {% for item in group.items %}
+                <a class="nav-item{% if active_nav in item.active_keys %} active{% endif %}" href="{{ item.href }}"{% if active_nav in item.active_keys %} aria-current="page"{% endif %}>
+                  <svg class="icon"><use href="/static/icons.svg#{{ item.icon }}"></use></svg><span>{{ item.label }}</span>
+                  {% if item.badge_template %}{% include item.badge_template %}{% endif %}
+                </a>
+              {% endfor %}
+            </nav>
+          {% endfor %}
         </div>
 
         <div class="sidebar-bottom">
@@ -95,22 +56,19 @@
             </button>
           </div>
           <div class="session-list">
-            <a class="session-card" href="/accounts#classroom-session" data-sidebar-session="classroom" title="{% if classroom_session_status.is_logged_in %}已连接 · {{ classroom_session_status.saved_at or '会话已保存' }}{% else %}未登录{% endif %}">
-              <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}" data-session-indicator="classroom"></span>
-              <span><span class="session-title">课程录播</span><span class="session-meta" data-session-label="classroom">{% if classroom_session_status.is_logged_in %}已连接{% else %}未登录{% endif %}</span></span>
-            </a>
-            <a class="session-card" href="/accounts#selection-session" data-sidebar-session="selection" title="{% if selection_session_status.is_valid is sameas true %}会话有效 · {{ selection_session_status.checked_at or '刚刚验证' }}{% elif selection_session_status.is_saved %}会话待验证{% else %}未登录{% endif %}">
-              <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}" data-session-indicator="selection"></span>
-              <span><span class="session-title">本科教务</span><span class="session-meta" data-session-label="selection">{% if selection_session_status.is_valid is sameas true %}会话有效{% elif selection_session_status.is_saved %}待验证{% else %}未登录{% endif %}</span></span>
-            </a>
+            {% for session_template in plugin_registry.sidebar_templates %}
+              {% include session_template %}
+            {% endfor %}
           </div>
         </div>
       </aside>
+      <button class="nav-backdrop" type="button" data-nav-close aria-label="关闭导航" tabindex="-1" hidden></button>
 
       <main class="main">
         <header class="topbar">
+          <button class="btn icon-only nav-toggle" type="button" data-nav-toggle aria-controls="app-navigation" aria-expanded="false" aria-label="打开导航">☰</button>
           <div class="breadcrumb">
-            <span>{% block breadcrumb_parent %}{% if active_system == "accounts" %}账户{% elif active_system == "selection" %}本科选课{% elif active_system == "common" %}通用{% else %}课程录播{% endif %}{% endblock %}</span>
+            <span>{% block breadcrumb_parent %}{{ plugin_registry.system_label(active_system) }}{% endblock %}</span>
             <span>/</span>
             <strong>{% block breadcrumb_current %}{% block page_title %}概览{% endblock %}{% endblock %}</strong>
           </div>
@@ -120,15 +78,16 @@
             </a>
             <a class="btn" href="/accounts">
               <span class="session-pair" aria-hidden="true">
-                <span class="session-dot{% if classroom_session_status.is_logged_in %} valid{% else %} invalid{% endif %}" data-session-indicator="classroom"></span>
-                <span class="session-dot{% if selection_session_status.is_saved and selection_session_status.is_valid is not sameas false %} valid{% else %} invalid{% endif %}" data-session-indicator="selection"></span>
+                {% for status_template in plugin_registry.topbar_status_templates %}
+                  {% include status_template %}
+                {% endfor %}
               </span>
               会话状态
             </a>
           </div>
         </header>
 
-        <div class="content">
+        <div class="content" id="main-content" tabindex="-1">
           {% block content %}{% endblock %}
         </div>
       </main>
@@ -155,7 +114,9 @@
         </footer>
       </div>
     </div>
-    <script src="/static/app.js?v=20260824-3"></script>
+    <script src="/static/app.js?v=20260921-6"></script>
+    <script src="/static/shell.js?v=20260921-6"></script>
+    {% for script in plugin_registry.page_assets(ui_page, "script") %}<script src="{{ script }}"></script>{% endfor %}
     {% block scripts %}{% endblock %}
   </body>
 </html>

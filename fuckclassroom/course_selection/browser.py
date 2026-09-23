@@ -23,6 +23,7 @@ from ..auth.cas import (
     submit_saved_credentials,
 )
 from ..auth.credentials import CredentialStoreError, SelectionCredentialStore, SelectionCredentials
+from ..core.atomic import atomic_write_text
 from ..core.config import AppConfig
 from .proxy import Hy2ProxyError, Hy2ProxyManager
 from .helpers import *
@@ -265,17 +266,15 @@ class SelectionBrowserMixin:
         return courses
 
     def _write_selection_info(self, payload: dict[str, Any]) -> None:
-        self._ensure_session_dir()
-        self.selection_info_path.write_text(
+        atomic_write_text(
+            self.selection_info_path,
             json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
     def _write_selection_action_result(self, payload: dict[str, Any]) -> None:
-        self._ensure_session_dir()
-        self.selection_action_path.write_text(
+        atomic_write_text(
+            self.selection_action_path,
             json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
     def _build_action_result(

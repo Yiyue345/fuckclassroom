@@ -5,6 +5,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 from fuckclassroom.course_selection.helpers import _group_plan_courses, _plan_course_category
+from fuckclassroom.plugins import build_plugin_registry
 
 
 class PlanCourseGroupTests(unittest.TestCase):
@@ -37,9 +38,12 @@ class PlanCourseGroupTests(unittest.TestCase):
 
     def test_selection_info_template_compiles(self) -> None:
         template_dir = Path(__file__).resolve().parents[1] / "templates"
-        environment = Environment(loader=FileSystemLoader(template_dir))
+        registry = build_plugin_registry({"course_selection"})
+        environment = Environment(
+            loader=FileSystemLoader(registry.template_directories(template_dir))
+        )
 
-        self.assertIsNotNone(environment.get_template("selection_info.html"))
+        self.assertIsNotNone(environment.get_template("selection/info.html"))
 
 
 if __name__ == "__main__":

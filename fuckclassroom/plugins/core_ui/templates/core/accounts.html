@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% set active_system = "accounts" %}
+{% set active_nav = "accounts" %}
+
+{% block title %}账户与认证 · 学业助手{% endblock %}
+{% block page_title %}账户与认证{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <div><h1>账户与认证</h1></div>
+    <div class="head-actions">
+      {% for item in account_panels %}
+        {% if item.panel.shortcut_href %}
+          <a class="btn{% if item.panel.shortcut_primary %} primary{% endif %}" href="{{ item.panel.shortcut_href }}"><svg class="icon"><use href="/static/icons.svg#{{ item.panel.shortcut_icon }}"></use></svg>{{ item.panel.shortcut_label }}</a>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+
+  {% for item in account_panels %}
+    {% for notice in item.context.get("notices", ()) %}
+      <div class="notice {{ notice.kind }}"><svg class="icon"><use href="/static/icons.svg#{{ notice.icon }}"></use></svg><span>{{ notice.message }}</span></div>
+    {% endfor %}
+  {% endfor %}
+
+  <div class="notice inline-task-status hidden" id="account-task-status" role="status" aria-live="polite">
+    <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
+    <div class="inline-task-body">
+      <div class="inline-task-message" data-task-message>正在准备认证</div>
+      <div class="progress" aria-hidden="true"><span data-task-progress></span></div>
+    </div>
+  </div>
+
+  <section class="account-session-grid">
+    {% for item in account_panels %}
+      {% set account = item.context %}
+      {% include item.panel.template %}
+    {% else %}
+      <div class="surface empty-state"><div><svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg><p>当前没有启用需要账户认证的插件。</p></div></div>
+    {% endfor %}
+  </section>
+{% endblock %}

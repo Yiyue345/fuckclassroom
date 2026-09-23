@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from fuckclassroom.classroom.client import Course, CourseDetail, Lesson, LessonResource
-from fuckclassroom.classroom.extraction import (
+from fuckclassroom.plugins.processing.extraction import (
     LessonExtractionService,
     _platform_transcript_is_usable,
 )

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from fuckclassroom.classroom.transcription import LocalTranscriptionService
+from fuckclassroom.plugins.transcription.engine import LocalTranscriptionService
 from fuckclassroom.core.config import AppConfig
 
 
@@ -50,10 +50,10 @@ class ChunkedAudioPipelineTests(unittest.TestCase):
             progress: list[tuple[int, str]] = []
 
             with patch(
-                "fuckclassroom.classroom.transcription._remote_media_supports_ranges",
+                "fuckclassroom.plugins.transcription.engine._remote_media_supports_ranges",
                 return_value=True,
             ), patch(
-                "fuckclassroom.classroom.transcription._decode_audio_chunk",
+                "fuckclassroom.plugins.transcription.engine._decode_audio_chunk",
                 side_effect=fake_decode,
             ):
                 result = service.transcribe_url(
@@ -100,7 +100,7 @@ class ChunkedAudioPipelineTests(unittest.TestCase):
             target = config.outputs_dir / "课程" / "课次" / "local_transcript.txt"
 
             with patch(
-                "fuckclassroom.classroom.transcription._remote_media_supports_ranges",
+                "fuckclassroom.plugins.transcription.engine._remote_media_supports_ranges",
                 return_value=False,
             ):
                 result = service.transcribe_url(

@@ -16,7 +16,7 @@ from fuckclassroom.classroom.client import (
     rewrite_live_playlist,
 )
 from fuckclassroom.core.config import AppConfig
-from fuckclassroom.web.app import _reconcile_live_status
+from fuckclassroom.plugins.classroom.routes import _reconcile_live_status
 
 
 class LiveClassroomTests(unittest.TestCase):
@@ -222,15 +222,15 @@ class LiveClassroomTests(unittest.TestCase):
             rewrite_live_playlist("https://evil.example/segment.ts\n", source)
 
     def test_templates_include_live_entry_and_player_hooks(self) -> None:
-        overview = Path("templates/login.html").read_text(encoding="utf-8")
-        detail = Path("templates/course_detail.html").read_text(encoding="utf-8")
+        overview = Path("fuckclassroom/plugins/classroom/templates/classroom/login.html").read_text(encoding="utf-8")
+        detail = Path("fuckclassroom/plugins/classroom/templates/classroom/course_detail.html").read_text(encoding="utf-8")
         base = Path("templates/base.html").read_text(encoding="utf-8")
-        styles = Path("static/course_media.css").read_text(encoding="utf-8")
-        script = Path("static/course_media.js").read_text(encoding="utf-8")
+        styles = Path("fuckclassroom/plugins/classroom/static/course_media.css").read_text(encoding="utf-8")
+        script = Path("fuckclassroom/plugins/classroom/static/course_media.js").read_text(encoding="utf-8")
 
         self.assertIn("正在直播", overview)
         self.assertIn("live-now-icon", overview)
-        self.assertIn("app.css?v=20260918-3", base)
+        self.assertIn("app.css?v=20260921-6", base)
         self.assertIn("data-live-info-url", detail)
         self.assertIn("data-ppt-slides-url", detail)
         self.assertIn("进入直播", detail)

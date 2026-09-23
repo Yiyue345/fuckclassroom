@@ -11,8 +11,11 @@ from fuckclassroom.auth import LoginSessionService, SessionStatus
 from fuckclassroom.classroom.semester_sync import SemesterSnapshot, SemesterSyncService
 from fuckclassroom.config import AppConfig
 from fuckclassroom.course_selection import CourseSelectionAssistant, WebVpnSessionStatus
-from fuckclassroom.course_selection.automation import AutoSelectionService
 from fuckclassroom.web import create_app
+from fuckclassroom.plugins.course_selection.services import (
+    AutoSelectionProcessProxy,
+    CourseSelectionProcessFacade,
+)
 
 
 class StartupSessionRecoveryTests(unittest.TestCase):
@@ -30,7 +33,7 @@ class StartupSessionRecoveryTests(unittest.TestCase):
                     return_value=WebVpnSessionStatus(True, "教务会话已恢复", is_valid=True),
                 ) as selection_verify,
                 patch.object(
-                    CourseSelectionAssistant,
+                    CourseSelectionProcessFacade,
                     "refresh_selection_info_for_web",
                     return_value="/selection/info",
                 ) as selection_refresh,
@@ -39,8 +42,8 @@ class StartupSessionRecoveryTests(unittest.TestCase):
                     "sync",
                     return_value=SemesterSnapshot((), "", datetime.now(timezone.utc)),
                 ) as semester_sync,
-                patch.object(AutoSelectionService, "start"),
-                patch.object(AutoSelectionService, "stop"),
+                patch.object(AutoSelectionProcessProxy, "start"),
+                patch.object(AutoSelectionProcessProxy, "stop"),
             ):
                 app = create_app(AppConfig(data_dir=Path(directory)))
 

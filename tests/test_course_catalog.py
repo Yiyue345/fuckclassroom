@@ -9,7 +9,7 @@ from fuckclassroom.course_selection.catalog import (
     _normalize_catalog_course,
 )
 from fuckclassroom.course_selection.models import CourseSelectionApiError
-from fuckclassroom.web.app import _resolve_catalog_queue_batch
+from fuckclassroom.plugins.course_selection.routes import _resolve_catalog_queue_batch
 
 
 class CatalogParsingTests(unittest.TestCase):
@@ -36,8 +36,8 @@ class CatalogParsingTests(unittest.TestCase):
             )
 
     def test_catalog_page_sends_the_selected_queue_batch(self) -> None:
-        script = Path("static/selection_catalog.js").read_text(encoding="utf-8")
-        template = Path("templates/selection_catalog.html").read_text(encoding="utf-8")
+        script = Path("fuckclassroom/plugins/course_selection/static/selection_catalog.js").read_text(encoding="utf-8")
+        template = Path("fuckclassroom/plugins/course_selection/templates/selection/catalog.html").read_text(encoding="utf-8")
 
         self.assertIn('id="catalog-queue-batch"', template)
         self.assertIn("batch_key: queueBatch.value", script)

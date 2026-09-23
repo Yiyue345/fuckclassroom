@@ -1,0 +1,31 @@
+/* Attendance account panel. */
+
+.ketangpai-panel { grid-column: 1 / -1; }
+.ketangpai-overview { display: grid; grid-template-columns: minmax(260px, 1fr) auto; align-items: center; gap: 28px; margin: 20px 0; }
+.ketangpai-panel .ketangpai-overview .session-state { min-height: 0; margin: 0; }
+.ketangpai-account-meta { display: grid; min-width: 430px; grid-template-columns: repeat(3, minmax(120px, 1fr)); overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-subtle); }
+.ketangpai-account-meta > div { min-width: 0; padding: 11px 14px; }
+.ketangpai-account-meta > div + div { border-left: 1px solid var(--border); }
+.ketangpai-account-meta span, .ketangpai-account-meta strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ketangpai-account-meta span { margin-bottom: 4px; color: var(--text-muted); font-size: var(--font-xs); }
+.ketangpai-account-meta strong { font-size: var(--font-sm); }
+.ketangpai-auth-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.ketangpai-auth-option { min-width: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); padding: 18px; }
+.ketangpai-method-head { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 11px; }
+.ketangpai-method-head h3 { margin: 0; font-size: var(--font-md); }
+.ketangpai-method-head p { margin: 3px 0 0; color: var(--text-muted); font-size: var(--font-xs); line-height: 1.5; }
+.ketangpai-method-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: var(--radius-md); background: var(--primary-soft); color: var(--primary); }
+.ketangpai-method-form { display: grid; gap: 14px; margin-top: 18px; }
+.ketangpai-method-action { width: 100%; margin-top: 2px; }
+.ketangpai-sms-option > summary { cursor: pointer; list-style: none; }
+.ketangpai-sms-option > summary::-webkit-details-marker { display: none; }
+.ketangpai-method-chevron { color: var(--text-muted); transition: transform .16s ease; }
+.ketangpai-sms-option[open] .ketangpai-method-chevron { transform: rotate(180deg); }
+.ketangpai-sms-content { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 16px; }
+.ketangpai-sms-content .ketangpai-method-form { margin-top: 0; }
+.ketangpai-captcha-row { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); align-items: end; gap: 12px; }
+.ketangpai-captcha { display: block; width: min(220px, 100%); min-height: 54px; border: 1px solid var(--border); border-radius: var(--radius-md); background: white; object-fit: contain; }
+.ketangpai-footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid var(--border); margin-top: 20px; padding-top: 18px; }
+.ketangpai-footer > p { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--text-muted); font-size: var(--font-xs); }
+.ketangpai-session-actions { display: flex; align-items: center; gap: 10px; }
+.ketangpai-session-actions .btn { min-width: 122px; }

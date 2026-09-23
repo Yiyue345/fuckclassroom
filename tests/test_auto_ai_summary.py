@@ -7,9 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fuckclassroom.classroom.ai import AIClientError
+from fuckclassroom.plugins.ai_summary.errors import AIClientError
 from fuckclassroom.classroom.client import Course, CourseDetail, Lesson, LessonResource
-from fuckclassroom.classroom.extraction import LessonExtractionService
+from fuckclassroom.plugins.processing.extraction import LessonExtractionService
 from fuckclassroom.core.config import AppConfig
 
 
@@ -107,7 +107,7 @@ class AutomaticAiSummaryTests(unittest.TestCase):
             with (
                 patch.object(service, "_download_export", return_value=(ppt_path, True)),
                 patch(
-                    "fuckclassroom.classroom.extraction.extract_pptx_text",
+                    "fuckclassroom.plugins.processing.extraction.extract_pptx_text",
                     return_value=("PPT：状态转移方程 dp[i] = min(dp[i-1], dp[i-2])", []),
                 ),
             ):
@@ -135,7 +135,7 @@ class AutomaticAiSummaryTests(unittest.TestCase):
             with (
                 patch.object(service, "_download_export", return_value=(ppt_path, True)),
                 patch(
-                    "fuckclassroom.classroom.extraction.extract_pptx_text",
+                    "fuckclassroom.plugins.processing.extraction.extract_pptx_text",
                     return_value=("PPT 文字内容", []),
                 ),
             ):

@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import main
 
+from fuckclassroom.web import ReloadableApplication
+
 
 class ServerStartupTests(unittest.TestCase):
     def test_reserved_default_uses_available_fallback(self) -> None:
@@ -19,6 +21,9 @@ class ServerStartupTests(unittest.TestCase):
 
         self.assertEqual(port, main.DEFAULT_PORT)
         probe.assert_called_once_with("127.0.0.1", main.DEFAULT_PORT)
+
+    def test_main_uses_reloadable_application_shell(self) -> None:
+        self.assertIsInstance(main.app, ReloadableApplication)
 
     def test_run_reuses_the_existing_application_instance(self) -> None:
         environment = {

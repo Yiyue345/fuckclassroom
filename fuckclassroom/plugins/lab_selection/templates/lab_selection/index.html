@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% set active_system = "lab_selection" %}
+{% set active_nav = "lab_selection" %}
+{% block title %}实验课选课 · 学业助手{% endblock %}
+{% block page_title %}实验课选课{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>实验课选课</h1>
+      <p class="page-description">查看实验项目、可选时段和名额，选课结果会在当前页面返回。</p>
+    </div>
+    <div class="head-actions">
+      <form class="lab-semester-switcher" data-lab-query-form>
+        <select class="select" id="lab-semester" aria-label="学年学期"><option value="">当前学期</option></select>
+        <button class="btn" id="lab-refresh" type="submit"><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>查询课程</button>
+      </form>
+      <form method="post" action="/lab-selection/login"><button class="btn primary" type="submit"><svg class="icon"><use href="/static/icons.svg#log-in"></use></svg>登录本科教务</button></form>
+    </div>
+  </div>
+
+  <div class="lab-session-summary">
+    <div class="lab-session-copy">
+      <span>教务会话</span>
+      <strong>{{ session.message }}</strong>
+    </div>
+    <div class="lab-session-meta">
+      <span><small>当前学期</small><strong id="lab-current-semester">尚未查询</strong></span>
+      <span><small>实验课程</small><strong id="lab-course-total">—</strong></span>
+      <span class="status {% if session.is_saved and session.is_valid is not sameas false %}green{% else %}red{% endif %}"><span class="tiny-dot"></span>{% if session.is_valid is sameas true %}入口有效{% elif session.is_saved %}会话已保存{% else %}尚未登录{% endif %}</span>
+    </div>
+  </div>
+
+  <div class="notice" id="lab-message" role="status" aria-live="polite">
+    <svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg>
+    <span data-lab-message>选择学期并查询课程；展开课程即可查看实验项目和可选时间。</span>
+  </div>
+
+  <div id="lab-app">
+    <nav class="tabs" aria-label="实验选课分类">
+      <button class="tab active" type="button" data-lab-tab="courses">可选实验<span class="count" id="lab-course-count">0</span></button>
+      <button class="tab" type="button" data-lab-tab="waitlist">候补任务<span class="count" id="lab-waitlist-count">0</span></button>
+    </nav>
+
+    <section class="lab-panel" data-lab-panel="courses">
+      <div class="toolbar lab-toolbar">
+        <div class="toolbar-left">
+          <div class="search"><svg class="icon"><use href="/static/icons.svg#search"></use></svg><input class="input" id="lab-search" type="search" placeholder="搜索实验课程"></div>
+        </div>
+        <div class="toolbar-right"><span class="section-meta" id="lab-updated">尚未查询</span></div>
+      </div>
+      <div class="selection-course-list" id="lab-courses">
+        <div class="table-wrap"><div class="table-empty">点击右上角“查询课程”读取实验课程</div></div>
+      </div>
+      <div class="lab-pagination" id="lab-pagination" hidden>
+        <button class="btn" id="lab-prev" type="button"><svg class="icon"><use href="/static/icons.svg#arrow-left"></use></svg>上一页</button>
+        <span id="lab-page">第 1 页</span>
+        <button class="btn" id="lab-next" type="button">下一页<svg class="icon lab-next-icon"><use href="/static/icons.svg#arrow-left"></use></svg></button>
+      </div>
+    </section>
+
+    <section class="lab-panel" data-lab-panel="waitlist" hidden>
+      <div class="stat-band lab-waitlist-stats">
+        <div class="stat"><div class="stat-label">正在候补</div><div class="stat-value" id="lab-waitlist-active">0</div><div class="stat-foot">自动检查空位并尝试选课</div></div>
+        <div class="stat"><div class="stat-label">已经选上</div><div class="stat-value" id="lab-waitlist-selected">0</div><div class="stat-foot">已核验成功的任务</div></div>
+        <div class="stat"><div class="stat-label">任务总数</div><div class="stat-value" id="lab-waitlist-total">0</div><div class="stat-foot">记录保存在本机</div></div>
+      </div>
+      <div class="toolbar lab-waitlist-toolbar">
+        <div class="toolbar-left"><span class="section-meta" id="lab-waitlist-message" role="status">正在读取候补任务</span></div>
+        <div class="toolbar-right"><button class="btn" id="lab-waitlist-refresh" type="button"><svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>刷新</button></div>
+      </div>
+      <div class="table-wrap">
+        <table class="lab-waitlist-table">
+          <thead><tr><th>实验课程 / 时段</th><th>执行状态</th><th>检查 / 尝试</th><th>下次检查</th><th></th></tr></thead>
+          <tbody id="lab-waitlist"><tr><td colspan="5" class="table-empty">正在读取候补任务</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <dialog id="lab-confirm" aria-labelledby="lab-confirm-title">
+    <div class="lab-dialog-head">
+      <span class="lab-dialog-icon"><svg class="icon"><use href="/static/icons.svg#check-square"></use></svg></span>
+      <div><h2 id="lab-confirm-title">确认实验选课</h2><p>提交前会重新核对名额和时间状态。</p></div>
+    </div>
+    <div class="lab-dialog-body">
+      <p class="lab-confirm-description" id="lab-confirm-description"></p>
+      <div class="field" id="lab-waitlist-options" hidden>
+        <label for="lab-waitlist-interval">检查间隔（秒）</label>
+        <input class="input" id="lab-waitlist-interval" type="number" min="15" max="3600" value="30">
+        <span class="field-hint">保持应用运行时自动检查，选上、结束或取消后停止。</span>
+      </div>
+    </div>
+    <div class="lab-dialog-actions">
+      <button class="btn" id="lab-confirm-cancel" type="button">取消</button>
+      <button class="btn primary" id="lab-confirm-submit" type="button">确认选课</button>
+    </div>
+  </dialog>
+{% endblock %}
