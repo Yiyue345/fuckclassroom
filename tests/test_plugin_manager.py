@@ -30,6 +30,7 @@ class PluginManagerTests(unittest.TestCase):
                     "ai_summary",
                     "attendance",
                     "course_selection",
+                    "lab_selection",
                 },
             )
             self.assertEqual(manager.selection_source, "default")
@@ -41,11 +42,11 @@ class PluginManagerTests(unittest.TestCase):
 
             desired = manager.disable("classroom")
 
-            self.assertEqual(desired, {"core_ui", "course_selection"})
+            self.assertEqual(desired, {"core_ui", "course_selection", "lab_selection"})
             payload = json.loads(manager.state_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 set(payload["selected"]),
-                {"core_ui", "course_selection"},
+                {"core_ui", "course_selection", "lab_selection"},
             )
 
     def test_enabling_plugin_automatically_enables_dependencies(self) -> None:
@@ -76,7 +77,7 @@ class PluginManagerTests(unittest.TestCase):
             self.assertIn("/selection/info", paths)
             self.assertEqual(
                 set(app.state.plugin_registry.plugin_ids),
-                {"core_ui", "course_selection"},
+                {"core_ui", "course_selection", "lab_selection"},
             )
 
     def test_core_ui_cannot_be_disabled(self) -> None:
