@@ -45,8 +45,8 @@ def build_plugin():
         template_dir=Path(__file__).resolve().parent / "templates",
         static_dir=Path(__file__).resolve().parent / "static",
         ui_assets=(
-            UIAsset("lab_selection.js?v=20260923-1", pages=("lab_selection",)),
-            UIAsset("lab_selection.css?v=20260923-1", kind="style", pages=("lab_selection",)),
+            UIAsset("lab_selection.js?v=20260923-2", pages=("lab_selection",)),
+            UIAsset("lab_selection.css?v=20260923-2", kind="style", pages=("lab_selection",)),
         ),
         navigation_groups=(NavigationGroup(
             key="lab_selection", label="实验课选课", aria_label="实验课选课导航",
