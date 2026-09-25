@@ -49,19 +49,11 @@
 .account-session-actions .btn { width: 100%; }
 
 /* Plugin manager */
-.plugin-install-panel { margin-bottom: 28px; }
-.plugin-install-panel .account-session-header { margin-bottom: 20px; }
-.plugin-install-panel > .account-session-header .status { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
-.plugin-install-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.plugin-install-option { display: flex; min-width: 0; flex-direction: column; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); padding: 18px; }
-.plugin-install-option-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
-.plugin-install-option-head h3 { margin: 0; font-size: var(--font-md); }
-.plugin-install-option-head p { margin: 5px 0 0; color: var(--text-muted); font-size: var(--font-xs); line-height: 1.55; }
-.plugin-install-form { display: grid; gap: 12px; margin-top: auto; }
-.plugin-upload-box { display: flex; min-height: 88px; flex: 1; flex-direction: column; align-items: flex-start; justify-content: center; gap: 9px; }
-.plugin-upload-status { color: var(--text-muted); font-size: var(--font-xs); line-height: 1.5; }
-.plugin-security-note { display: flex; align-items: flex-start; gap: 8px; border-top: 1px solid var(--border); color: var(--text-muted); padding-top: 17px; margin-top: 20px; font-size: var(--font-xs); line-height: 1.6; }
-.plugin-security-note .icon { color: var(--amber); margin-top: 1px; }
+.plugin-list-head { align-items: center; }
+.plugin-list-head-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+.plugin-upload-status { max-width: 360px; overflow: hidden; color: var(--text-muted); font-size: var(--font-xs); text-overflow: ellipsis; white-space: nowrap; }
+.plugin-add-button.btn.icon-only { width: 32px; height: 32px; min-height: 32px; flex: 0 0 32px; padding: 0; }
+.plugin-add-glyph { display: block; font-size: 22px; font-weight: 400; line-height: 1; transform: translateY(-1px); }
 
 .plugin-manager-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .plugin-manager-card { min-height: 0; padding: 16px; }
@@ -101,25 +93,26 @@
 .plugin-manager-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 9px; margin-top: 10px; }
 .plugin-manager-footer form { display: inline-flex; }
 
-.plugin-package-guide { overflow: hidden; margin-top: 28px; }
-.plugin-package-guide > summary { display: flex; min-height: 74px; align-items: center; justify-content: space-between; gap: 18px; list-style: none; padding: 18px 22px; cursor: pointer; }
-.plugin-package-guide > summary::-webkit-details-marker { display: none; }
-.plugin-package-guide > summary h2 { margin: 0; font-size: 15px; }
-.plugin-package-guide > summary p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--font-xs); }
-.plugin-package-guide > summary > .icon { color: var(--text-muted); transition: transform .16s ease; }
-.plugin-package-guide[open] > summary { border-bottom: 1px solid var(--border); }
-.plugin-package-guide[open] > summary > .icon { transform: rotate(180deg); }
-.plugin-package-guide-body { padding: 20px 22px 22px; }
-.plugin-package-guide-body > p { margin: 14px 0 0; color: var(--text-soft); font-size: var(--font-xs); line-height: 1.65; }
-.plugin-manifest-example { overflow-x: auto; margin: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-subtle); color: var(--text-soft); padding: 14px 16px; font: 10px/1.7 Consolas, "SFMono-Regular", monospace; }
-
 @media (max-width: 1320px) {
   .plugin-manager-grid { grid-template-columns: 1fr; }
   .plugin-manager-details { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
-  .plugin-manager-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plugin-manager-details, .about-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plugin-list-head { align-items: flex-start; }
+  .plugin-list-head-actions { flex-wrap: wrap; }
+  .plugin-upload-status { max-width: 220px; }
 }
+
+/* About */
+.about-card { max-width: 760px; padding: 24px; }
+.about-brand { display: flex; align-items: center; gap: 14px; padding-bottom: 22px; }
+.about-logo { display: grid; width: 48px; height: 48px; flex: 0 0 48px; place-items: center; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-subtle); font-size: 16px; font-weight: 750; letter-spacing: -.03em; }
+.about-brand h2 { margin: 0; font-size: 18px; }
+.about-brand p { margin: 5px 0 0; color: var(--text-muted); font-size: var(--font-xs); }
+.about-details { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 2px; }
+.about-details a { color: inherit; text-decoration: none; }
+.about-details a:hover { text-decoration: underline; }
 
 /* Core task pages. */
 .task-stack { display: grid; }
@@ -140,7 +133,6 @@
 .settings-main ~ .settings-section { margin-top: 20px; }
 .theme-option { padding: 12px; }
 .theme-preview { height: 76px; }
-.plugin-install-panel { background: var(--surface); }
 .plugin-manager-card { transition: border-color .15s ease; }
 .plugin-manager-card:hover { border-color: var(--border-strong); }
 .task-item { padding: 22px 24px; }
@@ -153,9 +145,9 @@
   .settings-nav { position: static; display: flex; overflow-x: auto; border-left: 0; padding: 0 0 8px; }
   .settings-nav a { flex: 0 0 auto; }
   .settings-section { padding: 20px; }
-  .plugin-install-options, .session-overview { grid-template-columns: minmax(0, 1fr); }
+  .session-overview { grid-template-columns: minmax(0, 1fr); }
   .account-session-panel { padding: 20px; }
-  .account-session-header, .plugin-install-option-head, .plugin-manager-dependencies-head { flex-wrap: wrap; }
+  .account-session-header, .plugin-manager-dependencies-head { flex-wrap: wrap; }
   .account-session-actions { grid-template-columns: minmax(0, 1fr); }
   .plugin-manager-controls { width: 100%; justify-content: flex-start; }
   .task-top { flex-wrap: wrap; }
