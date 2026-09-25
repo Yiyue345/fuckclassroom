@@ -85,7 +85,7 @@
           <a class="task-item" href="/tasks/{{ task.id }}">
             <div class="task-top">
               <div><div class="task-title">{{ task.title }}</div><div class="task-meta">{{ task.message }} · {{ task.updated_at }}</div></div>
-              {% if task.status == "succeeded" %}<span class="status green">完成</span>{% elif task.status == "failed" %}<span class="status red">失败</span>{% else %}<span class="status blue">{{ task.progress }}%</span>{% endif %}
+              {% if task.status == "succeeded" %}<span class="status green">已完成</span>{% elif task.status == "failed" %}<span class="status red">失败</span>{% elif task.status == "cancelled" %}<span class="status gray">已取消</span>{% elif task.status == "cancel_requested" or task.cancel_requested %}<span class="status blue">取消中</span>{% else %}<span class="status blue">进行中 {{ task.progress }}%</span>{% endif %}
             </div>
             {% if task.status == "running" %}<div class="progress"><span style="width: {{ task.progress }}%"></span></div>{% endif %}
           </a>
