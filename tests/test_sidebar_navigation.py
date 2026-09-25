@@ -37,6 +37,7 @@ class SidebarNavigationTests(unittest.TestCase):
                 "/accounts",
                 "/plugins",
                 "/settings",
+                "/about",
             },
         )
 
@@ -81,6 +82,7 @@ class SidebarNavigationTests(unittest.TestCase):
         environment.get_template("base.html")
         environment.get_template("core/settings.html")
         environment.get_template("core/plugin_manager.html")
+        environment.get_template("core/about.html")
         for panel in registry.settings_panels:
             environment.get_template(panel.template)
 
@@ -134,8 +136,12 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("grid-template-columns: repeat(4, minmax(0, 1fr))", styles)
         self.assertIn(".plugin-manager-card { min-height: 0; padding: 16px; }", styles)
         self.assertIn(".account-session-panel {", styles)
-        self.assertIn(".plugin-install-option {", styles)
+        self.assertIn(".plugin-add-button.btn.icon-only {", styles)
         self.assertIn(".plugin-manager-grid {", styles)
+        self.assertIn("已安装插件", template)
+        self.assertIn('id="plugin-zip-button"', template)
+        self.assertNotIn("本机路径", template)
+        self.assertNotIn("外部插件包格式", template)
         self.assertIn('class="toggle-control plugin-toggle-control"', template)
         self.assertIn('role="switch"', template)
         self.assertIn('onchange="this.form.requestSubmit()"', template)
@@ -153,7 +159,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260922-2",
+            "/plugins/core_ui/static/core_ui.css?v=20260926-1",
             registry.stylesheets,
         )
         self.assertIn(
