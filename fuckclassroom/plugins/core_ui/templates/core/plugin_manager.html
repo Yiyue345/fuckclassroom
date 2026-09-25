@@ -36,67 +36,19 @@
     </div>
   {% endif %}
 
-  <section class="surface account-session-panel plugin-install-panel">
-    <header class="account-session-header">
-      <div class="account-session-name">
-        <span class="workspace-icon"><svg class="icon"><use href="/static/icons.svg#folder"></use></svg></span>
-        <div>
-          <h2>添加外部插件</h2>
-          <span>从本机目录或 ZIP 包安装；新插件默认保持停用</span>
-        </div>
-      </div>
-      <span class="status gray">{{ plugin_dir }}</span>
-    </header>
-
-    <div class="plugin-install-options">
-      <section class="plugin-install-option">
-        <div class="plugin-install-option-head">
-          <div>
-            <h3>本机路径</h3>
-            <p>适合开发中的插件目录，或已经下载到磁盘的 ZIP 插件包。</p>
-          </div>
-          <span class="status blue">目录 / ZIP</span>
-        </div>
-        <form class="plugin-install-form" method="post" action="/plugins/install">
-          <div class="field">
-            <label for="plugin-source-path">插件路径</label>
-            <input class="input mono" id="plugin-source-path" name="source_path" placeholder="D:\plugins\my_plugin 或 /home/me/my_plugin.zip" {% if not plugin_config_mutable %}disabled{% endif %}>
-            <span class="field-hint">插件根目录中需要包含 plugin.json。</span>
-          </div>
-          <button class="btn primary" type="submit" {% if not plugin_config_mutable %}disabled{% endif %}>
-            <svg class="icon small"><use href="/static/icons.svg#folder"></use></svg>从路径添加
-          </button>
-        </form>
-      </section>
-
-      <section class="plugin-install-option">
-        <div class="plugin-install-option-head">
-          <div>
-            <h3>上传 ZIP</h3>
-            <p>直接选择插件压缩包，安装后可以在下方检查兼容性与依赖。</p>
-          </div>
-          <span class="status gray">最大 50 MB</span>
-        </div>
-        <div class="plugin-upload-box">
-          <input id="plugin-zip-file" type="file" accept=".zip,application/zip" hidden {% if not plugin_config_mutable %}disabled{% endif %}>
-          <button class="btn" id="plugin-zip-button" type="button" {% if not plugin_config_mutable %}disabled{% endif %}>
-            <svg class="icon small"><use href="/static/icons.svg#folder"></use></svg>选择 ZIP 插件包
-          </button>
-          <span class="plugin-upload-status" id="plugin-upload-status">选择文件后会直接安装，不会自动启用。</span>
-        </div>
-      </section>
-    </div>
-
-    <div class="plugin-security-note">
-      <svg class="icon small"><use href="/static/icons.svg#shield-check"></use></svg>
-      <span>外部插件启用后会执行 Python 代码。只安装可信来源；不兼容当前插件 API 或应用版本的插件会被阻止启用。</span>
-    </div>
-  </section>
-
   <section class="section">
-    <div class="section-head">
-      <h2>已发现插件</h2>
-      <span class="section-meta">{{ plugins|length }} 个插件</span>
+    <div class="section-head plugin-list-head">
+      <h2>已安装插件</h2>
+      <div class="plugin-list-head-actions">
+        <span class="plugin-upload-status" id="plugin-upload-status" aria-live="polite"></span>
+        <span class="section-meta">{{ plugins|length }} 个插件</span>
+        <input id="plugin-zip-file" type="file" accept=".zip,application/zip" hidden {% if not plugin_config_mutable %}disabled{% endif %}>
+        <button class="btn icon-only plugin-add-button" id="plugin-zip-button" type="button"
+          title="添加外部插件" aria-label="添加外部插件"
+          {% if not plugin_config_mutable %}disabled{% endif %}>
+          <span class="plugin-add-glyph" aria-hidden="true">+</span>
+        </button>
+      </div>
     </div>
 
     <div class="plugin-manager-grid">
@@ -179,10 +131,10 @@
                     <span>点击展开 Python 包与运行时组件</span>
                   </div>
                   <div class="plugin-manager-dependency-summary">
-                    {% if plugin.dependency_issue %}
+                    {% if plugin.missing_required_dependencies %}
                       <span class="status red">缺少必需依赖</span>
                     {% elif plugin.missing_optional_dependencies %}
-                      <span class="status amber">缺少可选增强</span>
+                      <span class="status amber">缺少可选扩展</span>
                     {% else %}
                       <span class="status green">已就绪</span>
                     {% endif %}
@@ -194,12 +146,18 @@
                   <div class="plugin-manager-dependency-list">
                     {% for dependency in plugin.dependencies %}
                       <div class="plugin-manager-dependency-row">
-                        <span class="session-dot {% if dependency.installed %}valid{% else %}invalid{% endif %}"></span>
+                        <span class="session-dot {% if dependency.installed %}valid{% elif dependency.optional %}optional-missing{% else %}invalid{% endif %}"></span>
                         <div>
                           <strong>{{ dependency.label }}</strong>
                           <span class="mono">{{ dependency.version or dependency.requirement or dependency.import_name }}</span>
                         </div>
-                        {% if dependency.optional %}<span class="status gray">可选</span>{% endif %}
+                        {% if dependency.optional and not dependency.installed %}
+                          <span class="status amber">可选 · 未安装</span>
+                        {% elif dependency.optional %}
+                          <span class="status gray">可选</span>
+                        {% elif not dependency.installed %}
+                          <span class="status red">必需 · 未安装</span>
+                        {% endif %}
                       </div>
                     {% endfor %}
                   </div>
@@ -232,30 +190,6 @@
       {% endfor %}
     </div>
   </section>
-
-  <details class="surface plugin-package-guide">
-    <summary>
-      <div>
-        <h2>外部插件包格式</h2>
-        <p>查看 plugin.json 的最小示例与兼容性字段。</p>
-      </div>
-      <svg class="icon"><use href="/static/icons.svg#chevron-down"></use></svg>
-    </summary>
-    <div class="plugin-package-guide-body">
-<pre class="plugin-manifest-example">{
-  "id": "my_plugin",
-  "name": "示例插件",
-  "version": "0.1.0",
-  "api_version": {{ plugin_api_version }},
-  "app_requires": ">=0.1,<0.3",
-  "description": "插件说明",
-  "requires": ["classroom"],
-  "python_requires": ["httpx>=0.27"],
-  "entry": "plugin.py"
-}</pre>
-      <p>plugin.py 中的 <code>PluginSpec.api_version</code> 必须与清单一致。API 主版本不匹配，或当前 FuckClassroom 版本不满足 <code>app_requires</code> 时，插件仍可保留在插件目录中，但不会被启用或执行。</p>
-    </div>
-  </details>
 {% endblock %}
 
 {% block scripts %}
@@ -421,7 +355,7 @@
     const file = input.files && input.files[0];
     if (!file) return;
     button.disabled = true;
-    status.textContent = `正在安装 ${file.name}…`;
+    status.textContent = `正在添加 ${file.name}…`;
     try {
       const response = await fetch('/plugins/install-upload', {
         method: 'POST',
