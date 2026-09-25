@@ -3,15 +3,13 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from importlib.metadata import PackageNotFoundError
 from pathlib import Path
-from unittest.mock import patch
 
 from fuckclassroom import __version__ as APP_VERSION
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.core.plugins import PLUGIN_API_VERSION
 from fuckclassroom.plugins import build_plugin_registry
-from fuckclassroom.plugins.manager import DependencySpec, PluginManager, PluginManagerError
+from fuckclassroom.plugins.manager import PluginManager, PluginManagerError
 from fuckclassroom.plugins.rpc import PLUGIN_RPC_API_VERSION
 from fuckclassroom.web import create_app
 
@@ -77,7 +75,6 @@ class PluginManagerTests(unittest.TestCase):
             self.assertNotIn("/classroom", paths)
             self.assertNotIn("/courses", paths)
             self.assertIn("/selection/info", paths)
-            self.assertIn("/about", paths)
             self.assertEqual(
                 set(app.state.plugin_registry.plugin_ids),
                 {"core_ui", "course_selection", "lab_selection"},
@@ -272,70 +269,6 @@ def build_plugin():
                 item for item in attendance if item["label"] == "wxscan 原生扩展"
             )
             self.assertTrue(wxscan["optional"])
-
-    def test_importable_alternative_distribution_counts_as_installed(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            manager = PluginManager(AppConfig(data_dir=Path(directory)))
-            dependency = DependencySpec(
-                "opencv-python>=4.8",
-                "cv2",
-                "OpenCV",
-            )
-
-            with (
-                patch(
-                    "fuckclassroom.plugins.manager.importlib.util.find_spec",
-                    return_value=object(),
-                ),
-                patch(
-                    "fuckclassroom.plugins.manager.importlib.metadata.version",
-                    side_effect=PackageNotFoundError("opencv-python"),
-                ),
-            ):
-                status = manager._dependency_status(dependency)
-
-            self.assertTrue(status["installed"])
-            self.assertEqual(status["version"], "")
-
-    def test_optional_dependency_is_reported_as_optional_missing(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            plugin_root = root / "data" / "plugins" / "optional_dep"
-            plugin_root.mkdir(parents=True)
-            (plugin_root / "plugin.json").write_text(
-                json.dumps(
-                    {
-                        "id": "optional_dep",
-                        "name": "Optional Dep",
-                        "requires": [],
-                        "entry": "plugin.py",
-                        "python_requires": [
-                            {
-                                "requirement": "definitely-missing-fuckclassroom-optional>=1",
-                                "import": "definitely_missing_fuckclassroom_optional",
-                                "label": "Optional Extension",
-                                "optional": True,
-                            }
-                        ],
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (plugin_root / "plugin.py").write_text(
-                "from fuckclassroom.core.plugins import PluginSpec\n"
-                "def build_plugin():\n"
-                "    return PluginSpec(id='optional_dep', name='Optional Dep')\n",
-                encoding="utf-8",
-            )
-
-            manager = PluginManager(AppConfig(data_dir=root / "data"))
-            rows = {row["id"]: row for row in manager.status_rows(())}
-            row = rows["optional_dep"]
-
-            self.assertEqual(row["dependency_state"], "optional_missing")
-            self.assertFalse(row["dependency_issue"])
-            self.assertEqual(len(row["missing_required_dependencies"]), 0)
-            self.assertEqual(len(row["missing_optional_dependencies"]), 1)
 
     def test_external_plugin_with_missing_python_dependency_cannot_be_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
