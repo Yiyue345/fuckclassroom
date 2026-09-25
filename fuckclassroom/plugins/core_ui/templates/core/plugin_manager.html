@@ -14,7 +14,12 @@
     </div>
     <div class="plugin-page-actions">
       <span class="plugin-upload-status" id="plugin-upload-status" aria-live="polite"></span>
-      <span class="plugin-operation-spinner hidden" id="plugin-operation-status" aria-hidden="true"></span>
+      <span class="plugin-operation-status{% if not notice %} hidden{% endif %}" id="plugin-operation-status" role="status" aria-live="polite" aria-label="{% if notice %}操作完成{% else %}插件操作状态{% endif %}">
+        <span class="plugin-operation-spinner{% if notice %} hidden{% endif %}" data-operation-loading aria-hidden="true"></span>
+        <svg class="icon plugin-operation-done{% if not notice %} hidden{% endif %}" data-operation-done aria-hidden="true">
+          <use href="/static/icons.svg#circle-check"></use>
+        </svg>
+      </span>
       <input id="plugin-zip-file" type="file" accept=".zip,application/zip" hidden {% if not plugin_config_mutable %}disabled{% endif %}>
       <button class="plugin-add-button" id="plugin-zip-button" type="button"
         title="添加外部插件" aria-label="添加外部插件"
@@ -223,7 +228,7 @@
           <h3 class="plugin-manage-title">管理</h3>
           <div class="plugin-manage-list">
             {% if plugin.dependencies %}
-              <form method="post" action="/plugins/{{ plugin.id }}/dependencies/install">
+              <form method="post" action="/plugins/{{ plugin.id }}/dependencies/install" data-plugin-operation-form>
                 <button class="plugin-manage-row" type="submit">
                   <span>{{ "安装 / 修复依赖" if plugin.missing_required_dependencies or plugin.missing_optional_dependencies else "重新安装 / 修复依赖" }}</span>
                   <span aria-hidden="true">›</span>
@@ -247,7 +252,7 @@
             </details>
 
             {% if not plugin.builtin %}
-              <form method="post" action="/plugins/{{ plugin.id }}/remove">
+              <form method="post" action="/plugins/{{ plugin.id }}/remove" data-plugin-operation-form>
                 <button class="plugin-manage-row danger" type="submit"
                   {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
                   title="{% if plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
@@ -457,6 +462,7 @@
       if (!id || !input || input.disabled) return;
 
       const requestedEnabled = input.checked;
+      showOperationStatus('loading');
       formsFor(id).forEach((otherForm) => {
         const otherInput = otherForm.querySelector('input[type="checkbox"]');
         if (otherInput) {
@@ -490,9 +496,15 @@
         });
 
         const status = await waitForRuntime();
-        if (!status.last_error && !status.restart_required) await refreshShellChrome();
+        if (!status.last_error && !status.restart_required) {
+          await refreshShellChrome();
+          showOperationStatus('done');
+        } else if (!status.last_error) {
+          showOperationStatus('done');
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        hideOperationStatus();
         if (!configurationSaved) {
           setPluginState(id, !requestedEnabled, !requestedEnabled, { error: message });
           const failedBadge = row?.querySelector('[data-plugin-state-badge]');
@@ -517,10 +529,36 @@
   const uploadButton = document.getElementById('plugin-zip-button');
   const uploadStatus = document.getElementById('plugin-upload-status');
   const operationStatus = document.getElementById('plugin-operation-status');
+  const operationLoading = operationStatus?.querySelector('[data-operation-loading]');
+  const operationDone = operationStatus?.querySelector('[data-operation-done]');
+  let operationStatusTimer = 0;
+
+  function showOperationStatus(state) {
+    if (!operationStatus || !operationLoading || !operationDone) return;
+    window.clearTimeout(operationStatusTimer);
+    operationStatus.classList.remove('hidden');
+    const done = state === 'done';
+    operationLoading.classList.toggle('hidden', done);
+    operationDone.classList.toggle('hidden', !done);
+    operationStatus.classList.toggle('is-done', done);
+    operationStatus.setAttribute('aria-label', done ? '操作完成' : '正在处理插件操作');
+    if (done) {
+      operationStatusTimer = window.setTimeout(() => {
+        operationStatus.classList.add('hidden');
+      }, 1600);
+    }
+  }
+
+  function hideOperationStatus() {
+    if (!operationStatus) return;
+    window.clearTimeout(operationStatusTimer);
+    operationStatus.classList.add('hidden');
+  }
 
   function setUploadBusy(busy) {
     if (uploadButton) uploadButton.disabled = busy;
-    operationStatus?.classList.toggle('hidden', !busy);
+    if (busy) showOperationStatus('loading');
+    else hideOperationStatus();
   }
 
   uploadButton?.addEventListener('click', () => uploadInput?.click());
@@ -549,6 +587,16 @@
       uploadInput.value = '';
     }
   });
+
+  document.querySelectorAll('[data-plugin-operation-form]').forEach((form) => {
+    form.addEventListener('submit', () => showOperationStatus('loading'));
+  });
+
+  if (operationStatus && operationStatus.classList.contains('is-done')) {
+    showOperationStatus('done');
+  } else if (operationDone && !operationDone.classList.contains('hidden')) {
+    showOperationStatus('done');
+  }
 
   applyFilters();
   if (selectedId) selectPlugin(selectedId);
