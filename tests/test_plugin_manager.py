@@ -270,6 +270,46 @@ def build_plugin():
             )
             self.assertTrue(wxscan["optional"])
 
+    def test_optional_dependency_is_reported_as_optional_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "optional_dep"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "optional_dep",
+                        "name": "Optional Dep",
+                        "requires": [],
+                        "entry": "plugin.py",
+                        "python_requires": [
+                            {
+                                "requirement": "definitely-missing-fuckclassroom-optional>=1",
+                                "import": "definitely_missing_fuckclassroom_optional",
+                                "label": "Optional Extension",
+                                "optional": True,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='optional_dep', name='Optional Dep')\n",
+                encoding="utf-8",
+            )
+
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+            rows = {row["id"]: row for row in manager.status_rows(())}
+            row = rows["optional_dep"]
+
+            self.assertEqual(row["dependency_state"], "optional_missing")
+            self.assertFalse(row["dependency_issue"])
+            self.assertEqual(len(row["missing_required_dependencies"]), 0)
+            self.assertEqual(len(row["missing_optional_dependencies"]), 1)
+
     def test_external_plugin_with_missing_python_dependency_cannot_be_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
