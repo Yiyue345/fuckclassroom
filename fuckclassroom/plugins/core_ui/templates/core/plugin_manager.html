@@ -146,12 +146,18 @@
                   <div class="plugin-manager-dependency-list">
                     {% for dependency in plugin.dependencies %}
                       <div class="plugin-manager-dependency-row">
-                        <span class="session-dot {% if dependency.installed %}valid{% else %}invalid{% endif %}"></span>
+                        <span class="session-dot {% if dependency.installed %}valid{% elif dependency.optional %}optional-missing{% else %}invalid{% endif %}"></span>
                         <div>
                           <strong>{{ dependency.label }}</strong>
                           <span class="mono">{{ dependency.version or dependency.requirement or dependency.import_name }}</span>
                         </div>
-                        {% if dependency.optional %}<span class="status gray">可选</span>{% endif %}
+                        {% if dependency.optional and not dependency.installed %}
+                          <span class="status amber">可选 · 未安装</span>
+                        {% elif dependency.optional %}
+                          <span class="status gray">可选</span>
+                        {% elif not dependency.installed %}
+                          <span class="status red">必需 · 未安装</span>
+                        {% endif %}
                       </div>
                     {% endfor %}
                   </div>
