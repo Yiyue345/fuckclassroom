@@ -78,7 +78,7 @@
 
 .plugin-manager-layout { display: grid; grid-template-columns: minmax(0, 1.39fr) minmax(360px, 1fr); gap: 20px; align-items: start; }
 .plugin-list-panel, .plugin-detail-panel { min-width: 0; min-height: 714px; border-radius: 16px; box-shadow: none; }
-.plugin-list-panel { padding: 16px; }
+.plugin-list-panel { height: 714px; overflow-y: auto; padding: 16px; scrollbar-width: thin; }
 .plugin-list { display: grid; gap: 20px; }
 .plugin-row { display: grid; min-height: 116px; grid-template-columns: 38px minmax(0, 1fr) 176px; align-items: start; gap: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 17px 16px; outline: 0; cursor: pointer; transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
 .plugin-row:hover { border-color: var(--border-strong); }
@@ -170,7 +170,7 @@ button.plugin-manage-row:hover, summary.plugin-manage-row:hover { border-color: 
 @media (max-width: 1180px) {
   .plugin-manager-layout { grid-template-columns: minmax(0, 1fr); }
   .plugin-detail-panel { position: static; min-height: 0; }
-  .plugin-list-panel { min-height: 0; }
+  .plugin-list-panel { height: auto; max-height: none; min-height: 0; overflow: visible; }
   .plugin-detail-empty { min-height: 220px; }
 }
 @media (max-width: 860px) {
