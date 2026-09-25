@@ -122,48 +122,60 @@ class SidebarNavigationTests(unittest.TestCase):
             ["classroom"],
         )
 
-    def test_plugin_manager_reuses_existing_card_spacing(self) -> None:
+    def test_plugin_manager_matches_split_panel_design(self) -> None:
         template = Path(
             "fuckclassroom/plugins/core_ui/templates/core/plugin_manager.html"
         ).read_text(encoding="utf-8")
-        styles = Path("fuckclassroom/plugins/core_ui/static/core_ui.css").read_text(encoding="utf-8")
+        styles = Path(
+            "fuckclassroom/plugins/core_ui/static/core_ui.css"
+        ).read_text(encoding="utf-8")
         base = Path("templates/base.html").read_text(encoding="utf-8")
 
-        self.assertIn("account-session-panel plugin-manager-card", template)
-        self.assertIn("account-session-header plugin-manager-card-header", template)
-        self.assertIn("detail-grid plugin-manager-details", template)
-        self.assertIn('<details class="plugin-manager-dependencies">', template)
-        self.assertIn("grid-template-columns: repeat(4, minmax(0, 1fr))", styles)
-        self.assertIn(".plugin-manager-card { min-height: 0; padding: 16px; }", styles)
-        self.assertIn(".account-session-panel {", styles)
-        self.assertIn(".plugin-add-button.btn.icon-only {", styles)
-        self.assertIn(".plugin-manager-grid {", styles)
-        self.assertIn("已安装插件", template)
-        self.assertIn("optional-missing", template)
-        self.assertIn("可选 · 未安装", template)
-        self.assertIn("必需 · 未安装", template)
+        self.assertIn('class="plugin-toolbar surface"', template)
+        self.assertIn('id="plugin-search-input"', template)
+        self.assertIn('data-plugin-filter="all"', template)
+        self.assertIn('data-plugin-filter="enabled"', template)
+        self.assertIn('data-plugin-filter="attention"', template)
+        self.assertIn('data-plugin-filter="external"', template)
+        self.assertIn('class="plugin-manager-layout"', template)
+        self.assertIn('class="plugin-list-panel surface"', template)
+        self.assertIn('class="plugin-detail-panel surface"', template)
+        self.assertIn("data-plugin-row", template)
+        self.assertIn("data-plugin-detail", template)
+        self.assertIn("plugin-dependency-box", template)
+        self.assertIn("plugin-manage-row", template)
+        self.assertIn("查看插件技术信息", template)
         self.assertIn('id="plugin-zip-button"', template)
+        self.assertIn('onchange="this.form.requestSubmit()"', template)
+        self.assertEqual(
+            template.count('onchange="this.form.requestSubmit()"'),
+            2,
+        )
+        self.assertIn("applyFilters()", template)
+        self.assertIn("selectPlugin(", template)
+        self.assertIn("fetch('/api/plugins/runtime-status'", template)
+        self.assertIn(".plugin-manager-layout {", styles)
+        self.assertIn(
+            "grid-template-columns: minmax(0, 1.39fr) minmax(360px, 1fr)",
+            styles,
+        )
+        self.assertIn(".plugin-list-panel { height: 714px;", styles)
+        self.assertIn(".plugin-row.is-selected {", styles)
+        self.assertIn(".plugin-detail-panel { position: sticky;", styles)
+        self.assertIn(".plugin-add-button {", styles)
         self.assertNotIn("本机路径", template)
         self.assertNotIn("外部插件包格式", template)
-        self.assertEqual(template.count("{% block "), template.count("{% endblock %}"))
-        self.assertIn('class="toggle-control plugin-toggle-control"', template)
-        self.assertIn('role="switch"', template)
-        self.assertIn('onchange="this.form.requestSubmit()"', template)
-        self.assertIn("data-plugin-card", template)
-        self.assertIn("data-plugin-runtime-state", template)
-        self.assertIn("form.addEventListener('submit'", template)
-        self.assertIn("fetch('/api/plugins/runtime-status'", template)
-        self.assertNotIn("plugin-toggle-state", template)
-        self.assertNotIn("account-session-actions plugin-manager-actions", template)
-        self.assertNotIn(">停用</button>", template)
-        self.assertNotIn(">启用</button>", template)
+        self.assertEqual(
+            template.count("{% block "),
+            template.count("{% endblock %}"),
+        )
         self.assertIn("/static/app.css?v=20260921-6", base)
 
     def test_plugin_ui_assets_are_registered_by_enabled_plugins(self) -> None:
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260926-2",
+            "/plugins/core_ui/static/core_ui.css?v=20260926-3",
             registry.stylesheets,
         )
         self.assertIn(
