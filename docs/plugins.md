@@ -202,7 +202,7 @@ my_plugin/
   "name": "示例插件",
   "version": "0.1.0",
   "api_version": 1,
-  "app_requires": ">=0.1,<0.2",
+  "app_requires": ">=0.1,<0.3",
   "description": "插件说明",
   "requires": ["classroom"],
   "python_requires": ["httpx>=0.27"],
@@ -277,12 +277,12 @@ PLUGIN_API_VERSION = 1
 ```json
 {
   "api_version": 1,
-  "app_requires": ">=0.1,<0.2"
+  "app_requires": ">=0.1,<0.3"
 }
 ```
 
 - `api_version`：插件接口版本。涉及 `PluginSpec`、生命周期 hook、ServiceContainer、Route/Static/Template 注册契约的破坏性变更时才递增。
-- `app_requires`：可选的 PEP 440 FuckClassroom 版本约束，例如 `>=0.1,<0.2`。
+- `app_requires`：可选的 PEP 440 FuckClassroom 版本约束，例如 `>=0.1,<0.3`。
 - 旧插件若没有声明 `api_version`，当前按 API v1 兼容处理。
 - `plugin.py` 返回的 `PluginSpec.api_version` 必须与 `plugin.json.api_version` 一致。
 - API 版本不匹配或 `app_requires` 不满足时，插件可以继续保留在 `data/plugins/` 中并显示在管理页面，但不能启用，也不会执行插件入口代码。
