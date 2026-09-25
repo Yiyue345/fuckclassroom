@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% set active_system = "common" %}
+{% set active_nav = "about" %}
+
+{% block title %}关于 · FuckClassroom{% endblock %}
+{% block breadcrumb_parent %}通用{% endblock %}
+{% block page_title %}关于{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>FuckClassroom</h1>
+      <p class="page-description">面向课程学习、教务与插件扩展的一体化本地工具。</p>
+    </div>
+  </div>
+
+  <section class="surface about-card">
+    <div class="about-brand">
+      <div class="about-logo">FC</div>
+      <div>
+        <h2>FuckClassroom</h2>
+        <p>当前正在开发 0.2.0 版本。</p>
+      </div>
+    </div>
+
+    <div class="detail-grid about-details">
+      <div class="detail-item">
+        <label>应用版本</label>
+        <strong>{{ app_version }}</strong>
+      </div>
+      <div class="detail-item">
+        <label>Plugin API</label>
+        <strong>v{{ plugin_api_version }}</strong>
+      </div>
+      <div class="detail-item">
+        <label>Plugin RPC API</label>
+        <strong>v{{ plugin_rpc_api_version }}</strong>
+      </div>
+      <div class="detail-item">
+        <label>项目仓库</label>
+        <strong><a href="https://github.com/Yiyue345/fuckclassroom" target="_blank" rel="noreferrer">Yiyue345/fuckclassroom</a></strong>
+      </div>
+    </div>
+  </section>
+{% endblock %}

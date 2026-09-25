@@ -33,6 +33,7 @@ class UiModularizationTests(unittest.TestCase):
             Path("fuckclassroom/plugins/core_ui/templates/core/tasks.html"),
             Path("fuckclassroom/plugins/core_ui/templates/core/task_status.html"),
             Path("fuckclassroom/plugins/core_ui/templates/core/plugin_manager.html"),
+            Path("fuckclassroom/plugins/core_ui/templates/core/about.html"),
             Path("fuckclassroom/plugins/classroom/templates/classroom/login.html"),
             Path("fuckclassroom/plugins/classroom/templates/classroom/courses.html"),
             Path("fuckclassroom/plugins/classroom/templates/classroom/course_detail.html"),
