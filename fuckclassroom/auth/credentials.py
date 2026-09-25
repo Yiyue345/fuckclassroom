@@ -72,8 +72,12 @@ class SelectionCredentialStore:
         return credentials
 
     def update_from_form(self, username: str, password: str) -> SelectionCredentials | None:
+        normalized_username = username.strip()
+        if normalized_username and password:
+            return self.save(normalized_username, password)
+
         current = self.load()
-        resolved_username = username.strip() or (current.username if current else "")
+        resolved_username = normalized_username or (current.username if current else "")
         resolved_password = password or (current.password if current else "")
         if not resolved_username and not resolved_password:
             return current
@@ -89,11 +93,22 @@ class SelectionCredentialStore:
         try:
             credentials = self.load()
         except CredentialStoreError as exc:
-            return {"is_saved": False, "username": "", "message": str(exc)}
+            return {
+                "is_saved": False,
+                "can_clear": self.path.exists(),
+                "username": "",
+                "message": str(exc),
+            }
         if credentials is None:
-            return {"is_saved": False, "username": "", "message": "尚未保存统一桂电账号"}
+            return {
+                "is_saved": False,
+                "can_clear": False,
+                "username": "",
+                "message": "尚未保存统一桂电账号",
+            }
         return {
             "is_saved": True,
+            "can_clear": True,
             "username": credentials.username,
             "message": "录播与教务会话失效时将自动登录",
         }

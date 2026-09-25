@@ -74,5 +74,39 @@ class SelectionCredentialStoreTests(unittest.TestCase):
             self.assertFalse(store.public_status()["is_saved"])
 
 
+    def test_complete_new_credentials_overwrite_corrupted_file(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            path = Path(directory) / "credentials.json"
+            path.write_text("{broken-json", encoding="utf-8")
+            store = SelectionCredentialStore(
+                path,
+                protect=_protect,
+                unprotect=_unprotect,
+            )
+
+            saved = store.update_from_form("new-user", "new-password")
+
+            self.assertIsNotNone(saved)
+            loaded = store.load()
+            self.assertEqual(loaded.username, "new-user")
+            self.assertEqual(loaded.password, "new-password")
+
+    def test_corrupted_file_status_remains_clearable(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            path = Path(directory) / "credentials.json"
+            path.write_text("{broken-json", encoding="utf-8")
+            store = SelectionCredentialStore(
+                path,
+                protect=_protect,
+                unprotect=_unprotect,
+            )
+
+            status = store.public_status()
+
+            self.assertFalse(status["is_saved"])
+            self.assertTrue(status["can_clear"])
+            self.assertIn("无法读取", str(status["message"]))
+
+
 if __name__ == "__main__":
     unittest.main()

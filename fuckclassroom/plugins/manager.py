@@ -28,6 +28,11 @@ from .rpc import PLUGIN_RPC_API_VERSION
 
 
 _PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
+_MAX_PLUGIN_ZIP_FILES = 4096
+_MAX_PLUGIN_ZIP_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+_MAX_PLUGIN_ZIP_SINGLE_FILE_BYTES = 128 * 1024 * 1024
+_MAX_PLUGIN_ZIP_COMPRESSION_RATIO = 200
+_ZIP_RATIO_CHECK_MIN_BYTES = 1024 * 1024
 
 
 class PluginManagerError(RuntimeError):
@@ -236,28 +241,28 @@ class PluginManager:
         selected = self._load_selected()
         selected.add(plugin_id)
         desired = self._expand_dependencies(selected)
-        # Validate external code before persisting the enable request so a broken
-        # package does not make the next application start fail immediately.
+        # Validate every plugin that would enter the runtime before persisting
+        # the enable request. Built-in and external plugins use the same
+        # required-dependency semantics.
         for enabled_id in sorted(desired):
             descriptor = descriptors[enabled_id]
-            if not descriptor.builtin:
-                compatibility = self.compatibility_status(descriptor)
-                if not compatibility["compatible"]:
-                    raise PluginManagerError(
-                        f"插件 {descriptor.name} 不兼容：{compatibility['message']}"
-                    )
-                missing = [
-                    item["label"]
-                    for item in self.dependency_status(enabled_id)
-                    if not item["installed"] and not item["optional"]
-                ]
-                if missing:
-                    raise PluginManagerError(
-                        f"插件 {descriptor.name} 缺少依赖："
-                        + "、".join(str(item) for item in missing)
-                        + "；请先安装依赖"
-                    )
-                self.load_spec(descriptor)
+            compatibility = self.compatibility_status(descriptor)
+            if not compatibility["compatible"]:
+                raise PluginManagerError(
+                    f"插件 {descriptor.name} 不兼容：{compatibility['message']}"
+                )
+            missing = [
+                item["label"]
+                for item in self.dependency_status(enabled_id)
+                if not item["installed"] and not item["optional"]
+            ]
+            if missing:
+                raise PluginManagerError(
+                    f"插件 {descriptor.name} 缺少依赖："
+                    + "、".join(str(item) for item in missing)
+                    + "；请先安装依赖"
+                )
+            self.load_spec(descriptor)
         self._save_selected(selected)
         return desired
 
@@ -411,34 +416,48 @@ class PluginManager:
                 progress(100, "该插件没有额外依赖")
             return
 
-        required_targets = [
-            item.install_target or item.requirement
-            for item in dependencies
+        statuses = self.dependency_status(plugin_id)
+        pending = [
+            dependency
+            for dependency, status in zip(dependencies, statuses, strict=True)
+            if not status["installed"]
+        ]
+        if not pending:
+            if progress:
+                progress(100, "插件依赖均已满足")
+            return
+
+        required = [
+            item for item in pending
             if not item.optional and (item.install_target or item.requirement)
         ]
-        optional_targets = [
-            item.install_target or item.requirement
-            for item in dependencies
+        optional = [
+            item for item in pending
             if item.optional and (item.install_target or item.requirement)
         ]
-        if required_targets:
-            self._run_install_command(
-                [sys.executable, "-m", "pip", "install", *required_targets],
-                progress,
-                5,
-                68,
-                "正在安装必需依赖",
-            )
+        installed_now: list[DependencySpec] = []
 
-        for index, target in enumerate(optional_targets):
+        if required:
+            self._run_install_command(
+                [sys.executable, "-m", "pip", "install",
+                 *(item.install_target or item.requirement for item in required)],
+                progress, 5, 60, "正在安装必需依赖",
+            )
+            installed_now.extend(required)
+
+        optional_start = 61 if required else 5
+        optional_span = max(1, 20 // max(1, len(optional)))
+        for index, dependency in enumerate(optional):
+            target = dependency.install_target or dependency.requirement
             try:
                 self._run_install_command(
                     [sys.executable, "-m", "pip", "install", target],
                     progress,
-                    69 + index * 4,
-                    min(80, 72 + index * 4),
+                    optional_start + index * optional_span,
+                    min(80, optional_start + (index + 1) * optional_span),
                     "正在安装可选增强",
                 )
+                installed_now.append(dependency)
             except PluginManagerError as exc:
                 if progress:
                     logger = getattr(progress, "log", None)
@@ -447,7 +466,7 @@ class PluginManager:
 
         post_commands: list[tuple[str, ...]] = []
         seen_commands: set[tuple[str, ...]] = set()
-        for dependency in dependencies:
+        for dependency in installed_now:
             for command in dependency.post_install:
                 resolved = tuple(
                     sys.executable if part == "{python}" else part
@@ -458,11 +477,10 @@ class PluginManager:
                     post_commands.append(resolved)
 
         if post_commands:
-            span = max(1, 20 // len(post_commands))
+            span = max(1, 18 // len(post_commands))
             for index, command in enumerate(post_commands):
                 self._run_install_command(
-                    list(command),
-                    progress,
+                    list(command), progress,
                     81 + index * span,
                     min(99, 81 + (index + 1) * span),
                     "正在安装运行时组件",
@@ -543,16 +561,16 @@ class PluginManager:
 
     def _dependency_status(self, dependency: DependencySpec) -> dict[str, object]:
         try:
-            installed = importlib.util.find_spec(dependency.import_name) is not None
+            module_available = importlib.util.find_spec(dependency.import_name) is not None
         except (ImportError, ModuleNotFoundError, ValueError):
-            installed = False
+            module_available = False
+
+        installed = module_available
         version = ""
-        requirement_name = ""
         version_ok = True
         if dependency.requirement:
             try:
                 parsed = Requirement(dependency.requirement)
-                requirement_name = parsed.name
                 if parsed.marker is not None and not parsed.marker.evaluate():
                     return {
                         "label": dependency.display_name,
@@ -566,14 +584,16 @@ class PluginManager:
                 try:
                     version = importlib.metadata.version(parsed.name)
                 except importlib.metadata.PackageNotFoundError:
-                    installed = False
-                if installed and version and parsed.specifier:
+                    version = ""
+                if module_available and version and parsed.specifier:
                     try:
                         version_ok = Version(version) in parsed.specifier
                     except InvalidVersion:
                         version_ok = False
             except InvalidRequirement:
                 installed = False
+                version_ok = False
+
         installed = bool(installed and version_ok)
         if installed and dependency.probe:
             installed = self._probe_dependency(dependency.probe)
@@ -917,19 +937,35 @@ class PluginManager:
     def _safe_extract_zip(source: Path, destination: Path) -> None:
         try:
             with zipfile.ZipFile(source) as archive:
+                file_count = 0
+                total_uncompressed = 0
                 for item in archive.infolist():
                     normalized = item.filename.replace("\\", "/")
                     path = Path(normalized)
                     first_part = path.parts[0] if path.parts else ""
-                    if (
-                        path.is_absolute()
-                        or ".." in path.parts
-                        or ":" in first_part
-                    ):
+                    if path.is_absolute() or ".." in path.parts or ":" in first_part:
                         raise PluginManagerError("ZIP 中包含不安全路径")
                     mode = (item.external_attr >> 16) & 0o170000
                     if mode == 0o120000:
                         raise PluginManagerError("ZIP 插件包不允许包含符号链接")
+                    if item.flag_bits & 0x1:
+                        raise PluginManagerError("ZIP 插件包不允许包含加密文件")
+                    if item.is_dir():
+                        continue
+                    file_count += 1
+                    if file_count > _MAX_PLUGIN_ZIP_FILES:
+                        raise PluginManagerError(
+                            f"ZIP 插件包文件数量超过 {_MAX_PLUGIN_ZIP_FILES} 个限制"
+                        )
+                    if item.file_size > _MAX_PLUGIN_ZIP_SINGLE_FILE_BYTES:
+                        raise PluginManagerError("ZIP 插件包包含过大的单个文件")
+                    total_uncompressed += item.file_size
+                    if total_uncompressed > _MAX_PLUGIN_ZIP_UNCOMPRESSED_BYTES:
+                        raise PluginManagerError("ZIP 插件包解压后总体积过大")
+                    if item.file_size >= _ZIP_RATIO_CHECK_MIN_BYTES:
+                        compression_ratio = item.file_size / max(1, item.compress_size)
+                        if compression_ratio > _MAX_PLUGIN_ZIP_COMPRESSION_RATIO:
+                            raise PluginManagerError("ZIP 插件包包含异常压缩比文件")
                 archive.extractall(destination)
         except zipfile.BadZipFile as exc:
             raise PluginManagerError("插件 ZIP 文件损坏") from exc
@@ -971,8 +1007,7 @@ def build_registry(
     blocked = {
         plugin_id
         for plugin_id in desired
-        if not descriptors[plugin_id].builtin
-        and (
+        if (
             not manager.compatibility_status(descriptors[plugin_id])["compatible"]
             or any(
                 not item["installed"] and not item["optional"]

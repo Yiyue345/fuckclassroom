@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from ..core.config import PROJECT_ROOT, AppConfig
 from ..core.plugins import PluginRuntime
+from ..core.tasks import TaskManager
 from ..plugins import PluginManager, build_plugin_registry
 from ..plugins.rpc import PluginRpcRegistry, register_builtin_rpc_methods
 
@@ -37,6 +38,7 @@ def create_app(
     *,
     reload_callback: Callable[[], object] | None = None,
     reload_status: Callable[[], dict[str, object]] | None = None,
+    shared_task_manager: TaskManager | None = None,
 ) -> FastAPI:
     app_config = config or AppConfig()
     plugin_manager = PluginManager(app_config)
@@ -49,6 +51,8 @@ def create_app(
     plugin_rpc = PluginRpcRegistry()
     plugin_runtime.services.add("plugin_manager", plugin_manager)
     plugin_runtime.services.add("plugin_rpc", plugin_rpc)
+    if shared_task_manager is not None:
+        plugin_runtime.services.add("task_manager", shared_task_manager)
     if reload_callback is not None:
         plugin_runtime.services.add("plugin_reload", reload_callback)
     if reload_status is not None:

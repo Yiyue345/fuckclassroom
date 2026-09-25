@@ -91,8 +91,8 @@ def register_routes(
                 "live_error": live_error,
                 "files": files,
                 "recent_tasks": recent_tasks,
-                "running_task_count": sum(task.status == "running" for task in recent_tasks),
-                "completed_task_count": sum(task.status == "succeeded" for task in recent_tasks),
+                "running_task_count": task_manager.count_by_status("running"),
+                "completed_task_count": task_manager.count_by_status("succeeded"),
             },
         )
 

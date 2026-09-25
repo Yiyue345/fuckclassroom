@@ -42,6 +42,8 @@ _TASK_REGISTRY_LOCK = threading.Lock()
 _TASK_OWNERS: dict[str, "TaskManager"] = {}
 _MAX_LOG_ENTRIES = 800
 _MAX_LOG_MESSAGE_LENGTH = 8000
+_MAX_RETAINED_FINISHED_TASKS = 100
+_TERMINAL_TASK_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 
 
 class TaskProgressReporter:
@@ -84,6 +86,9 @@ class TaskManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._tasks: dict[str, TaskState] = {}
+        self._terminal_counts: dict[str, int] = {
+            status: 0 for status in _TERMINAL_TASK_STATUSES
+        }
 
     def start(
         self,
@@ -242,6 +247,12 @@ class TaskManager:
             tasks = sorted(self._tasks.values(), key=lambda state: state.created_at, reverse=True)
             return tasks[: max(0, limit)]
 
+    def count_by_status(self, status: str) -> int:
+        with self._lock:
+            if status in self._terminal_counts:
+                return self._terminal_counts[status]
+            return sum(state.status == status for state in self._tasks.values())
+
     def is_cancel_requested(self, task_id: str) -> bool:
         with self._lock:
             state = self._tasks.get(task_id)
@@ -351,10 +362,12 @@ class TaskManager:
         clear_detail: bool = False,
         cancelled_at: str | None = None,
     ) -> None:
+        became_terminal = False
         with self._lock:
             state = self._tasks.get(task_id)
             if state is None:
                 return
+            previous_status = state.status
             previous_message = state.message
             previous_detail_message = state.detail_message
             if status is not None:
@@ -385,6 +398,40 @@ class TaskManager:
             if error is not None:
                 self._append_log_locked(state, "error", error)
             state.updated_at = _now()
+
+            became_terminal = (
+                previous_status not in _TERMINAL_TASK_STATUSES
+                and state.status in _TERMINAL_TASK_STATUSES
+            )
+            if became_terminal:
+                self._terminal_counts[state.status] += 1
+
+        if became_terminal:
+            self._finalize_task(task_id)
+
+    def _finalize_task(self, task_id: str) -> None:
+        with _TASK_REGISTRY_LOCK:
+            if _TASK_OWNERS.get(task_id) is self:
+                _TASK_OWNERS.pop(task_id, None)
+
+        with self._lock:
+            finished = sorted(
+                (
+                    state
+                    for state in self._tasks.values()
+                    if state.status in _TERMINAL_TASK_STATUSES
+                ),
+                key=lambda state: (state.updated_at, state.created_at),
+                reverse=True,
+            )
+            # Timestamps are intentionally human-readable and only have
+            # second precision. Keep the task that just reached a terminal
+            # state even when many tasks finish within the same second; a
+            # later completion may evict it normally.
+            keep_other = max(0, _MAX_RETAINED_FINISHED_TASKS - 1)
+            others = [state for state in finished if state.id != task_id]
+            for state in others[keep_other:]:
+                self._tasks.pop(state.id, None)
 
 
 def cancel_registered_task(task_id: str) -> dict[str, object]:

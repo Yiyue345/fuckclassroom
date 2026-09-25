@@ -8,6 +8,7 @@ from typing import Any, Callable, Iterable
 from fastapi import FastAPI
 
 from ..core.config import AppConfig
+from ..core.tasks import TaskManager
 from .app import create_app
 
 
@@ -169,6 +170,7 @@ def create_reloadable_app(
 ) -> ReloadableApplication:
     app_config = config or AppConfig()
     enabled = None if enabled_plugins is None else tuple(enabled_plugins)
+    shared_task_manager = TaskManager()
 
     def factory(reload_callback, reload_status) -> FastAPI:
         return create_app(
@@ -176,6 +178,7 @@ def create_reloadable_app(
             enabled_plugins=enabled,
             reload_callback=reload_callback,
             reload_status=reload_status,
+            shared_task_manager=shared_task_manager,
         )
 
     return ReloadableApplication(factory)

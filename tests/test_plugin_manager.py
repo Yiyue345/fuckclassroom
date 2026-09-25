@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import tempfile
 import unittest
+import zipfile
+from unittest.mock import patch
 from pathlib import Path
 
 from fuckclassroom import __version__ as APP_VERSION
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.core.plugins import PLUGIN_API_VERSION
 from fuckclassroom.plugins import build_plugin_registry
-from fuckclassroom.plugins.manager import PluginManager, PluginManagerError
+from fuckclassroom.plugins.manager import (
+    DependencySpec,
+    PluginDescriptor,
+    PluginManager,
+    PluginManagerError,
+)
 from fuckclassroom.plugins.rpc import PLUGIN_RPC_API_VERSION
 from fuckclassroom.web import create_app
 
@@ -623,6 +631,172 @@ def build_plugin():
 
             with self.assertRaisesRegex(PluginManagerError, "内部 Worker 保留能力"):
                 manager.descriptor_map()
+
+
+    def test_importable_module_is_not_missing_when_distribution_name_differs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            dependency = DependencySpec("opencv-python>=4.8", "cv2", "OpenCV")
+
+            with (
+                patch(
+                    "fuckclassroom.plugins.manager.importlib.util.find_spec",
+                    return_value=object(),
+                ),
+                patch(
+                    "fuckclassroom.plugins.manager.importlib.metadata.version",
+                    side_effect=importlib.metadata.PackageNotFoundError,
+                ),
+            ):
+                status = manager._dependency_status(dependency)
+
+            self.assertTrue(status["installed"])
+            self.assertEqual(status["version"], "")
+
+    def test_known_distribution_version_still_enforces_requirement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            dependency = DependencySpec("opencv-python>=4.8", "cv2", "OpenCV")
+
+            with (
+                patch(
+                    "fuckclassroom.plugins.manager.importlib.util.find_spec",
+                    return_value=object(),
+                ),
+                patch(
+                    "fuckclassroom.plugins.manager.importlib.metadata.version",
+                    return_value="4.7.0",
+                ),
+            ):
+                status = manager._dependency_status(dependency)
+
+            self.assertFalse(status["installed"])
+
+    def test_install_dependencies_only_processes_currently_missing_items(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            required = DependencySpec(
+                "already-present>=1",
+                "already_present",
+                "Already Present",
+                post_install=(("must-not-run",),),
+            )
+            optional = DependencySpec(
+                "optional-addon>=1",
+                "optional_addon",
+                "Optional Addon",
+                optional=True,
+                post_install=(("optional-post",),),
+            )
+            descriptor = PluginDescriptor(
+                "demo_dep",
+                "Demo Dep",
+                "",
+                "1.0.0",
+                100,
+                (),
+                True,
+                python_requirements=(required, optional),
+            )
+            initial = [
+                {
+                    "label": "Already Present",
+                    "installed": True,
+                    "optional": False,
+                },
+                {
+                    "label": "Optional Addon",
+                    "installed": False,
+                    "optional": True,
+                },
+            ]
+            final = [
+                {
+                    "label": "Already Present",
+                    "installed": True,
+                    "optional": False,
+                },
+                {
+                    "label": "Optional Addon",
+                    "installed": True,
+                    "optional": True,
+                },
+            ]
+            commands: list[tuple[list[str], str]] = []
+
+            def record(command, progress, start_percent, end_percent, message):
+                commands.append((list(command), message))
+
+            with (
+                patch.object(manager, "descriptor_map", return_value={"demo_dep": descriptor}),
+                patch.object(manager, "dependency_status", side_effect=[initial, final]),
+                patch.object(manager, "_run_install_command", side_effect=record),
+            ):
+                manager.install_dependencies("demo_dep")
+
+            self.assertFalse(any("必需依赖" in message for _, message in commands))
+            self.assertTrue(
+                any("optional-addon>=1" in command for command, _ in commands)
+            )
+            self.assertTrue(any(command == ["optional-post"] for command, _ in commands))
+            self.assertFalse(any("must-not-run" in command for command, _ in commands))
+
+    def test_builtin_required_dependency_blocks_enable_and_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            manager = PluginManager(AppConfig(data_dir=data_dir))
+            manager.state_path.write_text(
+                json.dumps({"selected": ["core_ui"]}),
+                encoding="utf-8",
+            )
+            missing = [
+                {
+                    "label": "Playwright + Chromium",
+                    "installed": False,
+                    "optional": False,
+                }
+            ]
+
+            def dependency_status(plugin_id: str):
+                return missing if plugin_id == "classroom" else []
+
+            with (
+                patch.object(manager, "dependency_status", side_effect=dependency_status),
+                patch.object(manager, "load_spec"),
+            ):
+                with self.assertRaisesRegex(PluginManagerError, "请先安装依赖"):
+                    manager.enable("classroom")
+
+            manager.state_path.write_text(
+                json.dumps({"selected": ["core_ui", "classroom"]}),
+                encoding="utf-8",
+            )
+            with patch.object(
+                manager,
+                "dependency_status",
+                side_effect=dependency_status,
+            ):
+                registry = build_plugin_registry(
+                    config=manager.config,
+                    manager=manager,
+                )
+            self.assertEqual(registry.plugin_ids, ("core_ui",))
+
+    def test_zip_with_abnormal_compression_ratio_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive_path = root / "bomb.zip"
+            with zipfile.ZipFile(
+                archive_path,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+                compresslevel=9,
+            ) as archive:
+                archive.writestr("plugin/payload.bin", b"0" * (2 * 1024 * 1024))
+
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+            with self.assertRaisesRegex(PluginManagerError, "压缩比"):
+                manager.install_from_path(str(archive_path))
 
 
 if __name__ == "__main__":
