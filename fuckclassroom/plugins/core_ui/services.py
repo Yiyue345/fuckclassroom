@@ -28,7 +28,8 @@ def setup_services(context: PluginContext) -> None:
     config = context.config
     context.services.add("settings_store", SettingsStore(config.data_dir / "settings.json"))
     context.services.add("cache_store", JsonCache(config.cache_dir))
-    context.services.add("task_manager", TaskManager())
+    if not context.services.has("task_manager"):
+        context.services.add("task_manager", TaskManager())
     context.services.add(
         "credential_store",
         SelectionCredentialStore(_credential_path(config)),
