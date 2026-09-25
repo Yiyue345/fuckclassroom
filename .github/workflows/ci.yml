@@ -5,7 +5,6 @@ on:
     branches:
       - main
       - 0.2.0
-      - frontend-polish
       - pluginization
       - feat/course-media-viewer
       - feature/live-ppt-qr-assistant
