@@ -288,6 +288,7 @@
   const detailEmpty = document.getElementById('plugin-detail-empty');
   let activeFilter = 'all';
   let selectedId = rows.find((row) => row.classList.contains('is-selected'))?.dataset.pluginId || rows[0]?.dataset.pluginId || '';
+  const pendingToggleOperations = new Map();
 
   function rowFor(id) {
     return rows.find((row) => row.dataset.pluginId === id) || null;
@@ -364,10 +365,14 @@
     const pendingLabel = status.hot_reload_available ? '待自动应用' : '重启后生效';
     rows.forEach((row) => {
       const id = row.dataset.pluginId;
-      setPluginState(id, desired.has(id), current.has(id), {
+      const hasPendingToggle = pendingToggleOperations.has(id);
+      const requestedEnabled = hasPendingToggle
+        ? pendingToggleOperations.get(id)
+        : desired.has(id);
+      setPluginState(id, requestedEnabled, current.has(id), {
         error,
-        busy: Boolean(status.reloading),
-        pendingLabel,
+        busy: hasPendingToggle || Boolean(status.reloading),
+        pendingLabel: hasPendingToggle ? '应用中…' : pendingLabel,
       });
     });
     applyFilters();
@@ -462,7 +467,8 @@
       if (!id || !input || input.disabled) return;
 
       const requestedEnabled = input.checked;
-      showOperationStatus('loading');
+      pendingToggleOperations.set(id, requestedEnabled);
+      beginOperation();
       formsFor(id).forEach((otherForm) => {
         const otherInput = otherForm.querySelector('input[type="checkbox"]');
         if (otherInput) {
@@ -496,15 +502,16 @@
         });
 
         const status = await waitForRuntime();
+        pendingToggleOperations.delete(id);
+        syncCards(status);
         if (!status.last_error && !status.restart_required) {
           await refreshShellChrome();
-          showOperationStatus('done');
-        } else if (!status.last_error) {
-          showOperationStatus('done');
         }
+        finishOperation(!status.last_error);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        hideOperationStatus();
+        pendingToggleOperations.delete(id);
+        finishOperation(false);
         if (!configurationSaved) {
           setPluginState(id, !requestedEnabled, !requestedEnabled, { error: message });
           const failedBadge = row?.querySelector('[data-plugin-state-badge]');
@@ -532,6 +539,9 @@
   const operationLoading = operationStatus?.querySelector('[data-operation-loading]');
   const operationDone = operationStatus?.querySelector('[data-operation-done]');
   let operationStatusTimer = 0;
+  let activeOperationCount = 0;
+  let operationBatchFailed = false;
+  let uploadOperationActive = false;
 
   function showOperationStatus(state) {
     if (!operationStatus || !operationLoading || !operationDone) return;
@@ -555,10 +565,36 @@
     operationStatus.classList.add('hidden');
   }
 
+  function beginOperation() {
+    if (activeOperationCount === 0) operationBatchFailed = false;
+    activeOperationCount += 1;
+    showOperationStatus('loading');
+  }
+
+  function finishOperation(success = true) {
+    if (activeOperationCount <= 0) return;
+    if (!success) operationBatchFailed = true;
+    activeOperationCount -= 1;
+    if (activeOperationCount > 0) {
+      showOperationStatus('loading');
+      return;
+    }
+    if (operationBatchFailed) {
+      hideOperationStatus();
+      return;
+    }
+    showOperationStatus('done');
+  }
+
   function setUploadBusy(busy) {
     if (uploadButton) uploadButton.disabled = busy;
-    if (busy) showOperationStatus('loading');
-    else hideOperationStatus();
+    if (busy && !uploadOperationActive) {
+      uploadOperationActive = true;
+      beginOperation();
+    } else if (!busy && uploadOperationActive) {
+      uploadOperationActive = false;
+      finishOperation(false);
+    }
   }
 
   uploadButton?.addEventListener('click', () => uploadInput?.click());
@@ -589,7 +625,7 @@
   });
 
   document.querySelectorAll('[data-plugin-operation-form]').forEach((form) => {
-    form.addEventListener('submit', () => showOperationStatus('loading'));
+    form.addEventListener('submit', () => beginOperation());
   });
 
   if (operationStatus && operationStatus.classList.contains('is-done')) {
