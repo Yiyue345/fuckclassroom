@@ -103,7 +103,7 @@
                   <input type="checkbox" role="switch"
                     aria-label="{{ '停用' if plugin.desired_enabled else '启用' }} {{ plugin.name }}"
                     {% if plugin.desired_enabled %}checked{% endif %}
-                    {% if plugin.locked or not plugin_config_mutable or (not plugin.desired_enabled and not plugin.compatible) %}disabled{% endif %}>
+                    {% if plugin.locked or not plugin_config_mutable or (not plugin.desired_enabled and not plugin.compatible) %}disabled{% endif %}onchange="this.form.requestSubmit()">
                   <span class="toggle-track" aria-hidden="true"><span></span></span>
                 </label>
               </form>
@@ -157,7 +157,7 @@
                 <input type="checkbox" role="switch"
                   aria-label="{{ '停用' if plugin.desired_enabled else '启用' }} {{ plugin.name }}"
                   {% if plugin.desired_enabled %}checked{% endif %}
-                  {% if plugin.locked or not plugin_config_mutable or (not plugin.desired_enabled and not plugin.compatible) %}disabled{% endif %}>
+                  {% if plugin.locked or not plugin_config_mutable or (not plugin.desired_enabled and not plugin.compatible) %}disabled{% endif %}onchange="this.form.requestSubmit()">
                 <span class="toggle-track" aria-hidden="true"><span></span></span>
               </label>
             </form>
