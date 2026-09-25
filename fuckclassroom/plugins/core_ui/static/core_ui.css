@@ -86,6 +86,7 @@
 .plugin-manager-dependency-row { display: grid; min-height: 30px; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 7px; border-top: 1px solid var(--border); }
 .plugin-manager-dependency-row:first-child { border-top: 0; }
 .plugin-manager-dependency-row .session-dot { width: 7px; height: 7px; box-shadow: none; }
+.plugin-manager-dependency-row .session-dot.optional-missing { background: var(--amber); }
 .plugin-manager-dependency-row > div { min-width: 0; }
 .plugin-manager-dependency-row > div > strong { display: block; overflow: hidden; font-size: var(--font-xs); text-overflow: ellipsis; white-space: nowrap; }
 .plugin-manager-dependency-row > div > span { display: block; overflow: hidden; margin-top: 2px; color: var(--text-muted); font-size: var(--font-xs); text-overflow: ellipsis; white-space: nowrap; }
