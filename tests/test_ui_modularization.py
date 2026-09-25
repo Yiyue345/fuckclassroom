@@ -158,9 +158,13 @@ class UiModularizationTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         # #18: a damaged credential file is not "saved", but must remain clearable.
-        self.assertIn("panel_context.credentials.can_clear", network)
-        self.assertNotIn(
-            "{% if panel_context.credentials.is_saved %}",
+        self.assertIn(
+            '{% if panel_context.credentials.can_clear %}\n'
+            '      <button class="btn danger" type="submit" form="credential-clear-form"',
+            network,
+        )
+        self.assertIn(
+            "panel_context.credentials.is_saved",
             network,
         )
 
