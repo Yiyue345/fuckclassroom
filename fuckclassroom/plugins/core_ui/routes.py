@@ -13,6 +13,7 @@ from ...core.plugins import PluginContext
 from ...core.tasks import cancel_registered_task
 from ...web.responses import task_started_response
 from ..manager import PluginManagerError
+from ..rpc import PLUGIN_RPC_API_VERSION
 
 
 def build_router(context: PluginContext) -> APIRouter:
@@ -295,6 +296,18 @@ def build_router(context: PluginContext) -> APIRouter:
         return RedirectResponse(
             f"/plugins?notice={quote('插件文件已删除')}",
             status_code=303,
+        )
+
+    @router.get("/about", response_class=HTMLResponse)
+    def about(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "core/about.html",
+            {
+                "app_version": plugin_manager.app_version,
+                "plugin_api_version": plugin_manager.api_version,
+                "plugin_rpc_api_version": PLUGIN_RPC_API_VERSION,
+            },
         )
 
     @router.get("/settings", response_class=HTMLResponse)
