@@ -48,7 +48,8 @@ class LoginStatusIndicatorTests(unittest.TestCase):
 
         self.assertIn("function markSessionLoggingIn(system)", script)
         self.assertIn('label.textContent = "登录中"', script)
-        self.assertIn("if (loginSystem) markSessionLoggingIn(loginSystem);", script)
+        self.assertIn("markSessionLoggingIn(loginSystem);", script)
+        self.assertIn('academic:auth-poll-wake', script)
         self.assertIn("if (loginSystem && !taskSucceeded) restoreSessionState(loginSystem);", script)
         self.assertIn(".session-dot.logging-in", styles)
         self.assertIn("background: var(--primary)", styles)
