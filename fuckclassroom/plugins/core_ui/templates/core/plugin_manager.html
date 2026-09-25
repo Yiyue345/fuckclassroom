@@ -6,231 +6,356 @@
 {% block page_title %}插件管理{% endblock %}
 
 {% block content %}
-  <div class="page-head">
+<div class="plugin-manager-page">
+  <header class="plugin-page-head">
     <div>
       <h1>插件管理</h1>
-      <p class="page-description">按需组合你的学习工具。{% if hot_reload_available %}开启或关闭插件后会在当前进程中自动重载，无需手动重启。{% else %}开启或关闭插件后，重启应用即可生效。{% endif %}</p>
+      <p>按需启用功能。常用操作留在列表中，技术细节收进右侧面板。</p>
     </div>
-    <div class="head-actions">
-      <span class="status blue">API v{{ plugin_api_version }}</span>
-      <span class="status gray">FuckClassroom {{ app_version }}</span>
-      {% if hot_reload_available %}<span class="status green">运行时热重载</span>{% endif %}
+    <div class="plugin-page-actions">
+      <span class="plugin-upload-status" id="plugin-upload-status" aria-live="polite"></span>
+      <span class="plugin-operation-status{% if not notice %} hidden{% endif %}" id="plugin-operation-status" role="status" aria-live="polite" aria-label="{% if notice %}操作完成{% else %}插件操作状态{% endif %}">
+        <span class="plugin-operation-spinner{% if notice %} hidden{% endif %}" data-operation-loading aria-hidden="true"></span>
+        <svg class="icon plugin-operation-done{% if not notice %} hidden{% endif %}" data-operation-done aria-hidden="true">
+          <use href="/static/icons.svg#circle-check"></use>
+        </svg>
+      </span>
+      <input id="plugin-zip-file" type="file" accept=".zip,application/zip" hidden {% if not plugin_config_mutable %}disabled{% endif %}>
+      <button class="plugin-add-button" id="plugin-zip-button" type="button"
+        title="添加外部插件" aria-label="添加外部插件"
+        {% if not plugin_config_mutable %}disabled{% endif %}>
+        <span aria-hidden="true">+</span>
+      </button>
     </div>
-  </div>
+  </header>
 
   {% if error %}
-    <div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>
+    <div class="notice error plugin-page-notice"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>
   {% endif %}
   {% if notice %}
-    <div class="notice success"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>{{ notice }}</span></div>
+    <div class="notice success plugin-page-notice"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>{{ notice }}</span></div>
   {% endif %}
   {% if reload_status.last_error %}
-    <div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>插件自动重载失败，当前 Runtime 已保留：{{ reload_status.last_error }}</span></div>
+    <div class="notice error plugin-page-notice"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>插件自动重载失败，当前 Runtime 已保留：{{ reload_status.last_error }}</span></div>
   {% elif restart_required %}
-    <div class="notice warning"><svg class="icon"><use href="/static/icons.svg#rotate-ccw"></use></svg><span>{% if hot_reload_available %}当前运行状态与保存配置仍不同，可再次切换重试；必要时再手动重启应用。{% else %}当前运行状态与保存配置不同。重启应用后，待启用/待停用的插件才会真正切换。{% endif %}</span></div>
+    <div class="notice warning plugin-page-notice"><svg class="icon"><use href="/static/icons.svg#rotate-ccw"></use></svg><span>{% if hot_reload_available %}当前运行状态与保存配置仍不同，可再次切换重试；必要时再手动重启应用。{% else %}当前运行状态与保存配置不同。重启应用后，待启用/待停用的插件才会真正切换。{% endif %}</span></div>
   {% endif %}
   {% if not plugin_config_mutable %}
-    <div class="notice warning">
+    <div class="notice warning plugin-page-notice">
       <svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg>
       <span>当前插件列表由 <strong>{{ "FUCKCLASSROOM_PLUGINS 环境变量" if selection_source == "environment" else "create_app(enabled_plugins=...) 参数" }}</strong> 控制，网页启停已锁定。</span>
     </div>
   {% endif %}
 
-  <section class="section">
-    <div class="section-head plugin-list-head">
-      <h2>已安装插件</h2>
-      <div class="plugin-list-head-actions">
-        <span class="plugin-upload-status" id="plugin-upload-status" aria-live="polite"></span>
-        <span class="section-meta">{{ plugins|length }} 个插件</span>
-        <input id="plugin-zip-file" type="file" accept=".zip,application/zip" hidden {% if not plugin_config_mutable %}disabled{% endif %}>
-        <button class="btn icon-only plugin-add-button" id="plugin-zip-button" type="button"
-          title="添加外部插件" aria-label="添加外部插件"
-          {% if not plugin_config_mutable %}disabled{% endif %}>
-          <span class="plugin-add-glyph" aria-hidden="true">+</span>
-        </button>
-      </div>
+  <section class="plugin-toolbar surface" aria-label="插件筛选">
+    <label class="plugin-search" for="plugin-search-input">
+      <svg class="icon small" aria-hidden="true"><use href="/static/icons.svg#search"></use></svg>
+      <input id="plugin-search-input" type="search" autocomplete="off" placeholder="搜索插件名称、ID…" aria-label="搜索插件">
+    </label>
+    <div class="plugin-filter-group" role="group" aria-label="筛选插件">
+      <button class="plugin-filter is-active" type="button" data-plugin-filter="all" aria-pressed="true">全部</button>
+      <button class="plugin-filter" type="button" data-plugin-filter="enabled" aria-pressed="false">已启用</button>
+      <button class="plugin-filter" type="button" data-plugin-filter="attention" aria-pressed="false">需要处理</button>
+      <button class="plugin-filter" type="button" data-plugin-filter="external" aria-pressed="false">外部插件</button>
     </div>
+    <span class="plugin-result-count" id="plugin-result-count">{{ plugins|length }} 个插件</span>
+  </section>
 
-    <div class="plugin-manager-grid">
-      {% for plugin in plugins %}
-        <article class="surface account-session-panel plugin-manager-card"
-          data-plugin-card="{{ plugin.id }}"
-          data-plugin-locked="{{ 'true' if plugin.locked else 'false' }}"
-          data-plugin-compatible="{{ 'true' if plugin.compatible else 'false' }}"
-          data-plugin-mutable="{{ 'true' if plugin_config_mutable else 'false' }}">
-          <header class="account-session-header plugin-manager-card-header">
-            <div class="account-session-name">
-              <span class="workspace-icon">
-                <svg class="icon">
-                  <use href="/static/icons.svg#{% if plugin.id == 'classroom' %}book-open{% elif plugin.id == 'course_selection' %}check-square{% elif plugin.id == 'transcription' %}captions{% elif plugin.id == 'ocr' %}scan-text{% elif plugin.id == 'ai_summary' %}sparkles{% elif plugin.id == 'attendance' %}shield-check{% elif plugin.id == 'processing' %}list-todo{% else %}settings{% endif %}"></use>
-                </svg>
-              </span>
-              <div>
-                <h2>{{ plugin.name }}</h2>
-                <span class="mono">{{ plugin.id }}{% if plugin.version and plugin.version != "builtin" %} · v{{ plugin.version }}{% endif %}</span>
-              </div>
+  <div class="plugin-manager-layout">
+    <section class="plugin-list-panel surface" aria-label="已安装插件">
+      <div class="plugin-list" id="plugin-list">
+        {% for plugin in plugins %}
+          <article class="plugin-row{% if plugin.id == 'ai_summary' %} is-selected{% endif %}"
+            tabindex="0"
+            role="button"
+            aria-selected="{{ 'true' if plugin.id == 'ai_summary' else 'false' }}"
+            data-plugin-row
+            data-plugin-id="{{ plugin.id }}"
+            data-plugin-name="{{ plugin.name|lower }}"
+            data-plugin-search="{{ (plugin.name ~ ' ' ~ plugin.id ~ ' ' ~ (plugin.description or ''))|lower }}"
+            data-plugin-enabled="{{ 'true' if plugin.desired_enabled else 'false' }}"
+            data-plugin-external="{{ 'false' if plugin.builtin else 'true' }}"
+            data-plugin-needs-action="{{ 'true' if (not plugin.compatible or plugin.missing_required_dependencies or plugin.missing_optional_dependencies or plugin.restart_required) else 'false' }}"
+            data-plugin-locked="{{ 'true' if plugin.locked else 'false' }}"
+            data-plugin-compatible="{{ 'true' if plugin.compatible else 'false' }}"
+            data-plugin-mutable="{{ 'true' if plugin_config_mutable else 'false' }}">
+            <span class="plugin-row-icon" data-plugin-icon="{{ plugin.id }}">
+              {% if plugin.id == "classroom" %}课
+              {% elif plugin.id == "course_selection" %}选
+              {% elif plugin.id == "lab_selection" %}实
+              {% elif plugin.id == "transcription" %}转
+              {% elif plugin.id == "ocr" %}识
+              {% elif plugin.id == "ai_summary" %}AI
+              {% elif plugin.id == "attendance" %}签
+              {% elif plugin.id == "processing" %}处
+              {% elif plugin.id == "core_ui" %}通
+              {% else %}{{ plugin.name[:1] }}{% endif %}
+            </span>
+
+            <div class="plugin-row-copy">
+              <strong>{{ plugin.name }}</strong>
+              <span class="mono">{{ plugin.id }}{% if plugin.version and plugin.version != "builtin" %} · v{{ plugin.version }}{% else %} · builtin{% endif %}</span>
+              <p>{{ plugin.description or "该插件未提供描述。" }}</p>
             </div>
 
-            <div class="plugin-manager-controls">
-              <span class="status {{ 'blue' if plugin.builtin else 'gray' }}">{{ plugin.source_label }}</span>
-
-              <form class="plugin-toggle-form" method="post" action="/plugins/{{ plugin.id }}/{{ 'disable' if plugin.desired_enabled else 'enable' }}" data-plugin-id="{{ plugin.id }}">
+            <div class="plugin-row-actions">
+              <span class="plugin-source-badge">{{ "内置" if plugin.builtin else "外部" }}</span>
+              <form class="plugin-toggle-form" method="post"
+                action="/plugins/{{ plugin.id }}/{{ 'disable' if plugin.desired_enabled else 'enable' }}"
+                data-plugin-id="{{ plugin.id }}">
                 <label class="toggle-control plugin-toggle-control"
                   title="{% if plugin.locked %}基础插件始终启用{% elif not plugin_config_mutable %}当前插件配置为只读{% elif not plugin.compatible and not plugin.desired_enabled %}插件不兼容，无法启用{% elif hot_reload_available %}切换后自动应用{% else %}切换后重启应用生效{% endif %}">
-                  <input
-                    type="checkbox"
-                    role="switch"
+                  <input type="checkbox" role="switch"
                     aria-label="{{ '停用' if plugin.desired_enabled else '启用' }} {{ plugin.name }}"
                     {% if plugin.desired_enabled %}checked{% endif %}
-                    {% if plugin.locked or not plugin_config_mutable or (not plugin.desired_enabled and not plugin.compatible) %}disabled{% endif %}
-                    onchange="this.form.requestSubmit()">
+                    {% if plugin.locked or not plugin_config_mutable or (not plugin.desired_enabled and not plugin.compatible) %}disabled{% endif %}onchange="this.form.requestSubmit()">
                   <span class="toggle-track" aria-hidden="true"><span></span></span>
                 </label>
               </form>
 
-              <span class="status amber{% if not plugin.restart_required %} hidden{% endif %}" data-plugin-runtime-state>
-                {{ "待自动应用" if hot_reload_available else "重启后生效" }}
-              </span>
+              {% if not plugin.compatible %}
+                <span class="plugin-state-badge red" data-plugin-state-badge data-default-class="red" data-default-text="不兼容">不兼容</span>
+              {% elif plugin.missing_required_dependencies %}
+                <span class="plugin-state-badge red" data-plugin-state-badge data-default-class="red" data-default-text="缺少依赖">缺少依赖</span>
+              {% elif plugin.missing_optional_dependencies %}
+                <span class="plugin-state-badge amber" data-plugin-state-badge data-default-class="amber" data-default-text="缺少可选扩展">缺少可选扩展</span>
+              {% elif plugin.restart_required %}
+                <span class="plugin-state-badge amber" data-plugin-state-badge data-default-class="amber" data-default-text="{{ '待自动应用' if hot_reload_available else '重启后生效' }}">{{ "待自动应用" if hot_reload_available else "重启后生效" }}</span>
+              {% else %}
+                <span class="plugin-state-badge green" data-plugin-state-badge data-default-class="green" data-default-text="已就绪">已就绪</span>
+              {% endif %}
+              <span class="plugin-row-chevron" aria-hidden="true">›</span>
             </div>
+          </article>
+        {% else %}
+          <div class="plugin-list-empty"><svg class="icon"><use href="/static/icons.svg#settings"></use></svg><p>没有发现可用插件</p></div>
+        {% endfor %}
+        <div class="plugin-list-empty hidden" id="plugin-filter-empty"><svg class="icon"><use href="/static/icons.svg#search"></use></svg><p>没有符合条件的插件</p></div>
+      </div>
+    </section>
+
+    <aside class="plugin-detail-panel surface" aria-label="插件详情">
+      {% for plugin in plugins %}
+        <section class="plugin-detail{% if plugin.id != 'ai_summary' %} hidden{% endif %}"
+          data-plugin-detail="{{ plugin.id }}">
+          <header class="plugin-detail-head">
+            <span class="plugin-detail-icon" data-plugin-icon="{{ plugin.id }}">
+              {% if plugin.id == "classroom" %}课
+              {% elif plugin.id == "course_selection" %}选
+              {% elif plugin.id == "lab_selection" %}实
+              {% elif plugin.id == "transcription" %}转
+              {% elif plugin.id == "ocr" %}识
+              {% elif plugin.id == "ai_summary" %}AI
+              {% elif plugin.id == "attendance" %}签
+              {% elif plugin.id == "processing" %}处
+              {% elif plugin.id == "core_ui" %}通
+              {% else %}{{ plugin.name[:1] }}{% endif %}
+            </span>
+            <div class="plugin-detail-title">
+              <h2>{{ plugin.name }}</h2>
+              <span class="mono">{{ plugin.id }}{% if plugin.version and plugin.version != "builtin" %} · v{{ plugin.version }}{% else %} · builtin{% endif %}</span>
+            </div>
+            <form class="plugin-toggle-form plugin-detail-toggle" method="post"
+              action="/plugins/{{ plugin.id }}/{{ 'disable' if plugin.desired_enabled else 'enable' }}"
+              data-plugin-id="{{ plugin.id }}">
+              <label class="toggle-control plugin-toggle-control">
+                <input type="checkbox" role="switch"
+                  aria-label="{{ '停用' if plugin.desired_enabled else '启用' }} {{ plugin.name }}"
+                  {% if plugin.desired_enabled %}checked{% endif %}
+                  {% if plugin.locked or not plugin_config_mutable or (not plugin.desired_enabled and not plugin.compatible) %}disabled{% endif %}onchange="this.form.requestSubmit()">
+                <span class="toggle-track" aria-hidden="true"><span></span></span>
+              </label>
+            </form>
           </header>
 
-          <div class="plugin-manager-card-body">
-            <p class="plugin-manager-description">{{ plugin.description or "该插件未提供描述。" }}</p>
+          <p class="plugin-detail-description">{{ plugin.description or "该插件未提供描述。" }}</p>
 
-            {% if not plugin.compatible %}
-              <div class="notice error plugin-manager-inline-notice">
-                <svg class="icon small"><use href="/static/icons.svg#circle-alert"></use></svg>
-                <span><strong>插件不兼容。</strong> {{ plugin.compatibility_message }}</span>
-              </div>
-            {% endif %}
-
-            <div class="detail-grid plugin-manager-details">
-              <div class="detail-item">
-                <label>插件 API</label>
-                <strong>v{{ plugin.api_version }}{% if plugin.api_version == plugin.current_api_version %} · 兼容{% endif %}</strong>
-              </div>
-              <div class="detail-item">
-                <label>应用版本要求</label>
-                <strong>{{ plugin.app_requires or "无限制" }}</strong>
-              </div>
-              <div class="detail-item">
-                <label>依赖插件</label>
-                <strong title="{{ plugin.requires|join(', ') }}">{{ plugin.requires|join(", ") if plugin.requires else "无" }}</strong>
-              </div>
-              <div class="detail-item">
-                <label>被依赖</label>
-                <strong title="{{ plugin.dependents|join(', ') }}">{{ plugin.dependents|join(", ") if plugin.dependents else "无" }}</strong>
-              </div>
-            </div>
-
-            {% if plugin.dependencies %}
-              <details class="plugin-manager-dependencies">
-                <summary class="plugin-manager-dependencies-head">
-                  <div>
-                    <strong>运行依赖 · {{ plugin.dependencies|length }}</strong>
-                    <span>点击展开 Python 包与运行时组件</span>
-                  </div>
-                  <div class="plugin-manager-dependency-summary">
-                    {% if plugin.missing_required_dependencies %}
-                      <span class="status red">缺少必需依赖</span>
-                    {% elif plugin.missing_optional_dependencies %}
-                      <span class="status amber">缺少可选扩展</span>
-                    {% else %}
-                      <span class="status green">已就绪</span>
-                    {% endif %}
-                    <svg class="icon small plugin-manager-dependency-chevron"><use href="/static/icons.svg#chevron-down"></use></svg>
-                  </div>
-                </summary>
-
-                <div class="plugin-manager-dependencies-body">
-                  <div class="plugin-manager-dependency-list">
-                    {% for dependency in plugin.dependencies %}
-                      <div class="plugin-manager-dependency-row">
-                        <span class="session-dot {% if dependency.installed %}valid{% elif dependency.optional %}optional-missing{% else %}invalid{% endif %}"></span>
-                        <div>
-                          <strong>{{ dependency.label }}</strong>
-                          <span class="mono">{{ dependency.version or dependency.requirement or dependency.import_name }}</span>
-                        </div>
-                        {% if dependency.optional and not dependency.installed %}
-                          <span class="status amber">可选 · 未安装</span>
-                        {% elif dependency.optional %}
-                          <span class="status gray">可选</span>
-                        {% elif not dependency.installed %}
-                          <span class="status red">必需 · 未安装</span>
-                        {% endif %}
-                      </div>
-                    {% endfor %}
-                  </div>
-
-                  <form method="post" action="/plugins/{{ plugin.id }}/dependencies/install">
-                    <button class="btn small" type="submit">
-                      <svg class="icon small"><use href="/static/icons.svg#download"></use></svg>
-                      {{ "安装/修复依赖" if plugin.dependency_issue or plugin.missing_optional_dependencies else "重新安装依赖" }}
-                    </button>
-                  </form>
-                </div>
-              </details>
-            {% endif %}
-          </div>
-
-          {% if not plugin.builtin %}
-            <div class="plugin-manager-footer">
-              <form method="post" action="/plugins/{{ plugin.id }}/remove">
-                <button class="btn small danger" type="submit"
-                  {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
-                  title="{% if plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
-                  <svg class="icon small"><use href="/static/icons.svg#trash-2"></use></svg>删除外部插件
-                </button>
-              </form>
+          {% if not plugin.compatible %}
+            <div class="notice error plugin-detail-notice">
+              <svg class="icon small"><use href="/static/icons.svg#circle-alert"></use></svg>
+              <span><strong>插件不兼容。</strong> {{ plugin.compatibility_message }}</span>
             </div>
           {% endif %}
-        </article>
-      {% else %}
-        <div class="surface empty-state"><div><svg class="icon"><use href="/static/icons.svg#settings"></use></svg><p>没有发现可用插件</p></div></div>
+
+          <div class="plugin-detail-divider"></div>
+
+          <dl class="plugin-detail-meta">
+            <div>
+              <dt>来源</dt>
+              <dd>{{ "内置插件" if plugin.builtin else "外部插件" }}</dd>
+            </div>
+            <div>
+              <dt>插件 API</dt>
+              <dd>v{{ plugin.api_version }}{% if plugin.api_version == plugin.current_api_version %} · 兼容{% endif %}</dd>
+            </div>
+            <div>
+              <dt>应用要求</dt>
+              <dd>{{ plugin.app_requires or "无限制" }}</dd>
+            </div>
+            <div>
+              <dt>运行方式</dt>
+              <dd>{{ "独立进程" if plugin.execution == "process" else "应用进程" }}</dd>
+            </div>
+          </dl>
+
+          <section class="plugin-dependency-box">
+            <header>
+              <strong>运行依赖</strong>
+              {% if plugin.missing_required_dependencies %}
+                <span class="plugin-state-badge red">缺少必需依赖</span>
+              {% elif plugin.missing_optional_dependencies %}
+                <span class="plugin-state-badge amber">缺少可选扩展</span>
+              {% else %}
+                <span class="plugin-state-badge green">已就绪</span>
+              {% endif %}
+            </header>
+            {% if plugin.dependencies %}
+              <div class="plugin-dependency-list">
+                {% for dependency in plugin.dependencies %}
+                  <div class="plugin-dependency-row">
+                    <span class="plugin-dependency-dot{% if dependency.installed %} green{% elif dependency.optional %} amber{% else %} red{% endif %}"></span>
+                    <strong>{{ dependency.label }}</strong>
+                    <span class="mono">{{ dependency.version or ("未安装" if not dependency.installed else dependency.requirement or dependency.import_name) }}</span>
+                    <span>{{ "可选" if dependency.optional else "必需" }}</span>
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="plugin-dependency-empty">无额外运行依赖</div>
+            {% endif %}
+          </section>
+
+          <h3 class="plugin-manage-title">管理</h3>
+          <div class="plugin-manage-list">
+            {% if plugin.dependencies %}
+              <form method="post" action="/plugins/{{ plugin.id }}/dependencies/install" data-plugin-operation-form>
+                <button class="plugin-manage-row" type="submit">
+                  <span>{{ "安装 / 修复依赖" if plugin.missing_required_dependencies or plugin.missing_optional_dependencies else "重新安装 / 修复依赖" }}</span>
+                  <span aria-hidden="true">›</span>
+                </button>
+              </form>
+            {% endif %}
+
+            <details class="plugin-tech-details">
+              <summary class="plugin-manage-row">
+                <span>查看插件技术信息</span>
+                <span aria-hidden="true">›</span>
+              </summary>
+              <div class="plugin-tech-grid">
+                <div><span>依赖插件</span><strong class="mono">{{ plugin.requires|join(", ") if plugin.requires else "无" }}</strong></div>
+                <div><span>被依赖</span><strong class="mono">{{ plugin.dependents|join(", ") if plugin.dependents else "无" }}</strong></div>
+                {% if plugin.isolated %}
+                  <div><span>RPC API</span><strong class="mono">v{{ plugin.rpc_api_version }}</strong></div>
+                  <div><span>Route Prefix</span><strong class="mono">{{ plugin.route_prefix or "—" }}</strong></div>
+                {% endif %}
+              </div>
+            </details>
+
+            {% if not plugin.builtin %}
+              <form method="post" action="/plugins/{{ plugin.id }}/remove" data-plugin-operation-form>
+                <button class="plugin-manage-row danger" type="submit"
+                  {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
+                  title="{% if plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
+                  <span>删除外部插件</span>
+                  <span aria-hidden="true">›</span>
+                </button>
+              </form>
+            {% endif %}
+          </div>
+        </section>
       {% endfor %}
-    </div>
-  </section>
+
+      <div class="plugin-detail-empty hidden" id="plugin-detail-empty">
+        <svg class="icon"><use href="/static/icons.svg#search"></use></svg>
+        <strong>没有可显示的插件</strong>
+        <span>调整搜索或筛选条件后再试。</span>
+      </div>
+    </aside>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 (() => {
+  const rows = Array.from(document.querySelectorAll('[data-plugin-row]'));
+  const details = Array.from(document.querySelectorAll('[data-plugin-detail]'));
   const toggleForms = Array.from(document.querySelectorAll('.plugin-toggle-form[data-plugin-id]'));
+  const filterButtons = Array.from(document.querySelectorAll('[data-plugin-filter]'));
+  const searchInput = document.getElementById('plugin-search-input');
+  const countLabel = document.getElementById('plugin-result-count');
+  const filterEmpty = document.getElementById('plugin-filter-empty');
+  const detailEmpty = document.getElementById('plugin-detail-empty');
+  let activeFilter = 'all';
+  let selectedId = rows.find((row) => row.classList.contains('is-selected'))?.dataset.pluginId || rows[0]?.dataset.pluginId || '';
+  const pendingToggleOperations = new Map();
 
-  function cardFor(id) {
-    return document.querySelector(`[data-plugin-card="${CSS.escape(id)}"]`);
+  function rowFor(id) {
+    return rows.find((row) => row.dataset.pluginId === id) || null;
   }
 
-  function setCardState(id, desiredEnabled, currentEnabled, options = {}) {
-    const card = cardFor(id);
-    if (!card) return;
-    const form = card.querySelector('.plugin-toggle-form');
-    const input = form && form.querySelector('input[type="checkbox"]');
-    const badge = card.querySelector('[data-plugin-runtime-state]');
-    if (!form || !input || !badge) return;
+  function formsFor(id) {
+    return toggleForms.filter((form) => form.dataset.pluginId === id);
+  }
 
-    const locked = card.dataset.pluginLocked === 'true';
-    const mutable = card.dataset.pluginMutable === 'true';
-    const compatible = card.dataset.pluginCompatible === 'true';
+  function selectPlugin(id) {
+    if (!id) return;
+    selectedId = id;
+    rows.forEach((row) => {
+      const selected = row.dataset.pluginId === id;
+      row.classList.toggle('is-selected', selected);
+      row.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+    details.forEach((panel) => {
+      panel.classList.toggle('hidden', panel.dataset.pluginDetail !== id);
+    });
+    if (detailEmpty) detailEmpty.classList.add('hidden');
+  }
+
+  function restoreRowBadge(row) {
+    const badge = row?.querySelector('[data-plugin-state-badge]');
+    if (!badge) return;
+    badge.className = 'plugin-state-badge ' + (badge.dataset.defaultClass || 'green');
+    badge.textContent = badge.dataset.defaultText || '已就绪';
+    badge.title = '';
+  }
+
+  function setPluginState(id, desiredEnabled, currentEnabled, options = {}) {
+    const row = rowFor(id);
+    if (!row) return;
+    const locked = row.dataset.pluginLocked === 'true';
+    const mutable = row.dataset.pluginMutable === 'true';
+    const compatible = row.dataset.pluginCompatible === 'true';
     const pending = desiredEnabled !== currentEnabled;
     const errorMessage = pending ? String(options.error || '') : '';
     const busy = Boolean(options.busy && pending);
 
-    input.checked = desiredEnabled;
-    form.action = `/plugins/${encodeURIComponent(id)}/${desiredEnabled ? 'disable' : 'enable'}`;
-    input.setAttribute('aria-label', `${desiredEnabled ? '停用' : '启用'} ${card.querySelector('h2')?.textContent || id}`);
+    row.dataset.pluginEnabled = desiredEnabled ? 'true' : 'false';
+    row.classList.toggle('is-applying', busy);
 
-    card.classList.toggle('is-applying', busy);
-    form.classList.toggle('is-busy', busy);
-    badge.className = `status ${errorMessage ? 'red' : 'amber'}${pending ? '' : ' hidden'}`;
-    badge.textContent = errorMessage
-      ? '应用失败'
-      : pending
-        ? (options.pendingLabel || '待应用')
-        : '';
-    badge.title = errorMessage;
+    formsFor(id).forEach((form) => {
+      const input = form.querySelector('input[type="checkbox"]');
+      if (!input) return;
+      input.checked = desiredEnabled;
+      form.action = '/plugins/' + encodeURIComponent(id) + '/' + (desiredEnabled ? 'disable' : 'enable');
+      input.disabled = locked || !mutable || (!desiredEnabled && !compatible) || busy;
+      form.classList.toggle('is-busy', busy);
+    });
 
-    input.disabled = locked || !mutable || (!desiredEnabled && !compatible) || busy;
+    const badge = row.querySelector('[data-plugin-state-badge]');
+    if (badge) {
+      if (errorMessage) {
+        badge.className = 'plugin-state-badge red';
+        badge.textContent = '应用失败';
+        badge.title = errorMessage;
+      } else if (pending) {
+        badge.className = 'plugin-state-badge amber';
+        badge.textContent = options.pendingLabel || '待应用';
+        badge.title = '';
+      } else {
+        restoreRowBadge(row);
+      }
+    }
   }
 
   function syncCards(status) {
@@ -238,15 +363,76 @@
     const current = new Set(status.current_enabled || []);
     const error = String(status.last_error || '');
     const pendingLabel = status.hot_reload_available ? '待自动应用' : '重启后生效';
-    document.querySelectorAll('[data-plugin-card]').forEach((card) => {
-      const id = card.dataset.pluginCard;
-      setCardState(id, desired.has(id), current.has(id), {
+    rows.forEach((row) => {
+      const id = row.dataset.pluginId;
+      const hasPendingToggle = pendingToggleOperations.has(id);
+      const requestedEnabled = hasPendingToggle
+        ? pendingToggleOperations.get(id)
+        : desired.has(id);
+      setPluginState(id, requestedEnabled, current.has(id), {
         error,
-        busy: Boolean(status.reloading),
-        pendingLabel,
+        busy: hasPendingToggle || Boolean(status.reloading),
+        pendingLabel: hasPendingToggle ? '应用中…' : pendingLabel,
       });
     });
+    applyFilters();
   }
+
+  function matchesFilter(row) {
+    const query = (searchInput?.value || '').trim().toLowerCase();
+    if (query && !row.dataset.pluginSearch.includes(query)) return false;
+    if (activeFilter === 'enabled') return row.dataset.pluginEnabled === 'true';
+    if (activeFilter === 'attention') return row.dataset.pluginNeedsAction === 'true';
+    if (activeFilter === 'external') return row.dataset.pluginExternal === 'true';
+    return true;
+  }
+
+  function applyFilters() {
+    const visibleRows = rows.filter((row) => {
+      const visible = matchesFilter(row);
+      row.classList.toggle('hidden', !visible);
+      return visible;
+    });
+    if (countLabel) countLabel.textContent = visibleRows.length + ' 个插件';
+    if (filterEmpty) filterEmpty.classList.toggle('hidden', visibleRows.length !== 0);
+
+    if (!visibleRows.length) {
+      details.forEach((panel) => panel.classList.add('hidden'));
+      if (detailEmpty) detailEmpty.classList.remove('hidden');
+      return;
+    }
+
+    if (!visibleRows.some((row) => row.dataset.pluginId === selectedId)) {
+      selectPlugin(visibleRows[0].dataset.pluginId);
+    }
+  }
+
+  rows.forEach((row) => {
+    row.addEventListener('click', (event) => {
+      if (event.target.closest('form, button, input, label, a, summary')) return;
+      selectPlugin(row.dataset.pluginId);
+    });
+    row.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      if (event.target.closest('form, button, input, label, a, summary')) return;
+      event.preventDefault();
+      selectPlugin(row.dataset.pluginId);
+    });
+  });
+
+  filterButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      activeFilter = button.dataset.pluginFilter || 'all';
+      filterButtons.forEach((item) => {
+        const active = item === button;
+        item.classList.toggle('is-active', active);
+        item.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+      applyFilters();
+    });
+  });
+
+  searchInput?.addEventListener('input', applyFilters);
 
   async function refreshShellChrome() {
     const response = await fetch('/plugins', {
@@ -267,7 +453,7 @@
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
-    if (!response.ok) throw new Error(`读取插件运行状态失败（${response.status}）`);
+    if (!response.ok) throw new Error('读取插件运行状态失败（' + response.status + '）');
     const status = await response.json();
     syncCards(status);
     return status;
@@ -281,18 +467,26 @@
       if (!id || !input || input.disabled) return;
 
       const requestedEnabled = input.checked;
-      const card = cardFor(id);
-      const badge = card && card.querySelector('[data-plugin-runtime-state]');
-      let configurationSaved = false;
-      input.disabled = true;
-      card?.classList.add('is-applying');
-      form.classList.add('is-busy');
+      pendingToggleOperations.set(id, requestedEnabled);
+      beginOperation();
+      formsFor(id).forEach((otherForm) => {
+        const otherInput = otherForm.querySelector('input[type="checkbox"]');
+        if (otherInput) {
+          otherInput.checked = requestedEnabled;
+          otherInput.disabled = true;
+        }
+      });
+
+      const row = rowFor(id);
+      const badge = row?.querySelector('[data-plugin-state-badge]');
+      if (row) row.classList.add('is-applying');
       if (badge) {
-        badge.className = 'status amber';
+        badge.className = 'plugin-state-badge amber';
         badge.textContent = '应用中…';
         badge.title = '';
       }
 
+      let configurationSaved = false;
       try {
         const response = await fetch(form.action, {
           method: 'POST',
@@ -303,59 +497,113 @@
         configurationSaved = true;
 
         const desired = new Set(payload.desired_enabled || []);
-        document.querySelectorAll('[data-plugin-card]').forEach((item) => {
-          const pluginId = item.dataset.pluginCard;
-          const currentInput = item.querySelector('.plugin-toggle-form input[type="checkbox"]');
-          if (currentInput) currentInput.checked = desired.has(pluginId);
+        rows.forEach((item) => {
+          item.dataset.pluginEnabled = desired.has(item.dataset.pluginId) ? 'true' : 'false';
         });
 
         const status = await waitForRuntime();
+        pendingToggleOperations.delete(id);
+        syncCards(status);
         if (!status.last_error && !status.restart_required) {
           await refreshShellChrome();
         }
+        finishOperation(!status.last_error);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        pendingToggleOperations.delete(id);
+        finishOperation(false);
         if (!configurationSaved) {
-          input.checked = !requestedEnabled;
-          form.action = `/plugins/${encodeURIComponent(id)}/${input.checked ? 'disable' : 'enable'}`;
-          if (badge) {
-            badge.className = 'status red';
-            badge.textContent = '修改失败';
-            badge.title = message;
+          setPluginState(id, !requestedEnabled, !requestedEnabled, { error: message });
+          const failedBadge = row?.querySelector('[data-plugin-state-badge]');
+          if (failedBadge) {
+            failedBadge.className = 'plugin-state-badge red';
+            failedBadge.textContent = '修改失败';
+            failedBadge.title = message;
           }
-          card?.classList.remove('is-applying');
-          form.classList.remove('is-busy');
-          input.disabled = false;
         } else {
           try {
             const status = await waitForRuntime();
             syncCards({ ...status, last_error: status.last_error || message });
           } catch (_) {
-            if (badge) {
-              badge.className = 'status red';
-              badge.textContent = '应用失败';
-              badge.title = message;
-            }
-            card?.classList.remove('is-applying');
-            form.classList.remove('is-busy');
-            input.disabled = false;
+            setPluginState(id, requestedEnabled, !requestedEnabled, { error: message });
           }
         }
       }
     });
   });
 
-  const input = document.getElementById('plugin-zip-file');
-  const button = document.getElementById('plugin-zip-button');
-  const status = document.getElementById('plugin-upload-status');
-  if (!input || !button || !status) return;
+  const uploadInput = document.getElementById('plugin-zip-file');
+  const uploadButton = document.getElementById('plugin-zip-button');
+  const uploadStatus = document.getElementById('plugin-upload-status');
+  const operationStatus = document.getElementById('plugin-operation-status');
+  const operationLoading = operationStatus?.querySelector('[data-operation-loading]');
+  const operationDone = operationStatus?.querySelector('[data-operation-done]');
+  let operationStatusTimer = 0;
+  let activeOperationCount = 0;
+  let operationBatchFailed = false;
+  let uploadOperationActive = false;
 
-  button.addEventListener('click', () => input.click());
-  input.addEventListener('change', async () => {
-    const file = input.files && input.files[0];
-    if (!file) return;
-    button.disabled = true;
-    status.textContent = `正在添加 ${file.name}…`;
+  function showOperationStatus(state) {
+    if (!operationStatus || !operationLoading || !operationDone) return;
+    window.clearTimeout(operationStatusTimer);
+    operationStatus.classList.remove('hidden');
+    const done = state === 'done';
+    operationLoading.classList.toggle('hidden', done);
+    operationDone.classList.toggle('hidden', !done);
+    operationStatus.classList.toggle('is-done', done);
+    operationStatus.setAttribute('aria-label', done ? '操作完成' : '正在处理插件操作');
+    if (done) {
+      operationStatusTimer = window.setTimeout(() => {
+        operationStatus.classList.add('hidden');
+      }, 1600);
+    }
+  }
+
+  function hideOperationStatus() {
+    if (!operationStatus) return;
+    window.clearTimeout(operationStatusTimer);
+    operationStatus.classList.add('hidden');
+  }
+
+  function beginOperation() {
+    if (activeOperationCount === 0) operationBatchFailed = false;
+    activeOperationCount += 1;
+    showOperationStatus('loading');
+  }
+
+  function finishOperation(success = true) {
+    if (activeOperationCount <= 0) return;
+    if (!success) operationBatchFailed = true;
+    activeOperationCount -= 1;
+    if (activeOperationCount > 0) {
+      showOperationStatus('loading');
+      return;
+    }
+    if (operationBatchFailed) {
+      hideOperationStatus();
+      return;
+    }
+    showOperationStatus('done');
+  }
+
+  function setUploadBusy(busy) {
+    if (uploadButton) uploadButton.disabled = busy;
+    if (busy && !uploadOperationActive) {
+      uploadOperationActive = true;
+      beginOperation();
+    } else if (!busy && uploadOperationActive) {
+      uploadOperationActive = false;
+      finishOperation(false);
+    }
+  }
+
+  uploadButton?.addEventListener('click', () => uploadInput?.click());
+  uploadInput?.addEventListener('change', async () => {
+    const file = uploadInput.files && uploadInput.files[0];
+    if (!file || !uploadStatus) return;
+    setUploadBusy(true);
+    uploadStatus.textContent = '';
+    uploadStatus.classList.remove('is-error');
     try {
       const response = await fetch('/plugins/install-upload', {
         method: 'POST',
@@ -369,11 +617,25 @@
       if (!response.ok) throw new Error(payload.detail || '插件安装失败');
       window.location.href = '/plugins?notice=' + encodeURIComponent(payload.message || '插件已添加');
     } catch (error) {
-      status.textContent = error instanceof Error ? error.message : String(error);
-      button.disabled = false;
-      input.value = '';
+      uploadStatus.textContent = error instanceof Error ? error.message : String(error);
+      uploadStatus.classList.add('is-error');
+      setUploadBusy(false);
+      uploadInput.value = '';
     }
   });
+
+  document.querySelectorAll('[data-plugin-operation-form]').forEach((form) => {
+    form.addEventListener('submit', () => beginOperation());
+  });
+
+  if (operationStatus && operationStatus.classList.contains('is-done')) {
+    showOperationStatus('done');
+  } else if (operationDone && !operationDone.classList.contains('hidden')) {
+    showOperationStatus('done');
+  }
+
+  applyFilters();
+  if (selectedId) selectPlugin(selectedId);
 })();
 </script>
 {% endblock %}
