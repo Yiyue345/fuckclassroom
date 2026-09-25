@@ -131,9 +131,9 @@
                     <span>点击展开 Python 包与运行时组件</span>
                   </div>
                   <div class="plugin-manager-dependency-summary">
-                    {% if plugin.dependency_state == "required_missing" %}
+                    {% if plugin.missing_required_dependencies %}
                       <span class="status red">缺少必需依赖</span>
-                    {% elif plugin.dependency_state == "optional_missing" %}
+                    {% elif plugin.missing_optional_dependencies %}
                       <span class="status amber">缺少可选扩展</span>
                     {% else %}
                       <span class="status green">已就绪</span>
