@@ -606,6 +606,13 @@ class PluginManager:
                 dependency for dependency in dependencies
                 if not dependency["installed"] and dependency["optional"]
             ]
+            dependency_state = (
+                "required_missing"
+                if missing_required
+                else "optional_missing"
+                if missing_optional
+                else "ready"
+            )
             rows.append(
                 {
                     "id": item.id,
@@ -628,6 +635,7 @@ class PluginManager:
                     "dependencies": dependencies,
                     "missing_required_dependencies": missing_required,
                     "missing_optional_dependencies": missing_optional,
+                    "dependency_state": dependency_state,
                     "dependency_issue": bool(missing_required),
                     "compatible": compatibility["compatible"],
                     "compatibility_message": compatibility["message"],
