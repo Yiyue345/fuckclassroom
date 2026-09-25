@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - 0.2.0
       - pluginization
       - feat/course-media-viewer
       - feature/live-ppt-qr-assistant
