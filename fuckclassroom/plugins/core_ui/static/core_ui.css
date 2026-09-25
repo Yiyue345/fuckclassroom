@@ -60,7 +60,9 @@
 .plugin-add-button:hover { background: var(--primary-hover); }
 .plugin-add-button:disabled { background: var(--surface-hover); color: var(--text-muted); box-shadow: none; cursor: default; }
 .plugin-add-button span { display: block; font-size: 25px; font-weight: 400; line-height: 1; transform: translateY(-1px); }
-.plugin-operation-spinner { width: 28px; height: 28px; flex: 0 0 28px; border: 3px solid var(--primary-soft); border-top-color: var(--primary); border-radius: 50%; animation: plugin-operation-spin .75s linear infinite; }
+.plugin-operation-status { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; }
+.plugin-operation-spinner { width: 24px; height: 24px; border: 2.5px solid var(--primary-soft); border-top-color: var(--primary); border-radius: 50%; animation: plugin-operation-spin .75s linear infinite; }
+.plugin-operation-done { width: 28px; height: 28px; color: var(--green); stroke-width: 1.8; }
 @keyframes plugin-operation-spin { to { transform: rotate(360deg); } }
 .plugin-page-notice { margin-bottom: 14px; }
 
