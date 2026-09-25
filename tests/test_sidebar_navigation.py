@@ -142,6 +142,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn('id="plugin-zip-button"', template)
         self.assertNotIn("本机路径", template)
         self.assertNotIn("外部插件包格式", template)
+        self.assertEqual(template.count("{% block "), template.count("{% endblock %}"))
         self.assertIn('class="toggle-control plugin-toggle-control"', template)
         self.assertIn('role="switch"', template)
         self.assertIn('onchange="this.form.requestSubmit()"', template)
