@@ -163,6 +163,12 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn(".plugin-row.is-selected {", styles)
         self.assertIn(".plugin-detail-panel { position: sticky;", styles)
         self.assertIn(".plugin-add-button {", styles)
+        self.assertIn("plugin-operation-status", template)
+        self.assertIn("data-operation-loading", template)
+        self.assertIn("data-operation-done", template)
+        self.assertIn("showOperationStatus('loading')", template)
+        self.assertIn("showOperationStatus('done')", template)
+        self.assertIn(".plugin-operation-done {", styles)
         self.assertNotIn("本机路径", template)
         self.assertNotIn("外部插件包格式", template)
         self.assertEqual(
@@ -175,7 +181,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260926-3",
+            "/plugins/core_ui/static/core_ui.css?v=20260926-4",
             registry.stylesheets,
         )
         self.assertIn(
