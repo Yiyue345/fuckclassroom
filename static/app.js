@@ -148,7 +148,10 @@
       statusBox.classList.remove("hidden", "error", "success");
       message.textContent = form.dataset.taskStarting || "正在启动刷新任务";
       progress.style.width = "4%";
-      if (loginSystem) markSessionLoggingIn(loginSystem);
+      if (loginSystem) {
+        markSessionLoggingIn(loginSystem);
+        document.dispatchEvent(new CustomEvent("academic:auth-poll-wake"));
+      }
 
       try {
         const response = await fetch(form.action, {
@@ -248,6 +251,8 @@
     let challengeId = "";
     let retryAfter = 0;
     let retryUpdatedAt = 0;
+    let authPollTimer = 0;
+    let authPollActiveUntil = 0;
 
     const setAuthError = (value) => {
       error.textContent = value || "";
@@ -296,14 +301,35 @@
       if (!response.ok) throw new Error(await readResponseError(response, "验证码操作失败"));
     };
 
+    const scheduleAuthPoll = (delay) => {
+      window.clearTimeout(authPollTimer);
+      authPollTimer = window.setTimeout(pollAuthChallenge, delay);
+    };
+
+    const authPollDelay = (hasChallenge) => {
+      if (document.hidden) return 30000;
+      if (hasChallenge || Date.now() < authPollActiveUntil) return 800;
+      return 15000;
+    };
+
+    const wakeAuthPolling = () => {
+      authPollActiveUntil = Date.now() + 30000;
+      scheduleAuthPoll(0);
+    };
+
     const pollAuthChallenge = async () => {
+      let hasChallenge = Boolean(challengeId);
       try {
         const response = await fetch("/api/auth/challenge", {headers: {Accept: "application/json"}, cache: "no-store"});
-        if (!response.ok) return;
-        const payload = await response.json();
-        renderChallenge(payload.challenge);
+        if (response.ok) {
+          const payload = await response.json();
+          hasChallenge = Boolean(payload.challenge);
+          renderChallenge(payload.challenge);
+        }
       } catch {
-        // The next poll will retry when the local server is available again.
+        // Keep the modal state and retry at the adaptive interval.
+      } finally {
+        scheduleAuthPoll(authPollDelay(hasChallenge));
       }
     };
 
@@ -345,9 +371,14 @@
       if (event.key === "Enter") verifyButton.click();
     });
 
+    document.addEventListener("academic:auth-poll-wake", wakeAuthPolling);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) wakeAuthPolling();
+      else scheduleAuthPoll(authPollDelay(Boolean(challengeId)));
+    });
+
     window.setInterval(renderRetry, 1000);
-    window.setInterval(pollAuthChallenge, 800);
-    pollAuthChallenge();
+    scheduleAuthPoll(0);
   }
 
   applyTheme(localStorage.getItem("ui-theme") || "auto");

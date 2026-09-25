@@ -128,17 +128,64 @@ class UiModularizationTests(unittest.TestCase):
         self.assertNotIn(".output-actions", core)
         self.assertNotIn(".catalog-filters", core)
         self.assertNotIn(".settings-layout", core)
-        self.assertNotIn(".plugin-manager-grid", core)
+        self.assertNotIn(".plugin-manager-layout", core)
         self.assertNotIn(".ketangpai-overview", core)
         self.assertNotIn(".task-stack", core)
         self.assertIn(".course-summary", classroom)
         self.assertIn(".output-actions", processing)
         self.assertIn(".catalog-filters", selection)
         self.assertIn(".settings-layout", core_ui)
-        self.assertIn(".plugin-manager-grid", core_ui)
+        self.assertIn(".plugin-manager-layout", core_ui)
+        self.assertNotIn(".plugin-manager-grid", core_ui)
         self.assertIn(".task-stack", core_ui)
         self.assertNotIn(".ketangpai-overview", core_ui)
         self.assertIn(".ketangpai-overview", attendance)
+
+    def test_frontend_regressions_for_open_ui_issues(self) -> None:
+        network = Path(
+            "fuckclassroom/plugins/core_ui/templates/core_settings_network.html"
+        ).read_text(encoding="utf-8")
+        classroom = Path(
+            "fuckclassroom/plugins/classroom/templates/classroom/login.html"
+        ).read_text(encoding="utf-8")
+        task_script = Path(
+            "fuckclassroom/plugins/core_ui/static/task_status.js"
+        ).read_text(encoding="utf-8")
+        app_script = Path("static/app.js").read_text(encoding="utf-8")
+        base = Path("templates/base.html").read_text(encoding="utf-8")
+        task_template = Path(
+            "fuckclassroom/plugins/core_ui/templates/core/task_status.html"
+        ).read_text(encoding="utf-8")
+
+        # #18: a damaged credential file is not "saved", but must remain clearable.
+        self.assertIn(
+            '{% if panel_context.credentials.can_clear %}\n'
+            '      <button class="btn danger" type="submit" form="credential-clear-form"',
+            network,
+        )
+        self.assertIn(
+            "panel_context.credentials.is_saved",
+            network,
+        )
+
+        # #24: recent tasks use the same cancelled/cancelling semantics as task center.
+        self.assertIn('task.status == "cancelled"', classroom)
+        self.assertIn("已取消", classroom)
+        self.assertIn("取消中", classroom)
+        self.assertIn("进行中 {{ task.progress }}%", classroom)
+
+        # #21: transient HTTP failures retry; missing/expired tasks stop with feedback.
+        self.assertIn("response.status === 404 || response.status === 410", task_script)
+        self.assertIn("正在重试", task_script)
+        self.assertIn("window.setTimeout(refreshTask, 1500)", task_script)
+        self.assertIn("task_status.js?v=20260926-1", task_template)
+
+        # #19: idle pages no longer poll auth every 800 ms forever.
+        self.assertNotIn("window.setInterval(pollAuthChallenge, 800)", app_script)
+        self.assertIn("return 15000", app_script)
+        self.assertIn('academic:auth-poll-wake', app_script)
+        self.assertIn("scheduleAuthPoll(0)", app_script)
+        self.assertIn("/static/app.js?v=20260926-1", base)
 
     def test_core_shell_and_task_pages_are_feature_agnostic(self) -> None:
         base = Path("templates/base.html").read_text(encoding="utf-8")

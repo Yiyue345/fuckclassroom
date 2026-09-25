@@ -2,10 +2,10 @@
 <section class="settings-section" id="network">
   <div><h2>统一登录</h2><p>保存统一桂电账号，方便各学习工具自动登录。密码加密保存在本机。</p></div>
   <div class="fields">
-    <div class="field-row">{{ ui.field("account_username", "统一桂电账号", panel_context.credentials.username, autocomplete="username") }}<div class="field"><label for="account_password">统一桂电密码</label><input class="input mono" id="account_password" name="account_password" type="password" autocomplete="new-password" placeholder="{% if panel_context.credentials.is_saved %}已加密保存，留空保持不变{% else %}未保存{% endif %}"></div></div>
+    <div class="field-row">{{ ui.field("account_username", "统一桂电账号", panel_context.credentials.username, autocomplete="username") }}<div class="field"><label for="account_password">统一桂电密码</label><input class="input mono" id="account_password" name="account_password" type="password" autocomplete="new-password" placeholder="{% if panel_context.credentials.is_saved %}已加密保存，留空保持不变{% else %}未保存或需要重新保存{% endif %}"></div></div>
     <div class="detail-grid"><div class="detail-item"><label>自动登录</label><strong>{{ panel_context.credentials.message }}</strong></div><div class="detail-item"><label>凭据存储</label><strong>系统安全存储</strong></div></div>
     <button class="btn danger" type="submit" form="login-state-clear-form"><svg class="icon"><use href="/static/icons.svg#log-out"></use></svg>清除插件登录状态</button>
-    {% if panel_context.credentials.is_saved %}
+    {% if panel_context.credentials.can_clear %}
       <button class="btn danger" type="submit" form="credential-clear-form"><svg class="icon"><use href="/static/icons.svg#trash-2"></use></svg>清除自动登录凭据</button>
     {% endif %}
   </div>

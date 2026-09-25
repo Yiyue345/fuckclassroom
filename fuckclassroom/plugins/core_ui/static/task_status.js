@@ -113,14 +113,29 @@
         renderLogs(task.logs);
       }
   
+      function showRefreshError(message) {
+        const error = document.getElementById("error");
+        error.textContent = message;
+        error.classList.remove("hidden");
+      }
+
       async function refreshTask() {
         try {
           const response = await fetch(`/api/tasks/${taskId}`, { cache: "no-store" });
-          if (!response.ok) return;
+          if (!response.ok) {
+            if (response.status === 404 || response.status === 410) {
+              showRefreshError(`任务不存在或已被清理（${response.status}）`);
+              return;
+            }
+            showRefreshError(`暂时无法读取任务状态（${response.status}），正在重试…`);
+            window.setTimeout(refreshTask, 1500);
+            return;
+          }
           const task = await response.json();
           renderTask(task);
           if (task.status === "running") window.setTimeout(refreshTask, 750);
         } catch (_) {
+          showRefreshError("暂时无法连接本地服务，正在重试…");
           window.setTimeout(refreshTask, 1500);
         }
       }
