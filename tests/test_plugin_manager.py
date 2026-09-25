@@ -75,6 +75,7 @@ class PluginManagerTests(unittest.TestCase):
             self.assertNotIn("/classroom", paths)
             self.assertNotIn("/courses", paths)
             self.assertIn("/selection/info", paths)
+            self.assertIn("/about", paths)
             self.assertEqual(
                 set(app.state.plugin_registry.plugin_ids),
                 {"core_ui", "course_selection", "lab_selection"},
