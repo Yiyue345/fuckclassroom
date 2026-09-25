@@ -4,7 +4,7 @@ import threading
 import time
 import unittest
 
-from fuckclassroom.core.tasks import TaskManager
+from fuckclassroom.core.tasks import TaskManager, cancel_registered_task
 
 
 class TaskDetailProgressTests(unittest.TestCase):
@@ -114,6 +114,32 @@ class TaskDetailProgressTests(unittest.TestCase):
 
         self.assertIsNotNone(state)
         self.assertTrue(state["auto_open_result"])
+
+
+    def test_status_counts_are_not_limited_by_recent_task_page(self) -> None:
+        manager = TaskManager()
+        for index in range(6):
+            task = manager.create_external(f"完成任务 {index}")
+            manager.complete_external(task.id)
+
+        self.assertEqual(len(manager.list_recent(4)), 4)
+        self.assertEqual(manager.count_by_status("succeeded"), 6)
+
+    def test_finished_tasks_are_bounded_and_removed_from_global_owner_registry(self) -> None:
+        manager = TaskManager()
+        running = manager.create_external("仍在运行")
+        completed_ids: list[str] = []
+        for index in range(120):
+            task = manager.create_external(f"历史任务 {index}")
+            completed_ids.append(task.id)
+            manager.complete_external(task.id)
+
+        self.assertIsNotNone(manager.get(running.id))
+        self.assertEqual(manager.count_by_status("running"), 1)
+        self.assertEqual(manager.count_by_status("succeeded"), 120)
+        self.assertLessEqual(len(manager.list_recent(1000)), 101)
+        with self.assertRaises(KeyError):
+            cancel_registered_task(completed_ids[-1])
 
 
 if __name__ == "__main__":
