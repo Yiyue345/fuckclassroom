@@ -566,7 +566,11 @@ class PluginManager:
                 try:
                     version = importlib.metadata.version(parsed.name)
                 except importlib.metadata.PackageNotFoundError:
-                    installed = False
+                    # The import may be provided by a compatible alternative
+                    # distribution, e.g. opencv-python-headless exposing cv2.
+                    # In that case the runtime capability exists even though the
+                    # exact requirement distribution has no metadata entry.
+                    version = ""
                 if installed and version and parsed.specifier:
                     try:
                         version_ok = Version(version) in parsed.specifier
