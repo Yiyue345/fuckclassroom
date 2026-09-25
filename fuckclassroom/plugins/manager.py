@@ -381,7 +381,7 @@ class PluginManager:
             except (InvalidSpecifier, InvalidVersion):
                 reasons.append("应用版本约束无效")
             else:
-                if current_version not in app_spec:
+                if not app_spec.contains(current_version, prereleases=current_version.is_prerelease):
                     reasons.append(
                         f"需要 FuckClassroom {descriptor.app_requires}，当前为 {APP_VERSION}"
                     )
