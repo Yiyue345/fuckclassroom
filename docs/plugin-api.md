@@ -22,7 +22,7 @@ hello_plugin/
   "name": "Hello Plugin",
   "version": "0.1.0",
   "api_version": 1,
-  "app_requires": ">=0.1,<0.2",
+  "app_requires": ">=0.1,<0.3",
   "description": "最小示例插件",
   "requires": [],
   "entry": "plugin.py"
@@ -116,7 +116,7 @@ from fuckclassroom.core.plugins import (
 | `name` | string | 展示名称 |
 | `version` | string | 插件自身版本 |
 | `api_version` | integer | FuckClassroom Plugin API 版本；当前为 `1` |
-| `app_requires` | string | 可选，PEP 440 应用版本约束，例如 `>=0.1,<0.2` |
+| `app_requires` | string | 可选，PEP 440 应用版本约束，例如 `>=0.1,<0.3` |
 | `description` | string | 插件描述 |
 | `requires` | string[] | 依赖的其他插件 ID |
 | `python_requires` | array | Python 运行依赖 |
@@ -1311,7 +1311,7 @@ PluginSpec(
 
 ```json
 {
-  "app_requires": ">=0.1,<0.2"
+  "app_requires": ">=0.1,<0.3"
 }
 ```
 
