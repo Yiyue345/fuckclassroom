@@ -99,7 +99,7 @@ class PluginManagerTests(unittest.TestCase):
                         "name": "Demo Plugin",
                         "version": "0.1.0",
                         "api_version": PLUGIN_API_VERSION,
-                        "app_requires": ">=0.1,<0.2",
+                        "app_requires": ">=0.1,<0.3",
                         "description": "test plugin",
                         "requires": ["classroom"],
                         "entry": "plugin.py",
