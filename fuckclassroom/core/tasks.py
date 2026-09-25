@@ -424,7 +424,13 @@ class TaskManager:
                 key=lambda state: (state.updated_at, state.created_at),
                 reverse=True,
             )
-            for state in finished[_MAX_RETAINED_FINISHED_TASKS:]:
+            # Timestamps are intentionally human-readable and only have
+            # second precision. Keep the task that just reached a terminal
+            # state even when many tasks finish within the same second; a
+            # later completion may evict it normally.
+            keep_other = max(0, _MAX_RETAINED_FINISHED_TASKS - 1)
+            others = [state for state in finished if state.id != task_id]
+            for state in others[keep_other:]:
                 self._tasks.pop(state.id, None)
 
 
