@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import tempfile
+from pathlib import Path
 from urllib.parse import parse_qs, quote
 
 from fastapi import APIRouter, HTTPException, Request
@@ -13,6 +14,20 @@ from ...core.plugins import PluginContext
 from ...core.tasks import cancel_registered_task
 from ...web.responses import task_started_response
 from ..manager import PluginManagerError
+
+
+def _snapshot_file(path: Path) -> bytes | None:
+    return path.read_bytes() if path.exists() else None
+
+
+def _restore_file(path: Path, payload: bytes | None) -> None:
+    if payload is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".rollback")
+    temporary.write_bytes(payload)
+    temporary.replace(path)
 
 
 def build_router(context: PluginContext) -> APIRouter:
@@ -331,13 +346,44 @@ def build_router(context: PluginContext) -> APIRouter:
         form = {key: values[-1] if values else "" for key, values in parsed.items()}
         for field in plugin_registry.active_checkbox_fields:
             form.setdefault(field, "")
-        updated = settings_store.update_from_form(form)
+
         try:
+            settings_snapshot = _snapshot_file(settings_store.path)
+            credential_snapshot = _snapshot_file(credential_store.path)
+        except OSError as exc:
+            return RedirectResponse(
+                f"/settings?settings_error={quote(f'读取现有设置失败：{exc}')}",
+                status_code=303,
+            )
+
+        try:
+            updated = settings_store.update_from_form(form)
             credential_store.update_from_form(
                 form.get("account_username", ""), form.get("account_password", "")
             )
-        except CredentialStoreError as exc:
-            return RedirectResponse(f"/settings?credential_error={quote(str(exc))}", status_code=303)
+        except (CredentialStoreError, OSError) as exc:
+            rollback_errors: list[str] = []
+            for path, snapshot in (
+                (settings_store.path, settings_snapshot),
+                (credential_store.path, credential_snapshot),
+            ):
+                try:
+                    _restore_file(path, snapshot)
+                except OSError as rollback_exc:
+                    rollback_errors.append(str(rollback_exc))
+            message = str(exc)
+            if rollback_errors:
+                message += "；回滚失败：" + "；".join(rollback_errors)
+            parameter = (
+                "credential_error"
+                if isinstance(exc, CredentialStoreError)
+                else "settings_error"
+            )
+            return RedirectResponse(
+                f"/settings?{parameter}={quote(message)}",
+                status_code=303,
+            )
+
         hook_errors = await context.notify_settings_saved(updated, form)
         if hook_errors:
             return RedirectResponse(

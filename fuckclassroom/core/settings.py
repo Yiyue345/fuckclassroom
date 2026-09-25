@@ -133,10 +133,16 @@ class SettingsStore:
 
     def save(self, settings: AppSettings) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(asdict(settings), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        temporary = self.path.with_name(self.path.name + ".tmp")
+        try:
+            temporary.write_text(
+                json.dumps(asdict(settings), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            temporary.replace(self.path)
+        except OSError:
+            temporary.unlink(missing_ok=True)
+            raise
 
     def update_from_form(self, form: dict[str, str]) -> AppSettings:
         current = self.load()
