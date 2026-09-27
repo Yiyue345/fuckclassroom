@@ -869,13 +869,24 @@ class PluginManager:
         if probe in cls._successful_dependency_probes:
             return True
         if probe == "playwright_chromium":
+            script = (
+                "from playwright.sync_api import sync_playwright\n"
+                "with sync_playwright() as p:\n"
+                "    browser = p.chromium.launch(headless=True)\n"
+                "    browser.close()\n"
+            )
             try:
-                from playwright.sync_api import sync_playwright
-
-                with sync_playwright() as playwright:
-                    browser = playwright.chromium.launch(headless=True)
-                    browser.close()
-            except Exception:
+                result = subprocess.run(
+                    [sys.executable, "-c", script],
+                    cwd=str(PROJECT_ROOT),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=15,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return False
+            if result.returncode != 0:
                 return False
             cls._successful_dependency_probes.add(probe)
             return True
