@@ -1,5 +1,6 @@
 {% import "ui/components.html" as ui %}
 {% set runtime = panel_context.get("asr_runtime", {}) %}
+{% set model_options = panel_context.get("asr_models", ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "turbo"]) %}
 {% set cuda_available = runtime.get("cuda_available", false) %}
 {% set auto_device = runtime.get("auto_device", "cpu") %}
 {% set compute_types = runtime.get("compute_types", {"cpu": ["int8", "float32", "default"], "cuda": []}) %}
@@ -8,7 +9,18 @@
 {% set selected_supported_types = compute_types.get(selected_resolved_device, []) %}
 {% set selected_compute_type = settings.asr_compute_type if settings.asr_compute_type in selected_supported_types else ("int8" if "int8" in selected_supported_types else "default") %}
 {% call ui.section("transcription", "本地语音转写", "调整 faster-whisper 的模型、并发与输出方式。") %}
-    {{ ui.field("asr_model", "语音识别模型", settings.asr_model, hint="默认 small；模型越大通常越准，但下载、内存和推理开销也更高。") }}
+    <div class="field">
+      <label for="asr_model">语音识别模型</label>
+      <select class="select" id="asr_model" name="asr_model" aria-describedby="asr_model-hint">
+        {% if settings.asr_model not in model_options %}
+          <option value="{{ settings.asr_model }}" selected>{{ settings.asr_model }}（当前自定义值）</option>
+        {% endif %}
+        {% for model in model_options %}
+          <option value="{{ model }}"{% if settings.asr_model == model %} selected{% endif %}>{{ model }}</option>
+        {% endfor %}
+      </select>
+      <span class="field-hint" id="asr_model-hint">默认 small；模型越大通常越准，但下载、内存和推理开销也更高。</span>
+    </div>
     <div class="field-row">
       <div class="field">
         <label for="asr_device">推理设备</label>
