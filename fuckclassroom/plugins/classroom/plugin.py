@@ -51,7 +51,7 @@ def build_plugin() -> PluginSpec:
             UIAsset("course_media.css?v=20260922-1", "style", ("course_detail",)),
             UIAsset("course_media_fit.css?v=20260922-1", "style", ("course_detail",)),
             UIAsset("course_media.js?v=20260927-1", pages=("course_detail",)),
-            UIAsset("course_media_fit.js?v=20260918-2", pages=("course_detail",)),
+            UIAsset("course_media_fit.js?v=20260927-1", pages=("course_detail",)),
         ),
         name="课程录播",
         order=10,
