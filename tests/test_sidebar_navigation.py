@@ -275,6 +275,8 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("document.startViewTransition", shell)
         self.assertIn("academic:page-before-swap", shell)
         self.assertIn("academic:page-load", shell)
+        self.assertIn("function beginIntervalCapture()", shell)
+        self.assertIn("clearPageIntervals()", shell)
         self.assertIn("window.FuckClassroomUI?.initPage?.(pageRoot)", shell)
         self.assertIn("function initPage(rootNode = document)", app)
         self.assertIn("data-inline-task", app)
@@ -282,7 +284,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("body.pjax-loading", styles)
         self.assertIn("/static/app.css?v=20260927-1", base)
         self.assertIn("/static/app.js?v=20260927-1", base)
-        self.assertIn("/static/shell.js?v=20260927-1", base)
+        self.assertIn("/static/shell.js?v=20260927-2", base)
 
     def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:
         template = Path("templates/base.html").read_text(encoding="utf-8")
