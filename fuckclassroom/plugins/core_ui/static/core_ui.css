@@ -101,6 +101,7 @@
 .plugin-row-copy > strong { display: block; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 700; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-copy > span { display: block; overflow: hidden; margin-top: 3px; color: var(--text-muted); font-size: 10px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-copy > p { display: -webkit-box; overflow: hidden; margin: 13px 0 0; color: var(--text-soft); font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.plugin-row-copy > .plugin-row-error { display: block; overflow: visible; margin-top: 8px; color: var(--red); font-size: 11px; line-height: 1.45; white-space: normal; -webkit-line-clamp: unset; }
 .plugin-row-actions { display: grid; grid-template-columns: minmax(0, 1fr) 40px; grid-template-rows: 25px 25px; align-items: center; gap: 24px 10px; }
 .plugin-source-badge, .plugin-state-badge { display: inline-flex; width: fit-content; max-width: 126px; align-items: center; justify-content: center; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 620; line-height: 15px; white-space: nowrap; }
 .plugin-source-badge { background: var(--surface-subtle); color: var(--text-soft); }
