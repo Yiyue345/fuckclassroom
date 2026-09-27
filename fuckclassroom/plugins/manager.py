@@ -154,11 +154,6 @@ _BUILTINS: tuple[PluginDescriptor, ...] = (
         "fuckclassroom.plugins.course_selection",
         python_requirements=(_PLAYWRIGHT,),
     ),
-    PluginDescriptor(
-        "lab_selection", "实验课选课", "实验课程、整组与时间段选课、自动候补，共享本科教务会话。", "builtin", 21, (), True,
-        "fuckclassroom.plugins.lab_selection",
-        python_requirements=(_PLAYWRIGHT,),
-    ),
 )
 
 
