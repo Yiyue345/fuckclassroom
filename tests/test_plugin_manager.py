@@ -317,7 +317,8 @@ def build_plugin():
                     {
                         "id": "future_app",
                         "name": "Future App",
-                        "api_version": PLUGIN_API_VERSION + 1,
+                        "api_version": PLUGIN_API_VERSION,
+                        "app_requires": ">=99",
                         "requires": [],
                         "entry": "plugin.py",
                     }
@@ -641,8 +642,7 @@ def build_plugin():
                     {
                         "id": "future_app",
                         "name": "Future App",
-                        "api_version": PLUGIN_API_VERSION,
-                        "app_requires": ">=99",
+                        "api_version": PLUGIN_API_VERSION + 1,
                         "requires": [],
                         "entry": "plugin.py",
                     }
