@@ -50,7 +50,7 @@ class ReloadableApplication:
         return self._request_gate, self._startup_lock
 
     async def _start_generation(self) -> _Generation:
-        app = self._app_factory(self.request_reload_threadsafe, self.runtime_status)
+        app = self._app_factory(self.request_reload, self.runtime_status)
         lifespan = app.router.lifespan_context(app)
         await lifespan.__aenter__()
         return _Generation(app=app, lifespan=lifespan)
@@ -193,16 +193,20 @@ def create_reloadable_app(
     enabled = None if enabled_plugins is None else tuple(enabled_plugins)
     shared_task_manager = TaskManager()
 
+    shell: ReloadableApplication
+
     def factory(reload_callback, reload_status) -> FastAPI:
         return create_app(
             app_config,
             enabled_plugins=enabled,
             reload_callback=reload_callback,
+            reload_background_callback=shell.request_reload_threadsafe,
             reload_status=reload_status,
             shared_task_manager=shared_task_manager,
         )
 
-    return ReloadableApplication(factory)
+    shell = ReloadableApplication(factory)
+    return shell
 
 
 __all__ = ["ReloadableApplication", "create_reloadable_app"]
