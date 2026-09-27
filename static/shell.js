@@ -9,6 +9,8 @@
   let sectionController = null;
   let navigationController = null;
   let navigationSequence = 0;
+  const nativeSetInterval = window.setInterval.bind(window);
+  const pageIntervals = new Set();
 
   function setNavigation(open, restoreFocus = true) {
     open = open && narrow.matches;
@@ -118,18 +120,37 @@
     return url.pathname === '/static/tokens.css' || url.pathname === '/static/app.css';
   }
 
+  function beginIntervalCapture() {
+    const previous = window.setInterval;
+    window.setInterval = (handler, timeout, ...args) => {
+      const timer = nativeSetInterval(handler, timeout, ...args);
+      pageIntervals.add(timer);
+      return timer;
+    };
+    return () => {
+      window.setInterval = previous;
+    };
+  }
+
+  function clearPageIntervals() {
+    pageIntervals.forEach((timer) => window.clearInterval(timer));
+    pageIntervals.clear();
+  }
+
   function markInitialPageScripts() {
     document.body.querySelectorAll('script').forEach((script) => {
       if (!isBaseScript(script)) script.dataset.pjaxPageScript = 'true';
     });
   }
 
-  function pageScripts(nextDocument) {
+  function pageScripts(nextDocument, baseUrl) {
     return Array.from(nextDocument.body.querySelectorAll('script'))
       .filter((script) => !isBaseScript(script))
       .map((script) => ({
-        src: script.src || '',
-        text: script.src ? '' : script.textContent || '',
+        src: script.getAttribute('src')
+          ? new URL(script.getAttribute('src'), baseUrl).href
+          : '',
+        text: script.getAttribute('src') ? '' : script.textContent || '',
         type: script.type || '',
         async: script.async,
         defer: script.defer,
@@ -146,30 +167,38 @@
     }
 
     await new Promise((resolve) => {
+      const restoreIntervalCapture = beginIntervalCapture();
       const script = document.createElement('script');
       script.dataset.pjaxPageScript = 'true';
       if (descriptor.type) script.type = descriptor.type;
       if (descriptor.crossOrigin) script.crossOrigin = descriptor.crossOrigin;
       if (descriptor.referrerPolicy) script.referrerPolicy = descriptor.referrerPolicy;
       script.noModule = descriptor.noModule;
+
+      const finish = () => {
+        restoreIntervalCapture();
+        resolve();
+      };
+
       if (descriptor.src) {
         script.src = descriptor.src;
         script.async = false;
-        script.addEventListener('load', resolve, { once: true });
+        script.addEventListener('load', finish, { once: true });
         script.addEventListener('error', () => {
           console.warn('页面脚本加载失败:', descriptor.src);
-          resolve();
+          finish();
         }, { once: true });
       } else {
         script.textContent = descriptor.text;
       }
       document.body.append(script);
-      if (!descriptor.src) resolve();
+      if (!descriptor.src) finish();
     });
   }
 
   function cleanupPageRuntime() {
     document.dispatchEvent(new CustomEvent('academic:page-before-swap'));
+    clearPageIntervals();
     document.querySelectorAll('script[data-pjax-page-script="true"]').forEach((script) => script.remove());
   }
 
@@ -263,7 +292,7 @@
         return;
       }
     }
-    window.scrollTo({ top: scrollY, left: 0, behavior: 'instant' });
+    window.scrollTo(0, scrollY);
   }
 
   function canNavigate(link, event) {
@@ -322,7 +351,7 @@
         throw new Error('目标页面不支持局部导航');
       }
 
-      const scripts = pageScripts(nextDocument);
+      const scripts = pageScripts(nextDocument, destination.href);
       const removeStaleStyles = await syncPageStyles(nextDocument);
       if (signal.aborted || sequence !== navigationSequence) return;
 
@@ -394,5 +423,10 @@
 
   initPage(document);
   window.FuckClassroomShell = Object.freeze({ navigate, initPage });
-  window.setTimeout(markInitialPageScripts, 0);
+
+  const restoreInitialIntervalCapture = beginIntervalCapture();
+  window.setTimeout(() => {
+    restoreInitialIntervalCapture();
+    markInitialPageScripts();
+  }, 0);
 })();
