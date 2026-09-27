@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import tempfile
 from pathlib import Path
@@ -52,6 +53,14 @@ def build_router(context: PluginContext) -> APIRouter:
         result = plugin_reload()
         if inspect.isawaitable(result):
             result = await result
+        return result is not False
+
+    def request_plugin_reload_from_worker() -> bool:
+        if not callable(plugin_reload):
+            return False
+        result = plugin_reload()
+        if inspect.isawaitable(result):
+            result = asyncio.run(result)
         return result is not False
 
     def reload_status() -> dict[str, object]:
@@ -290,6 +299,18 @@ def build_router(context: PluginContext) -> APIRouter:
 
         def worker(progress):
             plugin_manager.install_dependencies(plugin_id, progress)
+            if plugin_id in plugin_manager.desired_enabled():
+                reload_scheduled = request_plugin_reload_from_worker()
+                if reload_scheduled:
+                    progress(100, "依赖安装完成，正在自动应用插件")
+                    return (
+                        f"/plugins?notice="
+                        f"{quote(f'{descriptor.name} 的依赖安装完成，已请求自动应用')}"
+                    )
+                return (
+                    f"/plugins?restart=1&notice="
+                    f"{quote(f'{descriptor.name} 的依赖安装完成，重启应用后生效')}"
+                )
             return f"/plugins?notice={quote(f'{descriptor.name} 的依赖安装完成')}"
 
         task = task_manager.start(f"安装插件依赖 · {descriptor.name}", worker)
