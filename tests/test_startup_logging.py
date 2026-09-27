@@ -30,8 +30,9 @@ class StartupLoggingTests(unittest.TestCase):
 
     def test_configured_root_logger_writes_utf8_application_logs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            log_path = configure_startup_logging(Path(directory))
             root_logger = logging.getLogger()
+            original_level = root_logger.level
+            log_path = configure_startup_logging(Path(directory))
             handler = next(
                 handler
                 for handler in root_logger.handlers
@@ -47,6 +48,7 @@ class StartupLoggingTests(unittest.TestCase):
             finally:
                 root_logger.removeHandler(handler)
                 handler.close()
+                root_logger.setLevel(original_level)
 
     def test_uvicorn_logs_use_the_same_launch_log_without_console_propagation(self) -> None:
         log_path = Path("data/logs/startup-test.log")
