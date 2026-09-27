@@ -45,6 +45,7 @@ def build_router(context: PluginContext) -> APIRouter:
     verification_broker = services.get("verification_broker")
     plugin_manager = services.get("plugin_manager")
     plugin_reload = services.maybe("plugin_reload")
+    plugin_reload_background = services.maybe("plugin_reload_background")
     plugin_reload_status = services.maybe("plugin_reload_status")
 
     async def request_plugin_reload() -> bool:
@@ -56,9 +57,10 @@ def build_router(context: PluginContext) -> APIRouter:
         return result is not False
 
     def request_plugin_reload_from_worker() -> bool:
-        if not callable(plugin_reload):
+        callback = plugin_reload_background if callable(plugin_reload_background) else plugin_reload
+        if not callable(callback):
             return False
-        result = plugin_reload()
+        result = callback()
         if inspect.isawaitable(result):
             result = asyncio.run(result)
         return result is not False
