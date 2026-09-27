@@ -153,5 +153,47 @@ class UIContractTests(unittest.TestCase):
             self.assertEqual('/lessons/2/summarize' in html, expected)
 
 
+    def test_completed_transcription_ui_uses_existing_outputs_without_resubmitting(self):
+        registry = build_plugin_registry(ALL)
+        env = environment(registry)
+        lesson = NS(id="lesson-1", title="Lesson", resources=[NS(kind="video", is_downloadable=True, url="/demo.mp4")], is_live=False)
+        detail = NS(course=NS(id="course-1", title="Course"), lessons=[lesson])
+        course_html = env.get_template("classroom/course_detail.html").render(
+            request=request(registry),
+            detail=detail,
+        )
+        output_html = env.get_template("processing/lesson_outputs.html").render(
+            request=request(registry),
+            outputs={"transcript.md": "done"},
+            course_id="course-1",
+            lesson_id="lesson-1",
+        )
+        script = Path(
+            "fuckclassroom/plugins/processing/static/task_detail_progress.js"
+        ).read_text(encoding="utf-8")
+        styles = Path(
+            "fuckclassroom/plugins/processing/static/task_detail_progress.css"
+        ).read_text(encoding="utf-8")
+        plugin = Path(
+            "fuckclassroom/plugins/processing/plugin.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("data-transcription-form", course_html)
+        self.assertIn("data-transcription-output-url", course_html)
+        self.assertIn("data-transcription-complete", course_html)
+        self.assertIn("已转写", course_html)
+        self.assertIn("data-output-transcript", output_html)
+        self.assertIn("checkTranscriptionComplete", script)
+        self.assertIn("markTranscriptionComplete", script)
+        self.assertIn("workerCount = Math.min(4", script)
+        self.assertIn("node.classList.add('hidden')", script)
+        self.assertIn("node.classList.remove('hidden')", script)
+        self.assertIn("academic:page-before-swap", script)
+        self.assertIn(".transcription-complete {", styles)
+        self.assertIn("task_detail_progress.js?v=20260927-2", plugin)
+        self.assertIn("task_detail_progress.css?v=20260927-1", plugin)
+
+
+
 if __name__ == "__main__":
     unittest.main()
