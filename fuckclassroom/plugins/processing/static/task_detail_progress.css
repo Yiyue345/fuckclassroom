@@ -33,3 +33,21 @@
   height: 5px;
   margin-top: 6px;
 }
+
+
+.transcription-complete {
+  border-color: color-mix(in srgb, var(--green) 38%, var(--border));
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 650;
+}
+
+.transcription-complete:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+form[data-transcription-form][aria-busy="true"] [data-transcription-submit] {
+  cursor: wait;
+  opacity: .62;
+}

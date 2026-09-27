@@ -1,4 +1,6 @@
 (() => {
+  const pageController = new AbortController();
+  const pageSignal = pageController.signal;
   const stage = document.querySelector('[data-ppt-stage]');
   if (!stage) return;
 
@@ -173,7 +175,14 @@
     if (document.fullscreenElement === card) {
       syncActiveThumbnail(true);
     }
-  });
+  }, { signal: pageSignal });
+
+  document.addEventListener('academic:page-before-swap', () => {
+    cropObserver.disconnect();
+    navigationObserver.disconnect();
+    if (rebuildFrame) cancelAnimationFrame(rebuildFrame);
+    pageController.abort();
+  }, { once: true, signal: pageSignal });
 
   rebuildThumbnails();
 

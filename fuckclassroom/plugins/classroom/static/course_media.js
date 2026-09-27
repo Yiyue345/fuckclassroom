@@ -1,5 +1,7 @@
 (() => {
   const D = document;
+  const pageController = new AbortController();
+  const pageSignal = pageController.signal;
   const XML = (source) => new DOMParser().parseFromString(source, "application/xml");
   const all = (node, localName) => [...node.getElementsByTagName("*")].filter((item) => item.localName === localName);
   const one = (node, localName) => all(node, localName)[0];
@@ -610,7 +612,7 @@
     if (D.fullscreenElement !== pptCard) return;
     if (event.key === "ArrowLeft") showPptPage(pptIndex - 1);
     if (event.key === "ArrowRight") showPptPage(pptIndex + 1);
-  });
+  }, { signal: pageSignal });
 
   const requestedLesson = new URLSearchParams(window.location.search).get("lesson");
   const initialRow = rows.find((row) => row.dataset.lessonId === requestedLesson)
@@ -618,8 +620,13 @@
     || rows.find((row) => row.dataset.videoUrl || row.dataset.pptUrl)
     || rows[0];
   if (initialRow) selectLesson(initialRow);
-  window.addEventListener("beforeunload", () => {
+
+  function cleanupPage() {
     stopLivePptPolling();
     destroyVideoSource();
-  });
+    pageController.abort();
+  }
+
+  D.addEventListener("academic:page-before-swap", cleanupPage, { once: true, signal: pageSignal });
+  window.addEventListener("beforeunload", cleanupPage, { once: true, signal: pageSignal });
 })();

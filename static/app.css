@@ -282,3 +282,67 @@ td { padding-block: 16px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+
+/* Partial page navigation */
+body.pjax-loading {
+  cursor: progress;
+}
+
+body.pjax-loading::after {
+  content: "";
+  position: fixed;
+  z-index: 80;
+  inset: 0 auto auto 0;
+  width: 36%;
+  height: 2px;
+  background: var(--primary);
+  animation: pjax-progress 900ms ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+body.pjax-loading #main-content {
+  opacity: .72;
+  transition: opacity 140ms ease;
+}
+
+#main-content {
+  view-transition-name: page-content;
+}
+
+.breadcrumb {
+  view-transition-name: page-breadcrumb;
+}
+
+@keyframes pjax-progress {
+  from { transform: translateX(-30%); }
+  to { transform: translateX(210%); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+
+  ::view-transition-old(page-content) {
+    animation: pjax-content-out 120ms ease both;
+  }
+
+  ::view-transition-new(page-content) {
+    animation: pjax-content-in 180ms ease both;
+  }
+
+  ::view-transition-old(page-breadcrumb),
+  ::view-transition-new(page-breadcrumb) {
+    animation-duration: 140ms;
+  }
+}
+
+@keyframes pjax-content-out {
+  to { opacity: 0; transform: translateY(-3px); }
+}
+
+@keyframes pjax-content-in {
+  from { opacity: 0; transform: translateY(5px); }
+}

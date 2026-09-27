@@ -185,7 +185,7 @@ class UiModularizationTests(unittest.TestCase):
         self.assertIn("return 15000", app_script)
         self.assertIn('academic:auth-poll-wake', app_script)
         self.assertIn("scheduleAuthPoll(0)", app_script)
-        self.assertIn("/static/app.js?v=20260926-1", base)
+        self.assertIn("/static/app.js?v=20260927-1", base)
 
     def test_core_shell_and_task_pages_are_feature_agnostic(self) -> None:
         base = Path("templates/base.html").read_text(encoding="utf-8")
