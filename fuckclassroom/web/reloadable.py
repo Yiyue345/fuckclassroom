@@ -38,6 +38,7 @@ class ReloadableApplication:
         self._request_gate: asyncio.Event | None = None
         self._reload_task: asyncio.Task[None] | None = None
         self._startup_lock: asyncio.Lock | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._last_reload_error = ""
         self._shutting_down = False
 
@@ -49,7 +50,7 @@ class ReloadableApplication:
         return self._request_gate, self._startup_lock
 
     async def _start_generation(self) -> _Generation:
-        app = self._app_factory(self.request_reload, self.runtime_status)
+        app = self._app_factory(self.request_reload_threadsafe, self.runtime_status)
         lifespan = app.router.lifespan_context(app)
         await lifespan.__aenter__()
         return _Generation(app=app, lifespan=lifespan)
@@ -62,6 +63,7 @@ class ReloadableApplication:
 
     async def _ensure_started(self) -> None:
         gate, lock = self._primitives()
+        self._loop = asyncio.get_running_loop()
         if self._current is not None:
             return
         async with lock:
@@ -70,14 +72,33 @@ class ReloadableApplication:
             self._current = await self._start_generation()
             gate.set()
 
-    async def request_reload(self) -> bool:
-        """Schedule an in-process application generation swap."""
+    def _schedule_reload(self) -> bool:
         if self._shutting_down:
             return False
         gate, _ = self._primitives()
         gate.clear()
         if self._reload_task is None or self._reload_task.done():
             self._reload_task = asyncio.create_task(self._reload())
+        return True
+
+    async def request_reload(self) -> bool:
+        """Schedule an in-process application generation swap."""
+        return self._schedule_reload()
+
+    def request_reload_threadsafe(self) -> bool:
+        """Schedule a reload from either the ASGI loop or a background worker thread."""
+        if self._shutting_down:
+            return False
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return False
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is loop:
+            return self._schedule_reload()
+        loop.call_soon_threadsafe(self._schedule_reload)
         return True
 
     def runtime_status(self) -> dict[str, object]:
