@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fuckclassroom.plugins.transcription.environment import detect_asr_runtime
+from fuckclassroom.plugins.transcription.environment import available_asr_models, detect_asr_runtime
 
 
 class AsrEnvironmentTests(unittest.TestCase):
@@ -21,6 +21,21 @@ class AsrEnvironmentTests(unittest.TestCase):
                 else {"int8", "int8_float16", "float16", "float32"}
             ),
         )
+
+    def test_available_models_follow_faster_whisper_aliases(self) -> None:
+        fake_utils = SimpleNamespace(
+            _MODELS={
+                "small": "repo/small",
+                "tiny": "repo/tiny",
+                "large-v3": "repo/large-v3",
+                "custom-new": "repo/custom-new",
+            }
+        )
+        with patch.dict(sys.modules, {"faster_whisper.utils": fake_utils}):
+            models = available_asr_models()
+
+        self.assertEqual(models[:3], ("tiny", "small", "large-v3"))
+        self.assertEqual(models[-1], "custom-new")
 
     def test_cuda_is_disabled_when_cublas_is_missing(self) -> None:
         fake = self._fake_ctranslate2()
