@@ -50,15 +50,21 @@
     applyTheme(mode);
   }
 
-  document.querySelectorAll("[data-theme-option]").forEach((button) => {
-    button.addEventListener("click", () => saveTheme(button.dataset.themeOption || "auto"));
-  });
-
-  document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-    button.addEventListener("click", () => {
-      saveTheme(root.dataset.theme === "dark" ? "light" : "dark");
+  function bindThemeControls(rootNode = document) {
+    rootNode.querySelectorAll("[data-theme-option]").forEach((button) => {
+      if (button.dataset.themeOptionBound === "true") return;
+      button.dataset.themeOptionBound = "true";
+      button.addEventListener("click", () => saveTheme(button.dataset.themeOption || "auto"));
     });
-  });
+
+    rootNode.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+      if (button.dataset.themeToggleBound === "true") return;
+      button.dataset.themeToggleBound = "true";
+      button.addEventListener("click", () => {
+        saveTheme(root.dataset.theme === "dark" ? "light" : "dark");
+      });
+    });
+  }
 
   media.addEventListener("change", () => {
     if ((localStorage.getItem("ui-theme") || "auto") === "auto") {
@@ -66,26 +72,33 @@
     }
   });
 
-  document.querySelectorAll("[data-filter-input]").forEach((input) => {
-    const target = document.querySelector(input.dataset.filterInput || "");
-    if (!target) return;
-    const rows = Array.from(target.querySelectorAll("[data-filter-row]"));
-    input.addEventListener("input", () => {
-      const keyword = input.value.trim().toLocaleLowerCase();
-      rows.forEach((row) => {
-        row.classList.toggle("hidden", keyword && !row.textContent.toLocaleLowerCase().includes(keyword));
+  function bindFilterInputs(rootNode = document) {
+    rootNode.querySelectorAll("[data-filter-input]").forEach((input) => {
+      if (input.dataset.filterBound === "true") return;
+      const target = document.querySelector(input.dataset.filterInput || "");
+      if (!target) return;
+      input.dataset.filterBound = "true";
+      const rows = Array.from(target.querySelectorAll("[data-filter-row]"));
+      input.addEventListener("input", () => {
+        const keyword = input.value.trim().toLocaleLowerCase();
+        rows.forEach((row) => {
+          row.classList.toggle("hidden", keyword && !row.textContent.toLocaleLowerCase().includes(keyword));
+        });
       });
     });
-  });
+  }
 
-  document.querySelectorAll("form[data-confirm]").forEach((form) => {
-    if (form.hasAttribute("data-confirm-handled")) return;
-    form.addEventListener("submit", (event) => {
-      if (!window.confirm(form.dataset.confirm || "确认执行此操作？")) {
-        event.preventDefault();
-      }
+  function bindConfirmForms(rootNode = document) {
+    rootNode.querySelectorAll("form[data-confirm]").forEach((form) => {
+      if (form.hasAttribute("data-confirm-handled")) return;
+      form.setAttribute("data-confirm-handled", "");
+      form.addEventListener("submit", (event) => {
+        if (!window.confirm(form.dataset.confirm || "确认执行此操作？")) {
+          event.preventDefault();
+        }
+      });
     });
-  });
+  }
 
   const sleep = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
@@ -116,11 +129,14 @@
     });
   }
 
-  document.querySelectorAll("form[data-inline-task]").forEach((form) => {
-    const statusBox = document.querySelector(form.dataset.taskStatus || "");
+  function bindInlineTasks(rootNode = document) {
+    rootNode.querySelectorAll("form[data-inline-task]").forEach((form) => {
+      if (form.dataset.inlineTaskBound === "true") return;
+      const statusBox = document.querySelector(form.dataset.taskStatus || "");
     const message = statusBox && statusBox.querySelector("[data-task-message]");
-    const progress = statusBox && statusBox.querySelector("[data-task-progress]");
-    if (!statusBox || !message || !progress) return;
+      const progress = statusBox && statusBox.querySelector("[data-task-progress]");
+      if (!statusBox || !message || !progress) return;
+      form.dataset.inlineTaskBound = "true";
     const sourceSelector = form.dataset.taskSourceForm || "";
     const sourceForm = (sourceSelector && document.querySelector(sourceSelector)) || form;
     const taskGroup = form.dataset.taskGroup || "";
@@ -206,6 +222,7 @@
       }
     });
   });
+  }
 
   async function readResponseError(response, fallback) {
     try {
@@ -231,11 +248,27 @@
     window.setTimeout(() => toast.remove(), 6000);
   }
 
-  window.FuckClassroomUI = Object.freeze({ sleep, readResponseError, showToast });
+  function initPage(rootNode = document) {
+    bindThemeControls(rootNode);
+    bindFilterInputs(rootNode);
+    bindConfirmForms(rootNode);
+    bindInlineTasks(rootNode);
+    rootNode.querySelectorAll("[data-toast]").forEach((toast) => {
+      if (toast.dataset.toastTimerBound === "true") return;
+      toast.dataset.toastTimerBound = "true";
+      window.setTimeout(() => toast.classList.add("hidden"), 6000);
+    });
+    applyTheme(localStorage.getItem("ui-theme") || "auto");
+  }
 
-  document.querySelectorAll("[data-toast]").forEach((toast) => {
-    window.setTimeout(() => toast.classList.add("hidden"), 6000);
+  window.FuckClassroomUI = Object.freeze({
+    sleep,
+    readResponseError,
+    showToast,
+    initPage,
   });
+
+  initPage(document);
 
   const authModal = document.querySelector("[data-auth-challenge]");
   if (authModal) {
@@ -381,5 +414,4 @@
     scheduleAuthPoll(0);
   }
 
-  applyTheme(localStorage.getItem("ui-theme") || "auto");
 })();
