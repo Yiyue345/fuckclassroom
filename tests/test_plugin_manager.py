@@ -779,32 +779,50 @@ def build_plugin():
 
 
     def test_playwright_probe_uses_short_ttl_cache_for_success_and_failure(self) -> None:
-        PluginManager.invalidate_dependency_probe_cache()
-        succeeded = type("Completed", (), {"returncode": 0})()
-        failed = type("Completed", (), {"returncode": 1})()
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            succeeded = type("Completed", (), {"returncode": 0})()
+            failed = type("Completed", (), {"returncode": 1})()
 
-        with patch(
-            "fuckclassroom.plugins.manager.subprocess.run",
-            side_effect=[succeeded, failed],
-        ) as run:
-            self.assertTrue(PluginManager._probe_dependency("playwright_chromium"))
-            self.assertTrue(PluginManager._probe_dependency("playwright_chromium"))
-            self.assertEqual(run.call_count, 1)
+            with patch(
+                "fuckclassroom.plugins.manager.subprocess.run",
+                side_effect=[succeeded, failed],
+            ) as run:
+                self.assertTrue(manager._probe_dependency("playwright_chromium"))
+                self.assertTrue(manager._probe_dependency("playwright_chromium"))
+                self.assertEqual(run.call_count, 1)
 
-            with PluginManager._dependency_probe_cache_lock:
-                _, cached_result = PluginManager._dependency_probe_cache["playwright_chromium"]
-                PluginManager._dependency_probe_cache["playwright_chromium"] = (
-                    0.0,
-                    cached_result,
-                )
+                with manager._dependency_probe_cache_lock:
+                    _, cached_result = manager._dependency_probe_cache["playwright_chromium"]
+                    manager._dependency_probe_cache["playwright_chromium"] = (
+                        0.0,
+                        cached_result,
+                    )
 
-            self.assertFalse(PluginManager._probe_dependency("playwright_chromium"))
-            self.assertFalse(PluginManager._probe_dependency("playwright_chromium"))
+                self.assertFalse(manager._probe_dependency("playwright_chromium"))
+                self.assertFalse(manager._probe_dependency("playwright_chromium"))
 
-        self.assertEqual(run.call_count, 2)
-        command = run.call_args_list[0].args[0]
-        self.assertEqual(command[:2], [__import__("sys").executable, "-c"])
-        self.assertIn("chromium.launch(headless=True)", command[2])
+            self.assertEqual(run.call_count, 2)
+            command = run.call_args_list[0].args[0]
+            self.assertEqual(command[:2], [__import__("sys").executable, "-c"])
+            self.assertIn("chromium.launch(headless=True)", command[2])
+
+    def test_new_manager_generation_does_not_reuse_probe_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = AppConfig(data_dir=Path(directory))
+            first = PluginManager(config)
+            second = PluginManager(config)
+            succeeded = type("Completed", (), {"returncode": 0})()
+            failed = type("Completed", (), {"returncode": 1})()
+
+            with patch(
+                "fuckclassroom.plugins.manager.subprocess.run",
+                side_effect=[succeeded, failed],
+            ) as run:
+                self.assertTrue(first._probe_dependency("playwright_chromium"))
+                self.assertFalse(second._probe_dependency("playwright_chromium"))
+
+            self.assertEqual(run.call_count, 2)
 
     def test_dependency_install_invalidates_probe_cache_before_and_after_repair(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -830,7 +848,7 @@ def build_plugin():
                 [{"label": "Playwright + Chromium", "installed": False, "optional": False}],
                 [{"label": "Playwright + Chromium", "installed": True, "optional": False}],
             ]
-            PluginManager._dependency_probe_cache["playwright_chromium"] = (999999999.0, True)
+            manager._dependency_probe_cache["playwright_chromium"] = (999999999.0, True)
 
             with (
                 patch.object(manager, "descriptor_map", return_value={"demo_probe": descriptor}),
@@ -841,7 +859,7 @@ def build_plugin():
 
             self.assertNotIn(
                 "playwright_chromium",
-                PluginManager._dependency_probe_cache,
+                manager._dependency_probe_cache,
             )
 
     def test_importable_module_is_not_missing_when_distribution_name_differs(self) -> None:
