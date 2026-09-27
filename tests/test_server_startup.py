@@ -37,12 +37,17 @@ class ServerStartupTests(unittest.TestCase):
             patch.dict(main.os.environ, environment),
             patch.object(main, "_startup_log_path", None),
             patch.object(main, "configure_startup_logging", return_value=log_path) as configure_logging,
-            patch.object(main, "build_uvicorn_log_config", return_value=log_config),
+            patch.object(
+                main,
+                "build_uvicorn_log_config",
+                return_value=log_config,
+            ) as build_log_config,
             patch.object(main.uvicorn, "run") as uvicorn_run,
         ):
             main.run()
 
         configure_logging.assert_called_once_with(main._config.logs_dir)
+        build_log_config.assert_called_once_with(log_path)
         uvicorn_run.assert_called_once_with(
             main.app,
             host="127.0.0.1",

@@ -48,11 +48,15 @@ class StartupLoggingTests(unittest.TestCase):
                 root_logger.removeHandler(handler)
                 handler.close()
 
-    def test_uvicorn_logs_propagate_to_root_file_handler(self) -> None:
-        config = build_uvicorn_log_config()
+    def test_uvicorn_logs_use_the_same_launch_log_without_console_propagation(self) -> None:
+        log_path = Path("data/logs/startup-test.log")
+        config = build_uvicorn_log_config(log_path)
 
-        self.assertTrue(config["loggers"]["uvicorn"]["propagate"])
-        self.assertTrue(config["loggers"]["uvicorn.access"]["propagate"])
+        self.assertEqual(config["handlers"]["startup_file"]["filename"], str(log_path))
+        self.assertIn("startup_file", config["loggers"]["uvicorn"]["handlers"])
+        self.assertIn("startup_file", config["loggers"]["uvicorn.access"]["handlers"])
+        self.assertFalse(config["loggers"]["uvicorn"]["propagate"])
+        self.assertFalse(config["loggers"]["uvicorn.access"]["propagate"])
 
 
 if __name__ == "__main__":

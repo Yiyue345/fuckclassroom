@@ -75,13 +75,22 @@ def configure_startup_logging(
     return log_path
 
 
-def build_uvicorn_log_config() -> dict:
-    """Keep Uvicorn's console formatting while also propagating into our file handler."""
+def build_uvicorn_log_config(log_path: Path) -> dict:
+    """Keep Uvicorn's console handlers and add the launch log as a second sink."""
     config = deepcopy(LOGGING_CONFIG)
+    config["handlers"]["startup_file"] = {
+        "class": "logging.FileHandler",
+        "formatter": "default",
+        "filename": str(log_path),
+        "encoding": "utf-8",
+    }
     for logger_name in ("uvicorn", "uvicorn.access"):
         logger_config = config.get("loggers", {}).get(logger_name)
         if logger_config is not None:
-            logger_config["propagate"] = True
+            handlers = list(logger_config.get("handlers", ()))
+            if "startup_file" not in handlers:
+                handlers.append("startup_file")
+            logger_config["handlers"] = handlers
     return config
 
 

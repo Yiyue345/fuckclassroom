@@ -92,7 +92,7 @@ def run() -> None:
     logger.info("启动服务：http://%s:%s (pid=%s, log=%s)", host, port, os.getpid(), log_path)
     uvicorn_options = {}
     if log_path is not None:
-        uvicorn_options["log_config"] = build_uvicorn_log_config()
+        uvicorn_options["log_config"] = build_uvicorn_log_config(log_path)
     uvicorn.run(app, host=host, port=port, **uvicorn_options)
 
 
