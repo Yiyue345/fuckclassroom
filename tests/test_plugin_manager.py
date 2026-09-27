@@ -578,6 +578,10 @@ def build_plugin():
                 "    return PluginSpec(id='future_app', name='Future App')\n",
                 encoding="utf-8",
             )
+            (root / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui"]}),
+                encoding="utf-8",
+            )
             config = AppConfig(data_dir=root)
             app = create_app(config)
             from fastapi.testclient import TestClient
