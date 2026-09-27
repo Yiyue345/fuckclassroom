@@ -6,7 +6,7 @@
   const pageSignal = pageRuntime?.signal;
   const pageTimeout = pageRuntime?.setTimeout
     ? (callback, delay) => pageRuntime.setTimeout(callback, delay)
-    : (callback, delay) => pageTimeout(callback, delay);
+    : (callback, delay) => window.setTimeout(callback, delay);
   const pageSleep = pageRuntime?.sleep
     ? (delay) => pageRuntime.sleep(delay)
     : (delay) => new Promise((resolve) => window.setTimeout(resolve, delay));
