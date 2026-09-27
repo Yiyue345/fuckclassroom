@@ -93,8 +93,14 @@ class UIContractTests(unittest.TestCase):
         }
         html = env.get_template("transcription_settings.html").render(
             settings=settings,
-            panel_context={"asr_runtime": runtime},
+            panel_context={
+                "asr_runtime": runtime,
+                "asr_models": ["tiny", "base", "small", "medium", "large-v3", "turbo"],
+            },
         )
+        self.assertIn('id="asr_model" name="asr_model"', html)
+        self.assertIn('<option value="small" selected>small</option>', html)
+        self.assertNotIn('name="asr_model" type="text"', html)
         self.assertIn('value="cuda" selected', html)
         self.assertIn('value="float16" selected', html)
         self.assertIn('name="asr_cpu_threads" type="number" value="4" min="1" max="64" step="1"', html)
