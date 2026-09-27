@@ -22,6 +22,11 @@ async def shutdown(context: PluginContext):
     return await hook(context)
 
 
+def build_settings_context(services, request):
+    from .environment import build_settings_context as build
+    return build(services, request)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="transcription",
@@ -39,6 +44,7 @@ def build_plugin() -> PluginSpec:
                 template="transcription_settings.html",
                 order=50,
                 checkbox_fields=("asr_use_batched", "asr_simplified_chinese"),
+                context_factory=build_settings_context,
             ),
         ),
     )
