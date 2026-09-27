@@ -174,6 +174,12 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("pendingToggleOperations = new Map()", template)
         self.assertIn("pendingToggleOperations.set(id, requestedEnabled)", template)
         self.assertIn("pendingToggleOperations.delete(id)", template)
+        self.assertIn('data-plugin-error', template)
+        self.assertIn("function showPluginError(id, message)", template)
+        self.assertIn("errorElement.textContent = text", template)
+        self.assertIn("badge.textContent = '加载失败'", template)
+        self.assertNotIn("failedBadge.textContent = '修改失败'", template)
+        self.assertIn(".plugin-row-error {", styles)
         self.assertIn("if (activeOperationCount > 0)", template)
         self.assertIn(".plugin-operation-done {", styles)
         self.assertNotIn("本机路径", template)
@@ -188,7 +194,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260926-4",
+            "/plugins/core_ui/static/core_ui.css?v=20260927-1",
             registry.stylesheets,
         )
         self.assertIn(
