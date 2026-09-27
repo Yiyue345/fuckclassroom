@@ -96,6 +96,7 @@
               <strong>{{ plugin.name }}</strong>
               <span class="mono">{{ plugin.id }}{% if plugin.version and plugin.version != "builtin" %} · v{{ plugin.version }}{% else %} · builtin{% endif %}</span>
               <p>{{ plugin.description or "该插件未提供描述。" }}</p>
+              <p class="plugin-row-error hidden" data-plugin-error role="alert"></p>
             </div>
 
             <div class="plugin-row-actions">
@@ -298,6 +299,30 @@
     return toggleForms.filter((form) => form.dataset.pluginId === id);
   }
 
+  function clearPluginError(row) {
+    const errorElement = row?.querySelector('[data-plugin-error]');
+    if (!errorElement) return;
+    errorElement.textContent = '';
+    errorElement.classList.add('hidden');
+  }
+
+  function showPluginError(id, message) {
+    const row = rowFor(id);
+    if (!row) return;
+    const text = String(message || '插件状态修改失败');
+    const badge = row.querySelector('[data-plugin-state-badge]');
+    if (badge) {
+      badge.className = 'plugin-state-badge red';
+      badge.textContent = '加载失败';
+      badge.title = text;
+    }
+    const errorElement = row.querySelector('[data-plugin-error]');
+    if (errorElement) {
+      errorElement.textContent = text;
+      errorElement.classList.remove('hidden');
+    }
+  }
+
   function selectPlugin(id) {
     if (!id) return;
     selectedId = id;
@@ -318,6 +343,7 @@
     badge.className = 'plugin-state-badge ' + (badge.dataset.defaultClass || 'green');
     badge.textContent = badge.dataset.defaultText || '已就绪';
     badge.title = '';
+    clearPluginError(row);
   }
 
   function setPluginState(id, desiredEnabled, currentEnabled, options = {}) {
@@ -345,10 +371,9 @@
     const badge = row.querySelector('[data-plugin-state-badge]');
     if (badge) {
       if (errorMessage) {
-        badge.className = 'plugin-state-badge red';
-        badge.textContent = '应用失败';
-        badge.title = errorMessage;
+        showPluginError(id, errorMessage);
       } else if (pending) {
+        clearPluginError(row);
         badge.className = 'plugin-state-badge amber';
         badge.textContent = options.pendingLabel || '待应用';
         badge.title = '';
@@ -513,13 +538,8 @@
         pendingToggleOperations.delete(id);
         finishOperation(false);
         if (!configurationSaved) {
-          setPluginState(id, !requestedEnabled, !requestedEnabled, { error: message });
-          const failedBadge = row?.querySelector('[data-plugin-state-badge]');
-          if (failedBadge) {
-            failedBadge.className = 'plugin-state-badge red';
-            failedBadge.textContent = '修改失败';
-            failedBadge.title = message;
-          }
+          setPluginState(id, !requestedEnabled, !requestedEnabled);
+          showPluginError(id, message);
         } else {
           try {
             const status = await waitForRuntime();
