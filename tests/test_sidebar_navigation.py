@@ -209,7 +209,7 @@ class SidebarNavigationTests(unittest.TestCase):
             template.count("{% block "),
             template.count("{% endblock %}"),
         )
-        self.assertIn("/static/app.css?v=20260921-6", base)
+        self.assertIn("/static/app.css?v=20260927-1", base)
 
     def test_plugin_ui_assets_are_registered_by_enabled_plugins(self) -> None:
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
@@ -239,7 +239,7 @@ class SidebarNavigationTests(unittest.TestCase):
             registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
         )
         self.assertIn(
-            "/plugins/course_selection/static/selection_ui.js?v=20260921-1",
+            "/plugins/course_selection/static/selection_ui.js?v=20260927-1",
             registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
         )
 
@@ -253,7 +253,7 @@ class SidebarNavigationTests(unittest.TestCase):
             classroom_only.stylesheets,
         )
         self.assertNotIn(
-            "/plugins/course_selection/static/selection_ui.js?v=20260921-1",
+            "/plugins/course_selection/static/selection_ui.js?v=20260927-1",
             classroom_only.scripts,
         )
 
@@ -281,6 +281,31 @@ class SidebarNavigationTests(unittest.TestCase):
             mounts["core_ui"].path,
             "/plugins/core_ui/static",
         )
+
+    def test_shell_uses_partial_navigation_and_preserves_sidebar(self) -> None:
+        shell = Path("static/shell.js").read_text(encoding="utf-8")
+        app = Path("static/app.js").read_text(encoding="utf-8")
+        styles = Path("static/app.css").read_text(encoding="utf-8")
+        base = Path("templates/base.html").read_text(encoding="utf-8")
+
+        self.assertIn("async function navigate(url, options = {})", shell)
+        self.assertIn("fetch(destination.href", shell)
+        self.assertIn("history.pushState", shell)
+        self.assertIn("window.addEventListener('popstate'", shell)
+        self.assertIn("sidebarNav.scrollTop = sidebarScroll", shell)
+        self.assertIn("document.startViewTransition", shell)
+        self.assertIn("academic:page-before-swap", shell)
+        self.assertIn("academic:page-load", shell)
+        self.assertIn("function beginIntervalCapture()", shell)
+        self.assertIn("clearPageIntervals()", shell)
+        self.assertIn("window.FuckClassroomUI?.initPage?.(pageRoot)", shell)
+        self.assertIn("function initPage(rootNode = document)", app)
+        self.assertIn("data-inline-task", app)
+        self.assertIn("view-transition-name: page-content", styles)
+        self.assertIn("body.pjax-loading", styles)
+        self.assertIn("/static/app.css?v=20260927-1", base)
+        self.assertIn("/static/app.js?v=20260927-1", base)
+        self.assertIn("/static/shell.js?v=20260927-2", base)
 
     def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:
         template = Path("templates/base.html").read_text(encoding="utf-8")

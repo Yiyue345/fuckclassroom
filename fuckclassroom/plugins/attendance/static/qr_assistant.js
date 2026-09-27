@@ -194,10 +194,15 @@
     node.querySelectorAll?.(".live-ppt-slide").forEach(queuePage);
   }
 
-  new MutationObserver((mutations) => {
+  const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) mutation.addedNodes.forEach(scanAddedNode);
-  }).observe(stage, { childList: true, subtree: true });
+  });
+  observer.observe(stage, { childList: true, subtree: true });
 
   stage.querySelectorAll(".live-ppt-slide").forEach(queuePage);
   D.querySelectorAll("[data-lesson-row]").forEach((row) => row.addEventListener("click", hideNotice));
+  D.addEventListener("academic:page-before-swap", () => {
+    observer.disconnect();
+    pending.length = 0;
+  }, { once: true });
 })();

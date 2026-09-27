@@ -1,4 +1,6 @@
 (() => {
+  const pageController = new AbortController();
+  const pageSignal = pageController.signal;
   function ensureDetail(statusBox) {
     if (!statusBox) return null;
     let detail = statusBox.querySelector('[data-task-detail]');
@@ -70,7 +72,121 @@
     }, { capture: true });
   });
 
+  const transcriptionNodes = Array.from(document.querySelectorAll('[data-transcription-output-url]'));
+  const transcriptionUrls = Array.from(new Set(
+    transcriptionNodes
+      .map((node) => node.dataset.transcriptionOutputUrl || '')
+      .filter(Boolean)
+  ));
+
+  function cacheKey(outputUrl) {
+    return 'fuckclassroom:transcribed:' + outputUrl;
+  }
+
+  function cacheCompleted(outputUrl) {
+    try {
+      window.sessionStorage.setItem(cacheKey(outputUrl), '1');
+    } catch (_) {
+      // Session storage may be unavailable in hardened browser modes.
+    }
+  }
+
+  function isCachedCompleted(outputUrl) {
+    try {
+      return window.sessionStorage.getItem(cacheKey(outputUrl)) === '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function matchingTranscriptionNodes(outputUrl) {
+    return transcriptionNodes.filter(
+      (node) => node.dataset.transcriptionOutputUrl === outputUrl
+    );
+  }
+
+  function setCompletionCheckBusy(outputUrl, busy) {
+    matchingTranscriptionNodes(outputUrl)
+      .filter((node) => node.matches('form[data-transcription-form]'))
+      .forEach((form) => {
+        const button = form.querySelector('[data-transcription-submit]');
+        if (!button) return;
+        if (busy) {
+          button.dataset.transcriptionWasDisabled = button.disabled ? 'true' : 'false';
+          button.disabled = true;
+          form.setAttribute('aria-busy', 'true');
+        } else {
+          if (button.dataset.transcriptionWasDisabled !== 'true') button.disabled = false;
+          delete button.dataset.transcriptionWasDisabled;
+          form.removeAttribute('aria-busy');
+        }
+      });
+  }
+
+  function markTranscriptionComplete(outputUrl) {
+    cacheCompleted(outputUrl);
+    matchingTranscriptionNodes(outputUrl).forEach((node) => {
+      if (node.matches('form[data-transcription-form]')) {
+        node.classList.add('hidden');
+        node.removeAttribute('aria-busy');
+      } else if (node.matches('[data-transcription-complete]')) {
+        node.classList.remove('hidden');
+      }
+    });
+  }
+
+  async function checkTranscriptionComplete(outputUrl) {
+    if (isCachedCompleted(outputUrl)) {
+      markTranscriptionComplete(outputUrl);
+      return;
+    }
+
+    setCompletionCheckBusy(outputUrl, true);
+    try {
+      const response = await fetch(outputUrl, {
+        headers: { Accept: 'text/html' },
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      const documentText = await response.text();
+      const resultDocument = new DOMParser().parseFromString(documentText, 'text/html');
+      if (resultDocument.querySelector('[data-output-transcript]')) {
+        markTranscriptionComplete(outputUrl);
+        return;
+      }
+    } catch (_) {
+      // If status lookup fails, keep the original action available.
+    }
+    setCompletionCheckBusy(outputUrl, false);
+  }
+
+  async function scanCompletedTranscriptions() {
+    if (!transcriptionUrls.length) return;
+    let nextIndex = 0;
+    const workerCount = Math.min(4, transcriptionUrls.length);
+
+    async function worker() {
+      while (nextIndex < transcriptionUrls.length) {
+        const outputUrl = transcriptionUrls[nextIndex];
+        nextIndex += 1;
+        await checkTranscriptionComplete(outputUrl);
+      }
+    }
+
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  }
+
   document.addEventListener('academic:task-progress', (event) => {
-    renderTaskDetail(event.detail?.task, event.detail?.statusBox);
-  });
+    const task = event.detail?.task;
+    renderTaskDetail(task, event.detail?.statusBox);
+    if (task?.status === 'succeeded' && task.result_url) {
+      markTranscriptionComplete(String(task.result_url));
+    }
+  }, { signal: pageSignal });
+
+  document.addEventListener('academic:page-before-swap', () => {
+    pageController.abort();
+  }, { once: true, signal: pageSignal });
+
+  scanCompletedTranscriptions();
 })();

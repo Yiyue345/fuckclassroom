@@ -2,6 +2,31 @@
   const ui = window.FuckClassroomUI;
   if (!ui) return;
   const { sleep, readResponseError, showToast } = ui;
+  const pageController = new AbortController();
+  const pageSignal = pageController.signal;
+  const pageTimers = new Set();
+  let pageDisposed = false;
+
+  function pageTimeout(callback, delay) {
+    const timer = window.setTimeout(() => {
+      pageTimers.delete(timer);
+      if (!pageDisposed) callback();
+    }, delay);
+    pageTimers.add(timer);
+    return timer;
+  }
+
+  function cleanupPage() {
+    pageDisposed = true;
+    pageTimers.forEach((timer) => window.clearTimeout(timer));
+    pageTimers.clear();
+    pageController.abort();
+  }
+
+  document.addEventListener("academic:page-before-swap", cleanupPage, {
+    once: true,
+    signal: pageSignal,
+  });
   function applySelectionActionState(form, action) {
     const row = form.closest("tr[data-lesson-id]");
     const button = form.querySelector("[data-selection-submit]");
@@ -86,7 +111,7 @@
         progress.style.width = "100%";
         applySelectionActionState(form, action);
         showToast(actionLabel + "成功", (form.dataset.courseName || "课程") + "：" + resultMessage);
-        window.setTimeout(() => statusBox.classList.add("hidden"), 4000);
+        pageTimeout(() => statusBox.classList.add("hidden"), 4000);
       } catch (error) {
         const errorMessage = error && error.message ? error.message : (actionLabel + "失败");
         statusBox.classList.add("error");
@@ -179,9 +204,9 @@
           // Keep the last known state; the next poll will retry.
         }
       }
-      window.setTimeout(refreshAutoJobs, 3000);
+      pageTimeout(refreshAutoJobs, 3000);
     };
-    window.setTimeout(refreshAutoJobs, 3000);
+    pageTimeout(refreshAutoJobs, 3000);
   }
 
 
@@ -195,7 +220,7 @@
     const scheduleRefresh = () => {
       window.clearTimeout(refreshTimer);
       if (countRefreshToggle.checked && !document.hidden) {
-        refreshTimer = window.setTimeout(refreshCounts, 30000);
+        refreshTimer = pageTimeout(refreshCounts, 30000);
       }
     };
 
@@ -289,7 +314,7 @@
       } else if (countRefreshToggle.checked) {
         refreshCounts();
       }
-    });
+    }, { signal: pageSignal });
     if (countRefreshToggle.checked) refreshCounts();
   }
 

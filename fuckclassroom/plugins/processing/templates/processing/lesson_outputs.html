@@ -44,6 +44,6 @@
     <section class="surface output-section"><header><h2>课件 OCR</h2><span class="status green"><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg>OCR</span></header><div class="output-content"><pre>{{ outputs.get("ppt_ocr.md") }}</pre></div></section>
   {% endif %}
   {% if outputs.get("transcript.md") %}
-    <section class="surface output-section"><header><h2>语音转写</h2><span class="status gray"><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>Transcript</span></header><div class="output-content"><pre>{{ outputs.get("transcript.md") }}</pre></div></section>
+    <section class="surface output-section" data-output-transcript><header><h2>语音转写</h2><span class="status gray"><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>Transcript</span></header><div class="output-content"><pre>{{ outputs.get("transcript.md") }}</pre></div></section>
   {% endif %}
 {% endblock %}
