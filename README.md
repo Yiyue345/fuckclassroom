@@ -48,7 +48,7 @@ $env:FUCKCLASSROOM_PLUGINS="classroom"
 .\.venv\Scripts\python.exe main.py
 ```
 
-可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。应用启动后可访问 `/plugins` 管理页面启停插件、查看运行依赖、安装/修复依赖，并可从本机目录或 ZIP 包添加外部插件；页面还会检查插件 API 版本和 FuckClassroom 版本约束，不兼容插件不会被执行。网页配置保存在 `data/plugin_state.json`。正常从 `main.py` 启动时，插件启停会通过 Runtime generation 热重载自动应用；新 Runtime 构建失败时会保留旧 Runtime 并显示错误。只有当前启动方式没有提供热重载能力时，变更才需要重启后生效。详细架构见 `docs/plugins.md`，第三方插件开发接口见 `docs/plugin-api.md`。
+可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。应用启动后可访问 `/plugins` 管理页面启停插件、查看运行依赖、安装/修复依赖，并可从本机目录或 ZIP 包添加外部插件；页面会分别检查 Plugin API、RPC API 与 FuckClassroom 版本约束。只有 API 不兼容会阻止插件执行，主程序版本范围不满足时仅显示警告。网页配置保存在 `data/plugin_state.json`。正常从 `main.py` 启动时，插件启停会通过 Runtime generation 热重载自动应用；新 Runtime 构建失败时会保留旧 Runtime 并显示错误。只有当前启动方式没有提供热重载能力时，变更才需要重启后生效。详细架构见 `docs/plugins.md`，第三方插件开发接口见 `docs/plugin-api.md`。
 
 ## 首次配置与登录
 
