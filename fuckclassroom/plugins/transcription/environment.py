@@ -8,6 +8,21 @@ from pathlib import Path
 
 
 _COMPUTE_TYPE_ORDER = ("int8", "int8_float16", "float16", "float32", "default")
+_FALLBACK_MODEL_ORDER = (
+    "tiny",
+    "tiny.en",
+    "base",
+    "base.en",
+    "small",
+    "small.en",
+    "medium",
+    "medium.en",
+    "large-v1",
+    "large-v2",
+    "large-v3",
+    "large-v3-turbo",
+    "turbo",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +110,22 @@ def detect_asr_runtime() -> AsrRuntimeCapabilities:
 
 def build_settings_context(services, request) -> dict[str, object]:
     del services, request
-    return {"asr_runtime": detect_asr_runtime().to_context()}
+    return {
+        "asr_runtime": detect_asr_runtime().to_context(),
+        "asr_models": list(available_asr_models()),
+    }
+
+
+def available_asr_models() -> tuple[str, ...]:
+    try:
+        from faster_whisper.utils import _MODELS as model_repositories
+    except Exception:
+        return _FALLBACK_MODEL_ORDER
+
+    names = {str(name).strip() for name in model_repositories if str(name).strip()}
+    ordered = [name for name in _FALLBACK_MODEL_ORDER if name in names]
+    ordered.extend(sorted(names.difference(ordered)))
+    return tuple(ordered) or _FALLBACK_MODEL_ORDER
 
 
 def resolve_auto_device() -> str:
