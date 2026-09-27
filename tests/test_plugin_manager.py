@@ -38,7 +38,6 @@ class PluginManagerTests(unittest.TestCase):
                     "ai_summary",
                     "attendance",
                     "course_selection",
-                    "lab_selection",
                 },
             )
             self.assertEqual(manager.selection_source, "default")
@@ -50,11 +49,11 @@ class PluginManagerTests(unittest.TestCase):
 
             desired = manager.disable("classroom")
 
-            self.assertEqual(desired, {"core_ui", "course_selection", "lab_selection"})
+            self.assertEqual(desired, {"core_ui", "course_selection"})
             payload = json.loads(manager.state_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 set(payload["selected"]),
-                {"core_ui", "course_selection", "lab_selection"},
+                {"core_ui", "course_selection"},
             )
 
     def test_enabling_plugin_automatically_enables_dependencies(self) -> None:
@@ -85,7 +84,7 @@ class PluginManagerTests(unittest.TestCase):
             self.assertIn("/selection/info", paths)
             self.assertEqual(
                 set(app.state.plugin_registry.plugin_ids),
-                {"core_ui", "course_selection", "lab_selection"},
+                {"core_ui", "course_selection"},
             )
 
     def test_core_ui_cannot_be_disabled(self) -> None:
@@ -144,6 +143,56 @@ def build_plugin():
 
             self.assertIn("demo_plugin", registry.plugin_ids)
             self.assertIn("classroom", registry.plugin_ids)
+
+    def test_externalized_lab_selection_can_use_canonical_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "lab_selection"
+            source.mkdir()
+            (source / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "lab_selection",
+                        "name": "实验课选课",
+                        "version": "0.1.0",
+                        "api_version": PLUGIN_API_VERSION,
+                        "app_requires": ">=0.1,<0.3",
+                        "requires": ["core_ui"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (source / "plugin.py").write_text(
+                """
+from fuckclassroom.core.plugins import PluginSpec
+
+
+def build_plugin():
+    return PluginSpec(
+        id="lab_selection",
+        name="实验课选课",
+        order=21,
+        api_version=1,
+        requires=("core_ui",),
+    )
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            config = AppConfig(data_dir=root / "data")
+            manager = PluginManager(config)
+            installed = manager.install_from_path(str(source))
+
+            self.assertEqual(installed.id, "lab_selection")
+            self.assertFalse(installed.builtin)
+            self.assertNotIn("lab_selection", {item.id for item in manager.builtin_descriptors})
+
+            desired = manager.enable("lab_selection")
+            registry = build_plugin_registry(config=config, manager=manager)
+
+            self.assertIn("lab_selection", desired)
+            self.assertIn("lab_selection", registry.plugin_ids)
 
     def test_plugin_api_and_app_version_compatibility_are_exposed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -504,6 +553,49 @@ def build_plugin():
             self.assertTrue(payload["reload_scheduled"])
             self.assertEqual(reload_calls, [True])
 
+
+    def test_plugin_toggle_json_409_preserves_backend_detail(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "plugins" / "future_app"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "future_app",
+                        "name": "Future App",
+                        "api_version": PLUGIN_API_VERSION,
+                        "app_requires": ">=99",
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='future_app', name='Future App')\n",
+                encoding="utf-8",
+            )
+            (root / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui"]}),
+                encoding="utf-8",
+            )
+            config = AppConfig(data_dir=root)
+            app = create_app(config)
+            from fastapi.testclient import TestClient
+
+            with TestClient(app) as client:
+                response = client.post(
+                    "/plugins/future_app/enable",
+                    headers={"Accept": "application/json"},
+                )
+
+            self.assertEqual(response.status_code, 409)
+            detail = response.json()["detail"]
+            self.assertIn("插件 Future App 不兼容", detail)
+            self.assertIn("需要 FuckClassroom >=99", detail)
 
     def test_process_plugin_rpc_manifest_is_validated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
