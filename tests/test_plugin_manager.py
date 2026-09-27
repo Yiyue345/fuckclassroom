@@ -317,8 +317,7 @@ def build_plugin():
                     {
                         "id": "future_app",
                         "name": "Future App",
-                        "api_version": PLUGIN_API_VERSION,
-                        "app_requires": ">=99",
+                        "api_version": PLUGIN_API_VERSION + 1,
                         "requires": [],
                         "entry": "plugin.py",
                     }
@@ -673,7 +672,7 @@ def build_plugin():
             self.assertEqual(response.status_code, 409)
             detail = response.json()["detail"]
             self.assertIn("插件 Future App 不兼容", detail)
-            self.assertIn("需要 FuckClassroom >=99", detail)
+            self.assertIn("插件 API", detail)
 
     def test_process_plugin_rpc_manifest_is_validated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
