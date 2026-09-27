@@ -156,6 +156,7 @@
         });
         if (!response.ok) throw new Error(await responseError(response, "加入队列失败"));
         const payload = await response.json();
+        if (disposed()) return;
         button.textContent = "已在队列";
         showStatus(payload.message || "已加入定时队列", "success");
       } catch (error) {
