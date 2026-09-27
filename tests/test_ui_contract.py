@@ -126,11 +126,15 @@ class UIContractTests(unittest.TestCase):
             panel_context={"asr_runtime": runtime},
         )
 
-        self.assertIn('value="cuda" disabled', html)
-        self.assertIn("cuda（环境不可用）", html)
+        self.assertIn('value="cuda" selected', html)
+        self.assertNotIn('value="cuda" selected disabled', html)
+        self.assertIn("cuda（当前保存，环境不可用）", html)
         self.assertIn("缺少或无法加载 CUDA 12 cuBLAS", html)
-        self.assertIn('value="float16" disabled', html)
-        self.assertIn('value="cpu" selected', html)
+        self.assertIn('value="float16" selected', html)
+        self.assertNotIn('value="float16" selected disabled', html)
+        self.assertNotIn('value="cpu" selected', html)
+        self.assertIn("保存其他设置不会改写该偏好", html)
+        self.assertIn("当前保存值", html)
         self.assertIn('name="asr_use_batched" checked', html)
 
     def test_course_page_loses_optional_controls_and_assets_when_disabled(self):
