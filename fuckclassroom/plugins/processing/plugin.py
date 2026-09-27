@@ -21,8 +21,8 @@ def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="processing",
         ui_assets=(
-            UIAsset("task_detail_progress.css?v=20260922-1", "style", ("course_detail", "lesson_outputs")),
-            UIAsset("task_detail_progress.js?v=20260922-1", pages=("course_detail", "lesson_outputs")),
+            UIAsset("task_detail_progress.css?v=20260927-1", "style", ("course_detail", "lesson_outputs")),
+            UIAsset("task_detail_progress.js?v=20260927-2", pages=("course_detail", "lesson_outputs")),
         ),
         ui_slots=(
             UISlot("classroom.lesson.transcript", "processing/lesson_transcript.html"),
