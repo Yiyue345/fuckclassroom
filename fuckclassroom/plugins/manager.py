@@ -158,6 +158,8 @@ _BUILTINS: tuple[PluginDescriptor, ...] = (
 
 
 class PluginManager:
+    _successful_dependency_probes: set[str] = set()
+
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self.plugin_dir = config.data_dir / "plugins"
@@ -862,16 +864,21 @@ class PluginManager:
             rpc_permissions=tuple(rpc_permissions),
         )
 
-    @staticmethod
-    def _probe_dependency(probe: str) -> bool:
+    @classmethod
+    def _probe_dependency(cls, probe: str) -> bool:
+        if probe in cls._successful_dependency_probes:
+            return True
         if probe == "playwright_chromium":
             try:
                 from playwright.sync_api import sync_playwright
 
                 with sync_playwright() as playwright:
-                    return Path(playwright.chromium.executable_path).is_file()
+                    browser = playwright.chromium.launch(headless=True)
+                    browser.close()
             except Exception:
                 return False
+            cls._successful_dependency_probes.add(probe)
+            return True
         return True
 
     @staticmethod
