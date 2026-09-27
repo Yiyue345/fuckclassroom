@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import main
@@ -30,10 +31,24 @@ class ServerStartupTests(unittest.TestCase):
             "FUCKCLASSROOM_HOST": "127.0.0.1",
             "FUCKCLASSROOM_PORT": "9010",
         }
-        with patch.dict(main.os.environ, environment), patch.object(main.uvicorn, "run") as uvicorn_run:
+        log_path = Path("data/logs/startup-test.log")
+        log_config = {"version": 1}
+        with (
+            patch.dict(main.os.environ, environment),
+            patch.object(main, "_startup_log_path", None),
+            patch.object(main, "configure_startup_logging", return_value=log_path) as configure_logging,
+            patch.object(main, "build_uvicorn_log_config", return_value=log_config),
+            patch.object(main.uvicorn, "run") as uvicorn_run,
+        ):
             main.run()
 
-        uvicorn_run.assert_called_once_with(main.app, host="127.0.0.1", port=9010)
+        configure_logging.assert_called_once_with(main._config.logs_dir)
+        uvicorn_run.assert_called_once_with(
+            main.app,
+            host="127.0.0.1",
+            port=9010,
+            log_config=log_config,
+        )
 
 
 if __name__ == "__main__":

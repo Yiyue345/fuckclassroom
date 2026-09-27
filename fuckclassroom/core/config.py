@@ -47,6 +47,10 @@ class AppConfig:
         return self.data_dir / "cache"
 
     @property
+    def logs_dir(self) -> Path:
+        return self.data_dir / "logs"
+
+    @property
     def asr_models_dir(self) -> Path:
         return self.data_dir / "models" / "faster-whisper"
 

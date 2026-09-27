@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import sys
@@ -9,18 +10,41 @@ sys.dont_write_bytecode = True
 import uvicorn
 
 from fuckclassroom.core.config import AppConfig
+from fuckclassroom.core.logging_setup import build_uvicorn_log_config, configure_startup_logging
 from fuckclassroom.course_selection.hy2_prebuilt import Hy2PrebuiltError, install_prebuilt_runner
 from fuckclassroom.web import create_reloadable_app
 
 
+logger = logging.getLogger(__name__)
+
 _config = AppConfig()
+_startup_log_path = None
+
+
+def _ensure_startup_logging():
+    global _startup_log_path
+    if _startup_log_path is not None:
+        return _startup_log_path
+    try:
+        _startup_log_path = configure_startup_logging(_config.logs_dir)
+    except OSError as exc:
+        print(f"无法创建启动日志，将仅输出到控制台：{exc}", flush=True)
+    return _startup_log_path
+
+
+if __name__ == "__main__":
+    # Configure logging before plugin/application construction so startup
+    # diagnostics are included in the same launch log.
+    _ensure_startup_logging()
+
+
 if _config.hy2_enabled:
     try:
         install_prebuilt_runner(_config.hy2_source_dir, _config.hy2_runner_path)
     except Hy2PrebuiltError as exc:
         # Keep startup resilient: the existing Hy2 manager will fall back to the
         # pinned local Cargo build when a packaged runner is unavailable/invalid.
-        print(f"Hy2 预编译组件不可用，将回退本地构建：{exc}", flush=True)
+        logger.warning("Hy2 预编译组件不可用，将回退本地构建：%s", exc)
 
 app = create_reloadable_app(_config)
 
@@ -52,16 +76,24 @@ def _select_server_port(host: str, preferred_port: int) -> int:
 
 
 def run() -> None:
+    log_path = _ensure_startup_logging()
     host = os.getenv("FUCKCLASSROOM_HOST", "127.0.0.1")
     configured_port = os.getenv("FUCKCLASSROOM_PORT")
     preferred_port = int(configured_port) if configured_port else DEFAULT_PORT
     port = preferred_port if configured_port else _select_server_port(host, preferred_port)
     if port != preferred_port:
-        print(
-            f"端口 {preferred_port} 被 Windows 保留，自动改用 http://{host}:{port}",
-            flush=True,
+        logger.warning(
+            "端口 %s 被 Windows 保留，自动改用 http://%s:%s",
+            preferred_port,
+            host,
+            port,
         )
-    uvicorn.run(app, host=host, port=port)
+
+    logger.info("启动服务：http://%s:%s (pid=%s, log=%s)", host, port, os.getpid(), log_path)
+    uvicorn_options = {}
+    if log_path is not None:
+        uvicorn_options["log_config"] = build_uvicorn_log_config()
+    uvicorn.run(app, host=host, port=port, **uvicorn_options)
 
 
 if __name__ == "__main__":
