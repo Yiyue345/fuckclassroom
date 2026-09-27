@@ -78,6 +78,21 @@ class TaskDetailProgressTests(unittest.TestCase):
         self.assertTrue(any("取消请求" in message for message in messages))
         self.assertTrue(any("安全取消点" in message for message in messages))
 
+    def test_task_center_logs_are_forwarded_to_standard_logging(self) -> None:
+        manager = TaskManager()
+
+        with self.assertLogs("fuckclassroom.tasks", level="DEBUG") as captured:
+            task = manager.create_external("日志桥接任务")
+            manager.log_external(task.id, "正在处理", level="debug")
+            manager.log_external(task.id, "发生警告", level="warning")
+
+        output = "\n".join(captured.output)
+        self.assertIn("日志桥接任务", output)
+        self.assertIn(task.id[:8], output)
+        self.assertIn("RPC 任务已创建", output)
+        self.assertIn("正在处理", output)
+        self.assertIn("发生警告", output)
+
     def test_failed_task_keeps_error_and_traceback_in_logs(self) -> None:
         manager = TaskManager()
 

@@ -12,7 +12,8 @@ from uvicorn.config import LOGGING_CONFIG
 DEFAULT_STARTUP_LOG_RETENTION = 5
 STARTUP_LOG_PREFIX = "startup-"
 STARTUP_LOG_SUFFIX = ".log"
-_STARTUP_HANDLER_MARKER = "_fuckclassroom_startup_file"
+_STARTUP_FILE_HANDLER_MARKER = "_fuckclassroom_startup_file"
+_STARTUP_CONSOLE_HANDLER_MARKER = "_fuckclassroom_startup_console"
 
 
 def create_startup_log(
@@ -54,19 +55,27 @@ def configure_startup_logging(
     root_logger = logging.getLogger()
 
     for handler in list(root_logger.handlers):
-        if getattr(handler, _STARTUP_HANDLER_MARKER, False):
+        if (
+            getattr(handler, _STARTUP_FILE_HANDLER_MARKER, False)
+            or getattr(handler, _STARTUP_CONSOLE_HANDLER_MARKER, False)
+        ):
             root_logger.removeHandler(handler)
             handler.close()
 
-    handler = logging.FileHandler(log_path, encoding="utf-8")
-    handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
-    setattr(handler, _STARTUP_HANDLER_MARKER, True)
-    root_logger.addHandler(handler)
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    setattr(file_handler, _STARTUP_FILE_HANDLER_MARKER, True)
+    root_logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    setattr(console_handler, _STARTUP_CONSOLE_HANDLER_MARKER, True)
+    root_logger.addHandler(console_handler)
 
     if root_logger.level == logging.NOTSET or root_logger.level > level:
         root_logger.setLevel(level)

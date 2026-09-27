@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import traceback
 import uuid
@@ -44,6 +45,14 @@ _MAX_LOG_ENTRIES = 800
 _MAX_LOG_MESSAGE_LENGTH = 8000
 _MAX_RETAINED_FINISHED_TASKS = 100
 _TERMINAL_TASK_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
+_TASK_LOGGER = logging.getLogger("fuckclassroom.tasks")
+_TASK_LOGGER.setLevel(logging.DEBUG)
+_TASK_LOG_LEVELS = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
 
 
 class TaskProgressReporter:
@@ -110,12 +119,12 @@ class TaskManager:
             created_at=now,
             updated_at=now,
             auto_open_result=bool(auto_open_result),
-            logs=[TaskLogEntry(now, "info", "任务已创建")],
         )
         with self._lock:
             self._tasks[task_id] = state
         with _TASK_REGISTRY_LOCK:
             _TASK_OWNERS[task_id] = self
+        self._append_log(task_id, "info", "任务已创建")
 
         thread = threading.Thread(target=self._run, args=(task_id, worker), daemon=True)
         thread.start()
@@ -140,12 +149,12 @@ class TaskManager:
             created_at=now,
             updated_at=now,
             auto_open_result=bool(auto_open_result),
-            logs=[TaskLogEntry(now, "info", "RPC 任务已创建")],
         )
         with self._lock:
             self._tasks[task_id] = state
         with _TASK_REGISTRY_LOCK:
             _TASK_OWNERS[task_id] = self
+        self._append_log(task_id, "info", "RPC 任务已创建")
         return state
 
     def update_external(
@@ -347,6 +356,13 @@ class TaskManager:
         state.logs.append(TaskLogEntry(_now(), normalized_level, normalized_message))
         if len(state.logs) > _MAX_LOG_ENTRIES:
             del state.logs[: len(state.logs) - _MAX_LOG_ENTRIES]
+        _TASK_LOGGER.log(
+            _TASK_LOG_LEVELS[normalized_level],
+            "[任务 %s:%s] %s",
+            state.title,
+            state.id[:8],
+            normalized_message,
+        )
 
     def _update(
         self,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr
 from datetime import datetime, timedelta
+import io
 import logging
 from pathlib import Path
 import tempfile
@@ -28,27 +30,29 @@ class StartupLoggingTests(unittest.TestCase):
             self.assertFalse(created[0].exists())
             self.assertEqual(set(remaining), set(created[1:]))
 
-    def test_configured_root_logger_writes_utf8_application_logs(self) -> None:
+    def test_configured_root_logger_writes_file_and_console(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root_logger = logging.getLogger()
             original_level = root_logger.level
-            log_path = configure_startup_logging(Path(directory))
-            handler = next(
-                handler
-                for handler in root_logger.handlers
-                if isinstance(handler, logging.FileHandler)
-                and Path(handler.baseFilename) == log_path
-            )
-            try:
-                logging.getLogger("fuckclassroom.test").warning("日志探针")
-                handler.flush()
-                content = log_path.read_text(encoding="utf-8")
-                self.assertIn("fuckclassroom.test", content)
-                self.assertIn("日志探针", content)
-            finally:
-                root_logger.removeHandler(handler)
-                handler.close()
-                root_logger.setLevel(original_level)
+            original_handlers = list(root_logger.handlers)
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                log_path = configure_startup_logging(Path(directory))
+                try:
+                    logging.getLogger("fuckclassroom.test").warning("日志探针")
+                    for handler in root_logger.handlers:
+                        handler.flush()
+                    content = log_path.read_text(encoding="utf-8")
+                    self.assertIn("fuckclassroom.test", content)
+                    self.assertIn("日志探针", content)
+                    self.assertIn("fuckclassroom.test", stderr.getvalue())
+                    self.assertIn("日志探针", stderr.getvalue())
+                finally:
+                    for handler in list(root_logger.handlers):
+                        if handler not in original_handlers:
+                            root_logger.removeHandler(handler)
+                            handler.close()
+                    root_logger.setLevel(original_level)
 
     def test_uvicorn_logs_use_the_same_launch_log_without_console_propagation(self) -> None:
         log_path = Path("data/logs/startup-test.log")
