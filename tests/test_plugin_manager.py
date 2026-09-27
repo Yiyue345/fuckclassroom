@@ -8,6 +8,7 @@ import unittest
 import zipfile
 from unittest.mock import patch
 from pathlib import Path
+from urllib.parse import unquote
 
 from fuckclassroom import __version__ as APP_VERSION
 from fuckclassroom.core.config import AppConfig
@@ -1085,7 +1086,7 @@ def build_plugin():
 
             self.assertEqual(task["status"], "succeeded")
             self.assertEqual(reload_calls, [True])
-            self.assertIn("已请求自动应用", task["result_url"])
+            self.assertIn("已请求自动应用", unquote(task["result_url"]))
 
     def test_zip_with_abnormal_compression_ratio_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
