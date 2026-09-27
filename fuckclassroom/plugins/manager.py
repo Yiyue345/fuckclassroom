@@ -158,6 +158,8 @@ _BUILTINS: tuple[PluginDescriptor, ...] = (
 
 
 class PluginManager:
+    _successful_dependency_probes: set[str] = set()
+
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self.plugin_dir = config.data_dir / "plugins"
@@ -236,10 +238,12 @@ class PluginManager:
         selected = self._load_selected()
         selected.add(plugin_id)
         desired = self._expand_dependencies(selected)
-        # Validate every plugin that would enter the runtime before persisting
-        # the enable request. Built-in and external plugins use the same
-        # required-dependency semantics.
-        for enabled_id in sorted(desired):
+        # Only validate the plugin requested by this operation and its actual
+        # dependency chain. Unrelated configured plugins may be unavailable
+        # because of their own missing dependencies and must not block this
+        # enable request.
+        validation_ids = self._expand_dependencies({plugin_id})
+        for enabled_id in sorted(validation_ids):
             descriptor = descriptors[enabled_id]
             compatibility = self.compatibility_status(descriptor)
             if not compatibility["compatible"]:
@@ -860,16 +864,32 @@ class PluginManager:
             rpc_permissions=tuple(rpc_permissions),
         )
 
-    @staticmethod
-    def _probe_dependency(probe: str) -> bool:
+    @classmethod
+    def _probe_dependency(cls, probe: str) -> bool:
+        if probe in cls._successful_dependency_probes:
+            return True
         if probe == "playwright_chromium":
+            script = (
+                "from playwright.sync_api import sync_playwright\n"
+                "with sync_playwright() as p:\n"
+                "    browser = p.chromium.launch(headless=True)\n"
+                "    browser.close()\n"
+            )
             try:
-                from playwright.sync_api import sync_playwright
-
-                with sync_playwright() as playwright:
-                    return Path(playwright.chromium.executable_path).is_file()
-            except Exception:
+                result = subprocess.run(
+                    [sys.executable, "-c", script],
+                    cwd=str(PROJECT_ROOT),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=15,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
                 return False
+            if result.returncode != 0:
+                return False
+            cls._successful_dependency_probes.add(probe)
+            return True
         return True
 
     @staticmethod

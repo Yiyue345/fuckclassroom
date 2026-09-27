@@ -70,6 +70,58 @@ class PluginManagerTests(unittest.TestCase):
             self.assertNotIn("ai_summary", desired)
             self.assertNotIn("attendance", desired)
 
+    def test_enabling_independent_plugin_ignores_unrelated_missing_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_dir = root / "data"
+            plugin_root = data_dir / "plugins" / "independent"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "independent",
+                        "name": "Independent",
+                        "api_version": PLUGIN_API_VERSION,
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='independent', name='Independent')\n",
+                encoding="utf-8",
+            )
+            (data_dir / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui", "classroom"]}),
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=data_dir))
+            missing_playwright = [
+                {
+                    "label": "Playwright + Chromium",
+                    "installed": False,
+                    "optional": False,
+                }
+            ]
+
+            original_dependency_status = manager.dependency_status
+
+            def dependency_status(plugin_id: str):
+                if plugin_id == "classroom":
+                    return missing_playwright
+                return original_dependency_status(plugin_id)
+
+            with patch.object(manager, "dependency_status", side_effect=dependency_status):
+                desired = manager.enable("independent")
+
+            self.assertIn("independent", desired)
+            self.assertIn("classroom", desired)
+            payload = json.loads(manager.state_path.read_text(encoding="utf-8"))
+            self.assertIn("independent", payload["selected"])
+
     def test_saved_state_controls_next_application_start(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = AppConfig(data_dir=Path(directory))
@@ -724,6 +776,22 @@ def build_plugin():
             with self.assertRaisesRegex(PluginManagerError, "内部 Worker 保留能力"):
                 manager.descriptor_map()
 
+
+    def test_playwright_probe_runs_in_subprocess_and_caches_success(self) -> None:
+        PluginManager._successful_dependency_probes.discard("playwright_chromium")
+        completed = type("Completed", (), {"returncode": 0})()
+
+        with patch(
+            "fuckclassroom.plugins.manager.subprocess.run",
+            return_value=completed,
+        ) as run:
+            self.assertTrue(PluginManager._probe_dependency("playwright_chromium"))
+            self.assertTrue(PluginManager._probe_dependency("playwright_chromium"))
+
+        run.assert_called_once()
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], [__import__("sys").executable, "-c"])
+        self.assertIn("chromium.launch(headless=True)", command[2])
 
     def test_importable_module_is_not_missing_when_distribution_name_differs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
