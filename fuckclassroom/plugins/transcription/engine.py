@@ -469,6 +469,11 @@ class LocalTranscriptionService:
             ) from exc
 
         effective_device = device or self.config.asr_device
+        if effective_device == "auto":
+            from .environment import resolve_auto_device
+
+            effective_device = resolve_auto_device()
+            _log(progress, f"自动选择 ASR 推理设备：{effective_device}", "info")
         effective_compute_type = compute_type or self.config.asr_compute_type
         key = (
             self.config.asr_model,
