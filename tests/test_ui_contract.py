@@ -74,10 +74,57 @@ class UIContractTests(unittest.TestCase):
     def test_settings_panels_preserve_saved_selects_and_numeric_limits(self):
         env = environment(build_plugin_registry(ALL))
         settings = AppSettings().to_public_dict()
-        settings.update(asr_device="cuda", asr_cpu_threads=4, asr_use_batched=True)
-        html = env.get_template("transcription_settings.html").render(settings=settings)
+        settings.update(
+            asr_device="cuda",
+            asr_compute_type="float16",
+            asr_cpu_threads=4,
+            asr_use_batched=True,
+        )
+        runtime = {
+            "cuda_available": True,
+            "cuda_reason": "",
+            "cuda_device_count": 1,
+            "auto_device": "cuda",
+            "ctranslate2_version": "4.8.2",
+            "compute_types": {
+                "cpu": ["int8", "float32", "default"],
+                "cuda": ["int8", "int8_float16", "float16", "float32", "default"],
+            },
+        }
+        html = env.get_template("transcription_settings.html").render(
+            settings=settings,
+            panel_context={"asr_runtime": runtime},
+        )
         self.assertIn('value="cuda" selected', html)
+        self.assertIn('value="float16" selected', html)
         self.assertIn('name="asr_cpu_threads" type="number" value="4" min="1" max="64" step="1"', html)
+
+    def test_transcription_settings_disable_unavailable_cuda_and_compute_types(self):
+        env = environment(build_plugin_registry(ALL))
+        settings = AppSettings().to_public_dict()
+        settings.update(asr_device="cuda", asr_compute_type="float16")
+        runtime = {
+            "cuda_available": False,
+            "cuda_reason": "缺少或无法加载 CUDA 12 cuBLAS",
+            "cuda_device_count": 1,
+            "auto_device": "cpu",
+            "ctranslate2_version": "4.8.2",
+            "compute_types": {
+                "cpu": ["int8", "float32", "default"],
+                "cuda": [],
+            },
+        }
+
+        html = env.get_template("transcription_settings.html").render(
+            settings=settings,
+            panel_context={"asr_runtime": runtime},
+        )
+
+        self.assertIn('value="cuda" disabled', html)
+        self.assertIn("cuda（环境不可用）", html)
+        self.assertIn("缺少或无法加载 CUDA 12 cuBLAS", html)
+        self.assertIn('value="float16" disabled', html)
+        self.assertIn('value="cpu" selected', html)
         self.assertIn('name="asr_use_batched" checked', html)
 
     def test_course_page_loses_optional_controls_and_assets_when_disabled(self):
