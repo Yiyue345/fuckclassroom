@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import unittest
 
 from fastapi import FastAPI
@@ -32,6 +33,38 @@ class ReloadableApplicationTests(unittest.TestCase):
         with TestClient(app) as client:
             self.assertEqual(client.get("/generation").json()["generation"], 1)
             self.assertTrue(client.post("/reload").json()["scheduled"])
+            self.assertEqual(client.get("/generation").json()["generation"], 2)
+
+    def test_reload_can_be_scheduled_from_background_thread(self) -> None:
+        builds = {"count": 0}
+
+        def factory(reload_callback, _reload_status):
+            builds["count"] += 1
+            generation = builds["count"]
+            app = FastAPI()
+
+            @app.get("/generation")
+            def get_generation():
+                return {"generation": generation}
+
+            return app
+
+        shell = ReloadableApplication(factory)
+        with TestClient(shell) as client:
+            self.assertEqual(client.get("/generation").json()["generation"], 1)
+            result: dict[str, bool] = {}
+
+            thread = threading.Thread(
+                target=lambda: result.setdefault(
+                    "scheduled",
+                    shell.request_reload_threadsafe(),
+                )
+            )
+            thread.start()
+            thread.join(timeout=1)
+
+            self.assertFalse(thread.is_alive())
+            self.assertTrue(result["scheduled"])
             self.assertEqual(client.get("/generation").json()["generation"], 2)
 
     def test_failed_reload_keeps_previous_generation(self) -> None:

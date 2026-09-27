@@ -179,6 +179,27 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("errorElement.textContent = text", template)
         self.assertIn("badge.textContent = '加载失败'", template)
         self.assertNotIn("failedBadge.textContent = '修改失败'", template)
+        self.assertIn(
+            "data-plugin-enabled=\"{{ 'true' if plugin.current_enabled else 'false' }}\"",
+            template,
+        )
+        self.assertIn("data-plugin-static-needs-action", template)
+        self.assertIn(
+            "row.dataset.pluginEnabled = currentEnabled ? 'true' : 'false'",
+            template,
+        )
+        self.assertIn(
+            "row.dataset.pluginNeedsAction = (staticNeedsAction || pending || Boolean(errorMessage)) ? 'true' : 'false'",
+            template,
+        )
+        self.assertIn(
+            "const selectedRow = visibleRows.find((row) => row.dataset.pluginId === selectedId)",
+            template,
+        )
+        self.assertIn(
+            "selectPlugin(selectedRow ? selectedId : visibleRows[0].dataset.pluginId)",
+            template,
+        )
         self.assertIn(".plugin-row-error {", styles)
         self.assertIn("if (activeOperationCount > 0)", template)
         self.assertIn(".plugin-operation-done {", styles)

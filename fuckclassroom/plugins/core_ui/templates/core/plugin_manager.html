@@ -73,8 +73,11 @@
             data-plugin-id="{{ plugin.id }}"
             data-plugin-name="{{ plugin.name|lower }}"
             data-plugin-search="{{ (plugin.name ~ ' ' ~ plugin.id ~ ' ' ~ (plugin.description or ''))|lower }}"
-            data-plugin-enabled="{{ 'true' if plugin.desired_enabled else 'false' }}"
+            data-plugin-enabled="{{ 'true' if plugin.current_enabled else 'false' }}"
+            data-plugin-desired-enabled="{{ 'true' if plugin.desired_enabled else 'false' }}"
+            data-plugin-current-enabled="{{ 'true' if plugin.current_enabled else 'false' }}"
             data-plugin-external="{{ 'false' if plugin.builtin else 'true' }}"
+            data-plugin-static-needs-action="{{ 'true' if (not plugin.compatible or plugin.missing_required_dependencies or plugin.missing_optional_dependencies) else 'false' }}"
             data-plugin-needs-action="{{ 'true' if (not plugin.compatible or plugin.missing_required_dependencies or plugin.missing_optional_dependencies or plugin.restart_required) else 'false' }}"
             data-plugin-locked="{{ 'true' if plugin.locked else 'false' }}"
             data-plugin-compatible="{{ 'true' if plugin.compatible else 'false' }}"
@@ -309,6 +312,7 @@
   function showPluginError(id, message) {
     const row = rowFor(id);
     if (!row) return;
+    row.dataset.pluginNeedsAction = 'true';
     const text = String(message || '插件状态修改失败');
     const badge = row.querySelector('[data-plugin-state-badge]');
     if (badge) {
@@ -340,6 +344,8 @@
   function restoreRowBadge(row) {
     const badge = row?.querySelector('[data-plugin-state-badge]');
     if (!badge) return;
+    const staticNeedsAction = row.dataset.pluginStaticNeedsAction === 'true';
+    row.dataset.pluginNeedsAction = staticNeedsAction ? 'true' : 'false';
     badge.className = 'plugin-state-badge ' + (badge.dataset.defaultClass || 'green');
     badge.textContent = badge.dataset.defaultText || '已就绪';
     badge.title = '';
@@ -356,7 +362,11 @@
     const errorMessage = pending ? String(options.error || '') : '';
     const busy = Boolean(options.busy && pending);
 
-    row.dataset.pluginEnabled = desiredEnabled ? 'true' : 'false';
+    const staticNeedsAction = row.dataset.pluginStaticNeedsAction === 'true';
+    row.dataset.pluginDesiredEnabled = desiredEnabled ? 'true' : 'false';
+    row.dataset.pluginCurrentEnabled = currentEnabled ? 'true' : 'false';
+    row.dataset.pluginEnabled = currentEnabled ? 'true' : 'false';
+    row.dataset.pluginNeedsAction = (staticNeedsAction || pending || Boolean(errorMessage)) ? 'true' : 'false';
     row.classList.toggle('is-applying', busy);
 
     formsFor(id).forEach((form) => {
@@ -427,9 +437,8 @@
       return;
     }
 
-    if (!visibleRows.some((row) => row.dataset.pluginId === selectedId)) {
-      selectPlugin(visibleRows[0].dataset.pluginId);
-    }
+    const selectedRow = visibleRows.find((row) => row.dataset.pluginId === selectedId);
+    selectPlugin(selectedRow ? selectedId : visibleRows[0].dataset.pluginId);
   }
 
   rows.forEach((row) => {
@@ -523,7 +532,7 @@
 
         const desired = new Set(payload.desired_enabled || []);
         rows.forEach((item) => {
-          item.dataset.pluginEnabled = desired.has(item.dataset.pluginId) ? 'true' : 'false';
+          item.dataset.pluginDesiredEnabled = desired.has(item.dataset.pluginId) ? 'true' : 'false';
         });
 
         const status = await waitForRuntime();
@@ -548,6 +557,7 @@
             setPluginState(id, requestedEnabled, !requestedEnabled, { error: message });
           }
         }
+        applyFilters();
       }
     });
   });

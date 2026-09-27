@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -158,10 +160,12 @@ _BUILTINS: tuple[PluginDescriptor, ...] = (
 
 
 class PluginManager:
-    _successful_dependency_probes: set[str] = set()
+    _dependency_probe_cache_ttl_seconds = 30.0
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self._dependency_probe_cache: dict[str, tuple[float, bool]] = {}
+        self._dependency_probe_cache_lock = threading.Lock()
         self.plugin_dir = config.data_dir / "plugins"
         self.state_path = config.data_dir / "plugin_state.json"
         self._runtime_override: frozenset[str] | None = None
@@ -220,22 +224,27 @@ class PluginManager:
                     if value.strip()
                 }
             else:
-                selected = self._load_selected()
-                # A manually removed external plugin should not make the whole app
-                # unbootable. Missing direct selections are dropped; missing
-                # dependencies of an installed/enabled plugin still fail below.
-                selected.intersection_update(self.descriptor_map())
+                descriptors = self.descriptor_map()
+                raw_selected = self._load_selected()
+                selected = self._normalize_selected(raw_selected, descriptors)
+                if selected != raw_selected:
+                    self._save_selected(selected)
         return self._expand_dependencies(selected)
 
     def configured_selected(self) -> set[str]:
-        return self._load_selected()
+        descriptors = self.descriptor_map()
+        raw_selected = self._load_selected()
+        selected = self._normalize_selected(raw_selected, descriptors)
+        if selected != raw_selected and self.mutable:
+            self._save_selected(selected)
+        return selected
 
     def enable(self, plugin_id: str) -> set[str]:
         self._ensure_mutable()
         descriptors = self.descriptor_map()
         if plugin_id not in descriptors:
             raise PluginManagerError(f"插件不存在：{plugin_id}")
-        selected = self._load_selected()
+        selected = self._normalize_selected(self._load_selected(), descriptors)
         selected.add(plugin_id)
         desired = self._expand_dependencies(selected)
         # Only validate the plugin requested by this operation and its actual
@@ -272,10 +281,11 @@ class PluginManager:
         descriptors = self.descriptor_map()
         if plugin_id not in descriptors:
             raise PluginManagerError(f"插件不存在：{plugin_id}")
-        selected = self._load_selected()
+        selected = self._normalize_selected(self._load_selected(), descriptors)
         selected.difference_update(self._dependent_closure(plugin_id, descriptors))
+        desired = self._expand_dependencies(selected)
         self._save_selected(selected)
-        return self._expand_dependencies(selected)
+        return desired
 
     def install_from_path(self, raw_path: str) -> PluginDescriptor:
         self._ensure_mutable()
@@ -319,7 +329,7 @@ class PluginManager:
             raise PluginManagerError("内置插件不能删除")
         if plugin_id in set(current_enabled):
             raise PluginManagerError("插件当前仍在运行，请先禁用并重启应用后再删除")
-        selected = self._load_selected()
+        selected = self._normalize_selected(self._load_selected(), self.descriptor_map())
         if plugin_id in self._expand_dependencies(selected):
             raise PluginManagerError("插件仍被配置为启用，请先禁用")
         destination = self.plugin_dir / plugin_id
@@ -410,6 +420,8 @@ class PluginManager:
         if descriptor is None:
             raise PluginManagerError(f"插件不存在：{plugin_id}")
         dependencies = descriptor.python_requirements
+        probe_names = {item.probe for item in dependencies if item.probe}
+        self.invalidate_dependency_probe_cache(probe_names)
         if not dependencies:
             if progress:
                 progress(100, "该插件没有额外依赖")
@@ -485,6 +497,7 @@ class PluginManager:
                     "正在安装运行时组件",
                 )
 
+        self.invalidate_dependency_probe_cache(probe_names)
         remaining = [
             item["label"]
             for item in self.dependency_status(plugin_id)
@@ -678,6 +691,16 @@ class PluginManager:
         selected.add("core_ui")
         return selected
 
+    @staticmethod
+    def _normalize_selected(
+        selected: Iterable[str],
+        descriptors: dict[str, PluginDescriptor],
+    ) -> set[str]:
+        normalized = set(selected).intersection(descriptors)
+        if "core_ui" in descriptors:
+            normalized.add("core_ui")
+        return normalized
+
     def _save_selected(self, selected: Iterable[str]) -> None:
         values = sorted(set(selected) | {"core_ui"})
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -864,10 +887,27 @@ class PluginManager:
             rpc_permissions=tuple(rpc_permissions),
         )
 
-    @classmethod
-    def _probe_dependency(cls, probe: str) -> bool:
-        if probe in cls._successful_dependency_probes:
-            return True
+    def invalidate_dependency_probe_cache(
+        self,
+        probes: Iterable[str] | None = None,
+    ) -> None:
+        with self._dependency_probe_cache_lock:
+            if probes is None:
+                self._dependency_probe_cache.clear()
+                return
+            for probe in probes:
+                self._dependency_probe_cache.pop(str(probe), None)
+
+    def _probe_dependency(self, probe: str) -> bool:
+        now = time.monotonic()
+        with self._dependency_probe_cache_lock:
+            cached = self._dependency_probe_cache.get(probe)
+            if cached is not None:
+                cached_at, cached_result = cached
+                if now - cached_at < self._dependency_probe_cache_ttl_seconds:
+                    return cached_result
+                self._dependency_probe_cache.pop(probe, None)
+
         if probe == "playwright_chromium":
             script = (
                 "from playwright.sync_api import sync_playwright\n"
@@ -884,12 +924,13 @@ class PluginManager:
                     timeout=15,
                     check=False,
                 )
+                available = result.returncode == 0
             except (OSError, subprocess.TimeoutExpired):
-                return False
-            if result.returncode != 0:
-                return False
-            cls._successful_dependency_probes.add(probe)
-            return True
+                available = False
+
+            with self._dependency_probe_cache_lock:
+                self._dependency_probe_cache[probe] = (time.monotonic(), available)
+            return available
         return True
 
     @staticmethod

@@ -41,19 +41,19 @@ $env:FUCKCLASSROOM_PORT="8766"
 
 ## 插件模式
 
-当前 `pluginization` 分支支持按需启用功能插件。默认启动全部功能；也可以通过 `FUCKCLASSROOM_PLUGINS` 只加载需要的 Route、Service 和 Lifecycle：
+当前版本已经支持按需启用功能插件。默认启动全部内置功能；也可以通过 `FUCKCLASSROOM_PLUGINS` 只加载需要的 Route、Service 和 Lifecycle：
 
 ```powershell
 $env:FUCKCLASSROOM_PLUGINS="classroom"
 .\.venv\Scripts\python.exe main.py
 ```
 
-可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。应用启动后可访问 `/plugins` 管理页面启停插件、查看运行依赖、安装/修复依赖，并可从本机目录或 ZIP 包添加外部插件；页面还会检查插件 API 版本和 FuckClassroom 版本约束，不兼容插件不会被执行。网页配置保存在 `data/plugin_state.json`，启停变更在重启后生效。详细架构见 `docs/plugins.md`，第三方插件开发接口见 `docs/plugin-api.md`。
+可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。应用启动后可访问 `/plugins` 管理页面启停插件、查看运行依赖、安装/修复依赖，并可从本机目录或 ZIP 包添加外部插件；页面还会检查插件 API 版本和 FuckClassroom 版本约束，不兼容插件不会被执行。网页配置保存在 `data/plugin_state.json`。正常从 `main.py` 启动时，插件启停会通过 Runtime generation 热重载自动应用；新 Runtime 构建失败时会保留旧 Runtime 并显示错误。只有当前启动方式没有提供热重载能力时，变更才需要重启后生效。详细架构见 `docs/plugins.md`，第三方插件开发接口见 `docs/plugin-api.md`。
 
 ## 首次配置与登录
 
 1. 打开左下角的“设置”。
-2. 在“账号与网络”中填写统一桂电账号和密码，然后点击“保存更改”。这份账号同时用于课程录播和本科教务。
+2. 在“统一登录”中填写统一桂电账号和密码，然后点击“保存更改”。这份账号同时用于课程录播和本科教务。
 3. 按需设置默认学期、OCR、本地语音识别、音频预取、定时选课和 AI 服务。
 4. 在侧边栏“通用”分组中打开“账户与认证”。
 5. 分别在“课程录播”和“本科教务”区域点击“登录”。两个系统共用统一桂电账号，但各自保存和显示会话状态。
@@ -61,7 +61,7 @@ $env:FUCKCLASSROOM_PLUGINS="classroom"
 
 启动时会尝试复用已保存的会话；会话失效且已保存账号密码时，会尝试自动登录。只有需要图形验证码或其他网页操作时才会打开浏览器窗口；短信动态码会在本地页面弹窗中填写。
 
-登录状态可在左侧栏底部查看。需要重新测试登录时，可在“设置 > 账号与网络”中清除登录状态；此操作会保留自动登录凭据。要同时删除账号密码，请再点击“清除自动登录凭据”。
+登录状态可在左侧栏底部查看。需要重新测试登录时，可在“设置 > 统一登录”中清除登录状态；此操作会保留自动登录凭据。要同时删除账号密码，请再点击“清除自动登录凭据”。
 
 ## 课程录播、直播与 PPT
 
@@ -180,7 +180,7 @@ summary.md          AI 总结（配置 AI 后默认在文字提取结束时自�
 
 ## 校外访问与 Hy2
 
-本科教务登录会根据当前网络选择可用入口。校内可直接访问；校外可使用公网入口、WebVPN，也可以在“设置 > 账号与网络”中启用 Hy2。
+本科教务登录会根据当前网络选择可用入口。校内可直接访问；校外可使用公网入口、WebVPN，也可以在“设置 > 教务访问”中启用 Hy2。
 
 Hy2 采用两级启动策略：
 

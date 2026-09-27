@@ -38,6 +38,7 @@ class ReloadableApplication:
         self._request_gate: asyncio.Event | None = None
         self._reload_task: asyncio.Task[None] | None = None
         self._startup_lock: asyncio.Lock | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._last_reload_error = ""
         self._shutting_down = False
 
@@ -62,6 +63,7 @@ class ReloadableApplication:
 
     async def _ensure_started(self) -> None:
         gate, lock = self._primitives()
+        self._loop = asyncio.get_running_loop()
         if self._current is not None:
             return
         async with lock:
@@ -70,14 +72,33 @@ class ReloadableApplication:
             self._current = await self._start_generation()
             gate.set()
 
-    async def request_reload(self) -> bool:
-        """Schedule an in-process application generation swap."""
+    def _schedule_reload(self) -> bool:
         if self._shutting_down:
             return False
         gate, _ = self._primitives()
         gate.clear()
         if self._reload_task is None or self._reload_task.done():
             self._reload_task = asyncio.create_task(self._reload())
+        return True
+
+    async def request_reload(self) -> bool:
+        """Schedule an in-process application generation swap."""
+        return self._schedule_reload()
+
+    def request_reload_threadsafe(self) -> bool:
+        """Schedule a reload from either the ASGI loop or a background worker thread."""
+        if self._shutting_down:
+            return False
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return False
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is loop:
+            return self._schedule_reload()
+        loop.call_soon_threadsafe(self._schedule_reload)
         return True
 
     def runtime_status(self) -> dict[str, object]:
@@ -172,16 +193,20 @@ def create_reloadable_app(
     enabled = None if enabled_plugins is None else tuple(enabled_plugins)
     shared_task_manager = TaskManager()
 
+    shell: ReloadableApplication
+
     def factory(reload_callback, reload_status) -> FastAPI:
         return create_app(
             app_config,
             enabled_plugins=enabled,
             reload_callback=reload_callback,
+            reload_background_callback=shell.request_reload_threadsafe,
             reload_status=reload_status,
             shared_task_manager=shared_task_manager,
         )
 
-    return ReloadableApplication(factory)
+    shell = ReloadableApplication(factory)
+    return shell
 
 
 __all__ = ["ReloadableApplication", "create_reloadable_app"]
