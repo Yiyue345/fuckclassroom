@@ -1,3 +1,5 @@
+import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +16,39 @@ class LabSelectionTests(unittest.TestCase):
     def make_app(self, plugins):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        return create_app(AppConfig(data_dir=Path(temp.name)), enabled_plugins=plugins)
+        data_dir = Path(temp.name)
+        plugin_root = data_dir / "plugins" / "lab_selection"
+        shutil.copytree(Path("fuckclassroom/plugins/lab_selection"), plugin_root)
+
+        entry = plugin_root / "plugin.py"
+        entry_text = entry.read_text(encoding="utf-8")
+        entry_text = entry_text.replace(
+            "from ...core.plugins import NavigationGroup, NavigationItem, PluginSpec, UIAsset",
+            "from fuckclassroom.core.plugins import NavigationGroup, NavigationItem, PluginSpec, UIAsset",
+        )
+        entry_text = entry_text.replace(
+            'id="lab_selection", name="实验课选课", order=21,',
+            'id="lab_selection", name="实验课选课", order=21, api_version=1, requires=("core_ui",),',
+        )
+        entry.write_text(entry_text, encoding="utf-8")
+        (plugin_root / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "id": "lab_selection",
+                    "name": "实验课选课",
+                    "version": "0.1.0",
+                    "api_version": 1,
+                    "app_requires": ">=0.1,<0.3",
+                    "description": "实验课选课外部插件测试包",
+                    "requires": ["core_ui"],
+                    "python_requires": ["playwright>=1.45"],
+                    "entry": "plugin.py",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return create_app(AppConfig(data_dir=data_dir), enabled_plugins=plugins)
 
     def test_can_enable_without_regular_selection(self):
         app = self.make_app({"lab_selection"})
