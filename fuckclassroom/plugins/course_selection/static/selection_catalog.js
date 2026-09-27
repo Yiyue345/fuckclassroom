@@ -2,6 +2,23 @@
   const form = document.querySelector("[data-catalog-form]");
   if (!form) return;
 
+  const pageRuntime = window.FuckClassroomPage?.current?.();
+  const pageSignal = pageRuntime?.signal;
+  const pageTimeout = pageRuntime?.setTimeout
+    ? (callback, delay) => pageRuntime.setTimeout(callback, delay)
+    : (callback, delay) => pageTimeout(callback, delay);
+  const pageSleep = pageRuntime?.sleep
+    ? (delay) => pageRuntime.sleep(delay)
+    : (delay) => new Promise((resolve) => window.setTimeout(resolve, delay));
+
+  function disposed() {
+    return Boolean(pageSignal?.aborted);
+  }
+
+  function pageFetch(input, init = {}) {
+    return window.fetch(input, { ...init, signal: pageSignal });
+  }
+
   const body = document.querySelector("[data-catalog-body]");
   const status = document.querySelector("[data-catalog-status]");
   const statusText = document.querySelector("[data-catalog-status-text]");
@@ -39,12 +56,14 @@
   }
 
   function showStatus(message, kind = "") {
+    if (disposed()) return;
     status.classList.remove("hidden", "error", "success");
     if (kind) status.classList.add(kind);
     statusText.textContent = message;
   }
 
   function hideStatus() {
+    if (disposed()) return;
     status.classList.add("hidden");
   }
 
@@ -127,7 +146,7 @@
       button.disabled = true;
       showStatus("正在加入定时队列");
       try {
-        const response = await fetch("/selection/catalog/queue", {
+        const response = await pageFetch("/selection/catalog/queue", {
           method: "POST",
           body: new URLSearchParams({
             lesson_id: String(course.lesson_id),
@@ -140,6 +159,7 @@
         button.textContent = "已在队列";
         showStatus(payload.message || "已加入定时队列", "success");
       } catch (error) {
+        if (disposed() || error?.name === "AbortError") return;
         button.disabled = false;
         showStatus(error.message || "加入队列失败", "error");
       }
@@ -207,6 +227,7 @@
   }
 
   function render(payload) {
+    if (disposed()) return;
     const courses = Array.isArray(payload.courses) ? payload.courses : [];
     const pagination = payload.pagination || {};
     currentPage = Number(pagination.page) || 1;
@@ -245,18 +266,26 @@
       const params = new URLSearchParams(new FormData(form));
       params.set("page", String(page));
       params.set("page_size", pageSize.value);
-      const response = await fetch("/api/selection/catalog?" + params.toString(), {
+      const response = await pageFetch("/api/selection/catalog?" + params.toString(), {
         headers: {Accept: "application/json"},
         cache: "no-store",
       });
       if (!response.ok) throw new Error(await responseError(response, "查询全校开课失败"));
       const payload = await response.json();
+      if (disposed()) return;
       render(payload);
       const visibleParams = new URLSearchParams(params);
       visibleParams.delete("page");
-      history.replaceState(null, "", "/selection/catalog?" + visibleParams.toString());
+      if (!disposed()) {
+        history.replaceState(
+          { ...(history.state || {}), scrollY: window.scrollY },
+          "",
+          "/selection/catalog?" + visibleParams.toString()
+        );
+      }
       hideStatus();
     } catch (error) {
+      if (disposed() || error?.name === "AbortError") return;
       showStatus(error.message || "查询全校开课失败", "error");
       const row = document.createElement("tr");
       const cell = element("td", "table-empty", "课程读取失败");
@@ -264,6 +293,7 @@
       row.append(cell);
       body.replaceChildren(row);
     } finally {
+      if (disposed()) return;
       loading = false;
       form.removeAttribute("aria-busy");
     }
@@ -275,28 +305,30 @@
     const label = action === "drop" ? "退课" : "选课";
     showStatus("正在启动" + label + "任务");
     try {
-      const response = await fetch("/selection/catalog/action", {
+      const response = await pageFetch("/selection/catalog/action", {
         method: "POST",
         body: new URLSearchParams({lesson_id: String(lessonId), action}),
         headers: {Accept: "application/json"},
       });
       if (!response.ok) throw new Error(await responseError(response, "启动" + label + "失败"));
       const started = await response.json();
-      while (true) {
-        const taskResponse = await fetch(started.status_url, {
+      while (!disposed()) {
+        const taskResponse = await pageFetch(started.status_url, {
           headers: {Accept: "application/json"},
           cache: "no-store",
         });
         if (!taskResponse.ok) throw new Error("读取" + label + "进度失败");
         const task = await taskResponse.json();
+        if (disposed()) return;
         showStatus(task.error || task.message || ("正在" + label));
         if (task.status === "failed") throw new Error(task.error || label + "失败");
         if (task.status === "succeeded") break;
-        await new Promise((resolve) => window.setTimeout(resolve, 300));
+        await pageSleep(300);
       }
+      if (disposed()) return;
       let message = label + "成功";
       try {
-        const resultResponse = await fetch("/api/selection/action-result", {cache: "no-store"});
+        const resultResponse = await pageFetch("/api/selection/action-result", {cache: "no-store"});
         if (resultResponse.ok) {
           const result = await resultResponse.json();
           message = result.message || message;
@@ -304,9 +336,11 @@
       } catch {
         message = label + "成功";
       }
+      if (disposed()) return;
       showStatus(message, "success");
       await load(currentPage);
     } catch (error) {
+      if (disposed() || error?.name === "AbortError") return;
       button.disabled = false;
       showStatus(error.message || label + "失败", "error");
     }
@@ -317,7 +351,7 @@
     load(1);
   });
   form.addEventListener("reset", () => {
-    window.setTimeout(() => {
+    pageTimeout(() => {
       teacherSelect.classList.add("hidden");
       teacherSelect.replaceChildren();
       load(1);
@@ -336,14 +370,15 @@
       teacherSelect.classList.add("hidden");
       return;
     }
-    teacherTimer = window.setTimeout(async () => {
+    teacherTimer = pageTimeout(async () => {
       try {
-        const response = await fetch("/api/selection/catalog/teachers?q=" + encodeURIComponent(term), {
+        const response = await pageFetch("/api/selection/catalog/teachers?q=" + encodeURIComponent(term), {
           headers: {Accept: "application/json"},
           cache: "no-store",
         });
         if (!response.ok) return;
         const payload = await response.json();
+        if (disposed()) return;
         const teachers = Array.isArray(payload.teachers) ? payload.teachers : [];
         const options = [new Option("请选择教师", "")];
         teachers.forEach((teacher) => {
@@ -352,7 +387,8 @@
         });
         teacherSelect.replaceChildren(...options);
         teacherSelect.classList.toggle("hidden", teachers.length === 0);
-      } catch {
+      } catch (error) {
+        if (disposed() || error?.name === "AbortError") return;
         teacherSelect.classList.add("hidden");
       }
     }, 250);
