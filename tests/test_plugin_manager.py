@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import tempfile
+import time
 import unittest
 import zipfile
 from unittest.mock import patch
@@ -777,21 +778,71 @@ def build_plugin():
                 manager.descriptor_map()
 
 
-    def test_playwright_probe_runs_in_subprocess_and_caches_success(self) -> None:
-        PluginManager._successful_dependency_probes.discard("playwright_chromium")
-        completed = type("Completed", (), {"returncode": 0})()
+    def test_playwright_probe_uses_short_ttl_cache_for_success_and_failure(self) -> None:
+        PluginManager.invalidate_dependency_probe_cache()
+        succeeded = type("Completed", (), {"returncode": 0})()
+        failed = type("Completed", (), {"returncode": 1})()
 
         with patch(
             "fuckclassroom.plugins.manager.subprocess.run",
-            return_value=completed,
+            side_effect=[succeeded, failed],
         ) as run:
             self.assertTrue(PluginManager._probe_dependency("playwright_chromium"))
             self.assertTrue(PluginManager._probe_dependency("playwright_chromium"))
+            self.assertEqual(run.call_count, 1)
 
-        run.assert_called_once()
-        command = run.call_args.args[0]
+            with PluginManager._dependency_probe_cache_lock:
+                _, cached_result = PluginManager._dependency_probe_cache["playwright_chromium"]
+                PluginManager._dependency_probe_cache["playwright_chromium"] = (
+                    0.0,
+                    cached_result,
+                )
+
+            self.assertFalse(PluginManager._probe_dependency("playwright_chromium"))
+            self.assertFalse(PluginManager._probe_dependency("playwright_chromium"))
+
+        self.assertEqual(run.call_count, 2)
+        command = run.call_args_list[0].args[0]
         self.assertEqual(command[:2], [__import__("sys").executable, "-c"])
         self.assertIn("chromium.launch(headless=True)", command[2])
+
+    def test_dependency_install_invalidates_probe_cache_before_and_after_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            dependency = DependencySpec(
+                "playwright>=1.45",
+                "playwright",
+                "Playwright + Chromium",
+                post_install=(("{python}", "-m", "playwright", "install", "chromium"),),
+                probe="playwright_chromium",
+            )
+            descriptor = PluginDescriptor(
+                "demo_probe",
+                "Demo Probe",
+                "",
+                "1.0.0",
+                100,
+                (),
+                True,
+                python_requirements=(dependency,),
+            )
+            statuses = [
+                [{"label": "Playwright + Chromium", "installed": False, "optional": False}],
+                [{"label": "Playwright + Chromium", "installed": True, "optional": False}],
+            ]
+            PluginManager._dependency_probe_cache["playwright_chromium"] = (999999999.0, True)
+
+            with (
+                patch.object(manager, "descriptor_map", return_value={"demo_probe": descriptor}),
+                patch.object(manager, "dependency_status", side_effect=statuses),
+                patch.object(manager, "_run_install_command"),
+            ):
+                manager.install_dependencies("demo_probe")
+
+            self.assertNotIn(
+                "playwright_chromium",
+                PluginManager._dependency_probe_cache,
+            )
 
     def test_importable_module_is_not_missing_when_distribution_name_differs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -941,6 +992,82 @@ def build_plugin():
                     manager=manager,
                 )
             self.assertEqual(registry.plugin_ids, ("core_ui",))
+
+    def test_stale_plugin_state_is_pruned_before_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            manager = PluginManager(AppConfig(data_dir=data_dir))
+            manager.state_path.write_text(
+                json.dumps({"selected": ["core_ui", "removed_plugin"]}),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(manager, "dependency_status", return_value=[]),
+                patch.object(manager, "load_spec"),
+            ):
+                desired = manager.enable("ai_summary")
+
+            payload = json.loads(manager.state_path.read_text(encoding="utf-8"))
+            self.assertNotIn("removed_plugin", payload["selected"])
+            self.assertIn("ai_summary", payload["selected"])
+            self.assertIn("ai_summary", desired)
+
+    def test_disable_validation_failure_does_not_partially_write_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            manager = PluginManager(AppConfig(data_dir=data_dir))
+            manager.state_path.write_text(
+                json.dumps({"selected": ["core_ui", "classroom"]}, indent=2),
+                encoding="utf-8",
+            )
+            before = manager.state_path.read_bytes()
+
+            with patch.object(
+                manager,
+                "_expand_dependencies",
+                side_effect=PluginManagerError("validation failed"),
+            ):
+                with self.assertRaisesRegex(PluginManagerError, "validation failed"):
+                    manager.disable("classroom")
+
+            self.assertEqual(manager.state_path.read_bytes(), before)
+
+    def test_dependency_repair_for_enabled_plugin_requests_runtime_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            reload_calls: list[bool] = []
+
+            def request_reload_from_worker() -> bool:
+                reload_calls.append(True)
+                return True
+
+            app = create_app(
+                AppConfig(data_dir=Path(directory)),
+                enabled_plugins={"core_ui"},
+                reload_background_callback=request_reload_from_worker,
+            )
+            from fastapi.testclient import TestClient
+
+            with (
+                patch.object(PluginManager, "install_dependencies", return_value=None),
+                TestClient(app) as client,
+            ):
+                response = client.post(
+                    "/plugins/core_ui/dependencies/install",
+                    headers={"Accept": "application/json"},
+                )
+                self.assertEqual(response.status_code, 200)
+                status_url = response.json()["status_url"]
+                task = {}
+                for _ in range(100):
+                    task = client.get(status_url).json()
+                    if task["status"] != "running":
+                        break
+                    time.sleep(0.01)
+
+            self.assertEqual(task["status"], "succeeded")
+            self.assertEqual(reload_calls, [True])
+            self.assertIn("已请求自动应用", task["result_url"])
 
     def test_zip_with_abnormal_compression_ratio_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
