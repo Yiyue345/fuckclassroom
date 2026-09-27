@@ -77,6 +77,94 @@ class LocalTranscriptionTests(unittest.TestCase):
             self.assertEqual(cached.text, result.text)
             self.assertEqual(cached.export_path, exported)
 
+    def test_cuda_runtime_failure_falls_back_to_cpu_int8(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            (data_dir / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "asr_device": "cuda",
+                        "asr_compute_type": "float16",
+                        "asr_use_batched": False,
+                        "asr_simplified_chinese": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = AppConfig(data_dir=data_dir)
+            service = LocalTranscriptionService(config)
+            model_calls: list[tuple[str | None, str | None]] = []
+            progress: list[tuple[int, str]] = []
+
+            class FailingCudaModel:
+                def transcribe(self, url: str, **kwargs):
+                    raise RuntimeError(
+                        "Library cublas64_12.dll is not found or cannot be loaded"
+                    )
+
+            class CpuModel:
+                def transcribe(self, url: str, **kwargs):
+                    return iter(
+                        [SimpleNamespace(start=0.0, end=3.0, text="CPU 回退成功")]
+                    ), SimpleNamespace(duration=3.0)
+
+            def get_model(progress_callback=None, *, device=None, compute_type=None):
+                model_calls.append((device, compute_type))
+                if device == "cpu":
+                    return CpuModel()
+                return FailingCudaModel()
+
+            service._get_model = get_model  # type: ignore[method-assign]
+            target = config.outputs_dir / "课程" / "课次" / "local_transcript.txt"
+
+            result = service.transcribe_url(
+                "https://example.test/lesson.mp4",
+                target,
+                progress=lambda percent, message: progress.append((percent, message)),
+            )
+
+            self.assertIn("CPU 回退成功", result.text)
+            self.assertEqual(model_calls, [(None, None), ("cpu", "int8")])
+            self.assertTrue(
+                any(
+                    "GPU 运行库不可用，正在切换 CPU int8 转写" in message
+                    for _, message in progress
+                )
+            )
+
+    def test_non_cuda_runtime_failure_does_not_trigger_cpu_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            (data_dir / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "asr_device": "cuda",
+                        "asr_compute_type": "float16",
+                        "asr_use_batched": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = AppConfig(data_dir=data_dir)
+            service = LocalTranscriptionService(config)
+            calls: list[tuple[str | None, str | None]] = []
+
+            class FailingModel:
+                def transcribe(self, url: str, **kwargs):
+                    raise RuntimeError("media decode failed")
+
+            def get_model(progress_callback=None, *, device=None, compute_type=None):
+                calls.append((device, compute_type))
+                return FailingModel()
+
+            service._get_model = get_model  # type: ignore[method-assign]
+            target = config.outputs_dir / "课程" / "课次" / "local_transcript.txt"
+
+            with self.assertRaisesRegex(Exception, "media decode failed"):
+                service.transcribe_url("https://example.test/lesson.mp4", target)
+
+            self.assertEqual(calls, [(None, None)])
+
     def test_batched_pipeline_uses_configured_batch_size(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
