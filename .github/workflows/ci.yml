@@ -6,6 +6,7 @@ on:
       - main
       - 0.2.0
       - pluginization
+      - plugin-management
       - feat/course-media-viewer
       - feature/live-ppt-qr-assistant
   pull_request:
