@@ -377,34 +377,78 @@ class PluginManager:
         self,
         descriptor: PluginDescriptor,
     ) -> dict[str, object]:
-        reasons: list[str] = []
-        if int(descriptor.api_version) != PLUGIN_API_VERSION:
-            reasons.append(
-                f"插件 API {descriptor.api_version}，当前支持 API {PLUGIN_API_VERSION}"
-            )
+        plugin_api_compatible = int(descriptor.api_version) == PLUGIN_API_VERSION
+        rpc_api_compatible = (
+            descriptor.execution != "process"
+            or int(descriptor.rpc_api_version) == PLUGIN_RPC_API_VERSION
+        )
 
-        if descriptor.execution == "process" and int(descriptor.rpc_api_version) != PLUGIN_RPC_API_VERSION:
-            reasons.append(
-                f"Plugin RPC API {descriptor.rpc_api_version}，当前支持 RPC API {PLUGIN_RPC_API_VERSION}"
-            )
-
+        app_version_satisfied = True
+        app_version_message = ""
         if descriptor.app_requires:
             try:
                 app_spec = SpecifierSet(descriptor.app_requires)
                 current_version = Version(APP_VERSION)
             except (InvalidSpecifier, InvalidVersion):
-                reasons.append("应用版本约束无效")
+                app_version_satisfied = False
+                app_version_message = f"主程序版本约束无效：{descriptor.app_requires}"
             else:
-                if not app_spec.contains(current_version, prereleases=current_version.is_prerelease):
-                    reasons.append(
+                if not app_spec.contains(
+                    current_version,
+                    prereleases=current_version.is_prerelease,
+                ):
+                    app_version_satisfied = False
+                    app_version_message = (
                         f"需要 FuckClassroom {descriptor.app_requires}，当前为 {APP_VERSION}"
                     )
 
+        # Whether a plugin can be loaded is determined by the stable API contracts.
+        # app_requires is advisory: it warns users that the plugin has not declared
+        # support for this host version, but a normal app release must not disable
+        # otherwise API-compatible plugins.
+        loadable = plugin_api_compatible and rpc_api_compatible
+
+        if not plugin_api_compatible:
+            state = "plugin_api_incompatible"
+            label = "✕ Plugin API 不兼容"
+            severity = "error"
+            message = (
+                f"插件 API {descriptor.api_version}，当前支持 API {PLUGIN_API_VERSION}"
+            )
+        elif not rpc_api_compatible:
+            state = "rpc_api_incompatible"
+            label = "✕ RPC API 不兼容"
+            severity = "error"
+            message = (
+                f"Plugin RPC API {descriptor.rpc_api_version}，"
+                f"当前支持 RPC API {PLUGIN_RPC_API_VERSION}"
+            )
+        elif not app_version_satisfied:
+            state = "app_version_mismatch"
+            label = "⚠ 主程序版本不满足"
+            severity = "warning"
+            message = app_version_message
+        else:
+            state = "compatible"
+            label = "✓ 兼容"
+            severity = "success"
+            message = "Plugin API、RPC API 与主程序版本声明均兼容"
+
         return {
-            "compatible": not reasons,
-            "message": "；".join(reasons) if reasons else "兼容",
+            # Backward-compatible field used by enable/load/runtime gating.
+            # It intentionally means "API-loadable", not "all advisory checks pass".
+            "compatible": loadable,
+            "state": state,
+            "label": label,
+            "severity": severity,
+            "message": message,
+            "plugin_api_compatible": plugin_api_compatible,
+            "rpc_api_compatible": rpc_api_compatible,
+            "app_version_satisfied": app_version_satisfied,
             "api_version": descriptor.api_version,
             "current_api_version": PLUGIN_API_VERSION,
+            "rpc_api_version": descriptor.rpc_api_version,
+            "current_rpc_api_version": PLUGIN_RPC_API_VERSION,
             "app_requires": descriptor.app_requires,
             "app_version": APP_VERSION,
         }
@@ -662,9 +706,17 @@ class PluginManager:
                     "missing_optional_dependencies": missing_optional,
                     "dependency_issue": bool(missing_required),
                     "compatible": compatibility["compatible"],
+                    "compatibility_state": compatibility["state"],
+                    "compatibility_label": compatibility["label"],
+                    "compatibility_severity": compatibility["severity"],
                     "compatibility_message": compatibility["message"],
+                    "plugin_api_compatible": compatibility["plugin_api_compatible"],
+                    "rpc_api_compatible": compatibility["rpc_api_compatible"],
+                    "app_version_satisfied": compatibility["app_version_satisfied"],
                     "api_version": compatibility["api_version"],
                     "current_api_version": compatibility["current_api_version"],
+                    "rpc_api_version": compatibility["rpc_api_version"],
+                    "current_rpc_api_version": compatibility["current_rpc_api_version"],
                     "app_requires": compatibility["app_requires"],
                     "app_version": compatibility["app_version"],
                 }

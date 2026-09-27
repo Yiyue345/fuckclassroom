@@ -77,10 +77,11 @@
             data-plugin-desired-enabled="{{ 'true' if plugin.desired_enabled else 'false' }}"
             data-plugin-current-enabled="{{ 'true' if plugin.current_enabled else 'false' }}"
             data-plugin-external="{{ 'false' if plugin.builtin else 'true' }}"
-            data-plugin-static-needs-action="{{ 'true' if (not plugin.compatible or plugin.missing_required_dependencies or plugin.missing_optional_dependencies) else 'false' }}"
-            data-plugin-needs-action="{{ 'true' if (not plugin.compatible or plugin.missing_required_dependencies or plugin.missing_optional_dependencies or plugin.restart_required) else 'false' }}"
+            data-plugin-static-needs-action="{{ 'true' if (plugin.compatibility_state != 'compatible' or plugin.missing_required_dependencies or plugin.missing_optional_dependencies) else 'false' }}"
+            data-plugin-needs-action="{{ 'true' if (plugin.compatibility_state != 'compatible' or plugin.missing_required_dependencies or plugin.missing_optional_dependencies or plugin.restart_required) else 'false' }}"
             data-plugin-locked="{{ 'true' if plugin.locked else 'false' }}"
             data-plugin-compatible="{{ 'true' if plugin.compatible else 'false' }}"
+            data-plugin-compatibility-state="{{ plugin.compatibility_state }}"
             data-plugin-mutable="{{ 'true' if plugin_config_mutable else 'false' }}">
             <span class="plugin-row-icon" data-plugin-icon="{{ plugin.id }}">
               {% if plugin.id == "classroom" %}课
@@ -104,6 +105,8 @@
 
             <div class="plugin-row-actions">
               <span class="plugin-source-badge">{{ "内置" if plugin.builtin else "外部" }}</span>
+              <span class="plugin-state-badge {{ 'green' if plugin.compatibility_severity == 'success' else ('amber' if plugin.compatibility_severity == 'warning' else 'red') }}"
+                title="{{ plugin.compatibility_message }}">{{ plugin.compatibility_label }}</span>
               <form class="plugin-toggle-form" method="post"
                 action="/plugins/{{ plugin.id }}/{{ 'disable' if plugin.desired_enabled else 'enable' }}"
                 data-plugin-id="{{ plugin.id }}">
@@ -174,10 +177,15 @@
 
           <p class="plugin-detail-description">{{ plugin.description or "该插件未提供描述。" }}</p>
 
-          {% if not plugin.compatible %}
+          {% if plugin.compatibility_state == "app_version_mismatch" %}
+            <div class="notice warning plugin-detail-notice">
+              <svg class="icon small"><use href="/static/icons.svg#circle-alert"></use></svg>
+              <span><strong>{{ plugin.compatibility_label }}。</strong> {{ plugin.compatibility_message }}。API 兼容，仍允许启用。</span>
+            </div>
+          {% elif not plugin.compatible %}
             <div class="notice error plugin-detail-notice">
               <svg class="icon small"><use href="/static/icons.svg#circle-alert"></use></svg>
-              <span><strong>插件不兼容。</strong> {{ plugin.compatibility_message }}</span>
+              <span><strong>{{ plugin.compatibility_label }}。</strong> {{ plugin.compatibility_message }}</span>
             </div>
           {% endif %}
 
@@ -190,12 +198,18 @@
             </div>
             <div>
               <dt>插件 API</dt>
-              <dd>v{{ plugin.api_version }}{% if plugin.api_version == plugin.current_api_version %} · 兼容{% endif %}</dd>
+              <dd>v{{ plugin.api_version }} / 主程序 v{{ plugin.current_api_version }} · {{ "兼容" if plugin.plugin_api_compatible else "不兼容" }}</dd>
             </div>
             <div>
               <dt>应用要求</dt>
-              <dd>{{ plugin.app_requires or "无限制" }}</dd>
+              <dd>{{ plugin.app_requires or "无限制" }}{% if not plugin.app_version_satisfied %} · 警告{% endif %}</dd>
             </div>
+            {% if plugin.isolated %}
+            <div>
+              <dt>RPC API</dt>
+              <dd>v{{ plugin.rpc_api_version }} / 主程序 v{{ plugin.current_rpc_api_version }} · {{ "兼容" if plugin.rpc_api_compatible else "不兼容" }}</dd>
+            </div>
+            {% endif %}
             <div>
               <dt>运行方式</dt>
               <dd>{{ "独立进程" if plugin.execution == "process" else "应用进程" }}</dd>

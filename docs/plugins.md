@@ -285,10 +285,16 @@ PLUGIN_API_VERSION = 1
 - `app_requires`：可选的 PEP 440 FuckClassroom 版本约束，例如 `>=0.1,<0.3`。
 - 旧插件若没有声明 `api_version`，当前按 API v1 兼容处理。
 - `plugin.py` 返回的 `PluginSpec.api_version` 必须与 `plugin.json.api_version` 一致。
-- API 版本不匹配或 `app_requires` 不满足时，插件可以继续保留在 `data/plugins/` 中并显示在管理页面，但不能启用，也不会执行插件入口代码。
-- 如果状态文件中已经把不兼容插件标记为启用，启动时会安全跳过该插件以及依赖它的插件，保证 `core_ui` 仍可启动并展示具体兼容性错误。
+插件是否允许加载由稳定 API 契约决定，主程序版本号本身不作为硬阻断条件。插件管理页使用四种兼容性状态：
 
-当前应用版本来自 `fuckclassroom.__version__`，插件管理页会同时显示当前 FuckClassroom 版本与插件 API 版本。
+- `✓ 兼容`：Plugin API、RPC API（若适用）以及 `app_requires` 均满足。
+- `⚠ 主程序版本不满足`：`app_requires` 不包含当前 FuckClassroom 版本，作为兼容性警告展示；只要 API 兼容，插件仍可启用和运行。
+- `✕ Plugin API 不兼容`：`api_version` 与当前 `PLUGIN_API_VERSION` 不一致，禁止启用和加载。
+- `✕ RPC API 不兼容`：独立进程插件的 `rpc_api_version` 与当前 `PLUGIN_RPC_API_VERSION` 不一致，禁止启用和加载。
+
+如果状态文件中已经把 API 不兼容插件标记为启用，启动时会安全跳过该插件以及依赖它的插件，保证 `core_ui` 仍可启动并展示具体兼容性错误。普通应用版本升级不会因为 `app_requires` 未同步而自动废掉 API 仍兼容的插件。
+
+当前应用版本来自 `fuckclassroom.__version__`，插件管理页会同时显示当前 FuckClassroom、Plugin API 与 RPC API 版本。
 
 ## Manifest 懒加载
 

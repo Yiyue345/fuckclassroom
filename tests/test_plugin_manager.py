@@ -297,9 +297,17 @@ def build_plugin():
 
             rows = {row["id"]: row for row in manager.status_rows(registry.plugin_ids)}
             self.assertFalse(rows["future_plugin"]["compatible"])
+            self.assertEqual(
+                rows["future_plugin"]["compatibility_state"],
+                "plugin_api_incompatible",
+            )
+            self.assertEqual(
+                rows["future_plugin"]["compatibility_label"],
+                "✕ Plugin API 不兼容",
+            )
             self.assertIn("插件 API", rows["future_plugin"]["compatibility_message"])
 
-    def test_incompatible_app_version_cannot_be_enabled(self) -> None:
+    def test_app_version_mismatch_warns_but_does_not_block_enable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             plugin_root = root / "data" / "plugins" / "future_app"
@@ -325,13 +333,29 @@ def build_plugin():
             )
             manager = PluginManager(AppConfig(data_dir=root / "data"))
 
-            with self.assertRaisesRegex(PluginManagerError, "不兼容"):
-                manager.enable("future_app")
-
             descriptor = manager.descriptor_map()["future_app"]
             compatibility = manager.compatibility_status(descriptor)
-            self.assertFalse(compatibility["compatible"])
-            self.assertIn("需要 FuckClassroom", compatibility["message"])
+
+            self.assertTrue(compatibility["compatible"])
+            self.assertEqual(compatibility["state"], "app_version_mismatch")
+            self.assertEqual(compatibility["label"], "⚠ 主程序版本不满足")
+            self.assertFalse(compatibility["app_version_satisfied"])
+
+            enabled = manager.enable("future_app")
+            self.assertIn("future_app", enabled)
+
+            registry = build_plugin_registry(
+                config=manager.config,
+                manager=manager,
+            )
+            self.assertIn("future_app", registry.plugin_ids)
+
+            rows = {row["id"]: row for row in manager.status_rows(registry.plugin_ids)}
+            self.assertTrue(rows["future_app"]["compatible"])
+            self.assertEqual(
+                rows["future_app"]["compatibility_state"],
+                "app_version_mismatch",
+            )
 
     def test_manifest_and_plugin_spec_api_versions_must_match(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -686,7 +710,10 @@ def build_plugin():
                 descriptor.rpc_permissions,
                 ("core.settings.get", "core.storage.get"),
             )
-            self.assertTrue(manager.compatibility_status(descriptor)["compatible"])
+            compatibility = manager.compatibility_status(descriptor)
+            self.assertTrue(compatibility["compatible"])
+            self.assertEqual(compatibility["state"], "compatible")
+            self.assertEqual(compatibility["label"], "✓ 兼容")
 
     def test_future_process_plugin_rpc_api_is_incompatible(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -717,6 +744,8 @@ def build_plugin():
             compatibility = manager.compatibility_status(descriptor)
 
             self.assertFalse(compatibility["compatible"])
+            self.assertEqual(compatibility["state"], "rpc_api_incompatible")
+            self.assertEqual(compatibility["label"], "✕ RPC API 不兼容")
             self.assertIn("Plugin RPC API", compatibility["message"])
             with self.assertRaisesRegex(PluginManagerError, "不兼容"):
                 manager.enable("future_rpc")
