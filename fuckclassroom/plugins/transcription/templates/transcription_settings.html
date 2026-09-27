@@ -1,9 +1,51 @@
 {% import "ui/components.html" as ui %}
+{% set runtime = panel_context.get("asr_runtime", {}) %}
+{% set model_options = panel_context.get("asr_models", ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "turbo"]) %}
+{% set cuda_available = runtime.get("cuda_available", false) %}
+{% set auto_device = runtime.get("auto_device", "cpu") %}
+{% set compute_types = runtime.get("compute_types", {"cpu": ["int8", "float32", "default"], "cuda": []}) %}
+{% set selected_device = settings.asr_device if settings.asr_device != "cuda" or cuda_available else "cpu" %}
+{% set selected_resolved_device = auto_device if selected_device == "auto" else selected_device %}
+{% set selected_supported_types = compute_types.get(selected_resolved_device, []) %}
+{% set selected_compute_type = settings.asr_compute_type if settings.asr_compute_type in selected_supported_types else ("int8" if "int8" in selected_supported_types else "default") %}
 {% call ui.section("transcription", "本地语音转写", "调整 faster-whisper 的模型、并发与输出方式。") %}
-    {{ ui.field("asr_model", "语音识别模型", settings.asr_model, hint="默认 small；模型越大通常越准，但下载、内存和推理开销也更高。") }}
+    <div class="field">
+      <label for="asr_model">语音识别模型</label>
+      <select class="select" id="asr_model" name="asr_model" aria-describedby="asr_model-hint">
+        {% if settings.asr_model not in model_options %}
+          <option value="{{ settings.asr_model }}" selected>{{ settings.asr_model }}（当前自定义值）</option>
+        {% endif %}
+        {% for model in model_options %}
+          <option value="{{ model }}"{% if settings.asr_model == model %} selected{% endif %}>{{ model }}</option>
+        {% endfor %}
+      </select>
+      <span class="field-hint" id="asr_model-hint">默认 small；模型越大通常越准，但下载、内存和推理开销也更高。</span>
+    </div>
     <div class="field-row">
-      {{ ui.select("asr_device", "推理设备", settings.asr_device, ["cpu", "cuda", "auto"]) }}
-      {{ ui.select("asr_compute_type", "计算精度", settings.asr_compute_type, ["int8", "int8_float16", "float16", "float32", "default"]) }}
+      <div class="field">
+        <label for="asr_device">推理设备</label>
+        <select class="select" id="asr_device" name="asr_device" aria-describedby="asr_device-hint">
+          <option value="cpu"{% if selected_device == "cpu" %} selected{% endif %}>cpu</option>
+          <option value="cuda"{% if selected_device == "cuda" %} selected{% endif %}{% if not cuda_available %} disabled{% endif %}>cuda{% if not cuda_available %}（环境不可用）{% endif %}</option>
+          <option value="auto"{% if selected_device == "auto" %} selected{% endif %}>auto（当前 → {{ auto_device }}）</option>
+        </select>
+        <span class="field-hint" id="asr_device-hint">
+          {% if cuda_available %}
+            已检测到 {{ runtime.get("cuda_device_count", 0) }} 个 CUDA 设备；CTranslate2 {{ runtime.get("ctranslate2_version", "") }} 可使用 GPU。
+          {% else %}
+            CUDA 已禁用：{{ runtime.get("cuda_reason", "未检测到完整 CUDA 运行环境") }}。auto 将使用 CPU。
+          {% endif %}
+        </span>
+      </div>
+      <div class="field">
+        <label for="asr_compute_type">计算精度</label>
+        <select class="select" id="asr_compute_type" name="asr_compute_type" aria-describedby="asr_compute_type-hint">
+          {% for option in ["int8", "int8_float16", "float16", "float32", "default"] %}
+            <option value="{{ option }}"{% if selected_compute_type == option %} selected{% endif %}{% if option not in selected_supported_types %} disabled{% endif %}>{{ option }}{% if option not in selected_supported_types %}（当前设备不支持）{% endif %}</option>
+          {% endfor %}
+        </select>
+        <span class="field-hint" id="asr_compute_type-hint">仅显示当前设备实际支持的 CTranslate2 计算精度。</span>
+      </div>
     </div>
     <div class="field-row">
       {{ ui.field("asr_cpu_threads", "每个模型 CPU 线程", settings.asr_cpu_threads, type="number", min="1", max="64", step="1") }}
@@ -17,3 +59,35 @@
     {{ ui.checkbox("asr_use_batched", "启用 BatchedInferencePipeline 批量推理", settings.asr_use_batched) }}
     {{ ui.checkbox("asr_simplified_chinese", "中文转写自动转换为简体", settings.asr_simplified_chinese) }}
 {% endcall %}
+<script>
+(() => {
+  const device = document.getElementById('asr_device');
+  const compute = document.getElementById('asr_compute_type');
+  if (!device || !compute) return;
+
+  const autoDevice = {{ auto_device | tojson }};
+  const support = {{ compute_types | tojson }};
+
+  const refreshComputeTypes = () => {
+    const resolved = device.value === 'auto' ? autoDevice : device.value;
+    const allowed = new Set(support[resolved] || []);
+    let selectedAllowed = false;
+
+    for (const option of compute.options) {
+      const enabled = allowed.has(option.value);
+      option.disabled = !enabled;
+      if (option.selected && enabled) selectedAllowed = true;
+    }
+
+    if (!selectedAllowed) {
+      const preferred = Array.from(compute.options).find(
+        option => !option.disabled && option.value === 'int8'
+      ) || Array.from(compute.options).find(option => !option.disabled);
+      if (preferred) preferred.selected = true;
+    }
+  };
+
+  device.addEventListener('change', refreshComputeTypes);
+  refreshComputeTypes();
+})();
+</script>

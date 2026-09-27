@@ -96,36 +96,45 @@ class LocalTranscriptionService:
                 )
 
         _report(progress, 4, "正在准备本地语音识别模型")
-        model = self._get_model(progress)
+        using_cpu_fallback = False
+        try:
+            model = self._get_model(progress)
+        except LocalTranscriptionError as exc:
+            if not self._should_fallback_to_cpu(exc):
+                raise
+            model = self._load_cpu_fallback_model(progress, exc)
+            using_cpu_fallback = True
         _clear_detail(progress)
 
         duration_hint = max(0.0, float(duration_hint_seconds or 0.0))
         with _transcription_slot(self.config.asr_max_concurrent_tasks, progress):
             try:
-                if self._can_pipeline_remote_audio(video_url, duration_hint, progress):
-                    try:
-                        lines, duration = self._transcribe_chunked_remote(
-                            model,
-                            video_url,
-                            duration_hint,
-                            progress,
-                        )
-                    except _ChunkedDecodeError as exc:
-                        _raise_if_cancelled(progress)
-                        _log(
-                            progress,
-                            f"分块音频预处理失败，自动回退整段流式解码：{exc}",
-                            "warning",
-                        )
-                        _report(progress, 12, "分块解码不可用，正在回退整段流式音频处理")
-                        lines, duration = self._transcribe_single_stream(model, video_url, progress)
-                else:
-                    lines, duration = self._transcribe_single_stream(model, video_url, progress)
+                lines, duration = self._transcribe_with_model(
+                    model,
+                    video_url,
+                    duration_hint,
+                    progress,
+                )
             except LocalTranscriptionError:
                 raise
             except Exception as exc:  # faster-whisper/PyAV can raise backend-specific errors.
                 _raise_if_cancelled(progress)
-                raise LocalTranscriptionError(f"本地语音转写失败：{exc}") from exc
+                if not using_cpu_fallback and self._should_fallback_to_cpu(exc):
+                    cpu_model = self._load_cpu_fallback_model(progress, exc)
+                    try:
+                        lines, duration = self._transcribe_with_model(
+                            cpu_model,
+                            video_url,
+                            duration_hint,
+                            progress,
+                        )
+                    except Exception as cpu_exc:
+                        _raise_if_cancelled(progress)
+                        raise LocalTranscriptionError(
+                            f"GPU 运行库不可用，CPU 回退转写也失败：{cpu_exc}"
+                        ) from cpu_exc
+                else:
+                    raise LocalTranscriptionError(f"本地语音转写失败：{exc}") from exc
 
         if not lines:
             raise LocalTranscriptionError("录像中没有识别到可用语音")
@@ -144,6 +153,59 @@ class LocalTranscriptionService:
             duration_seconds=duration or None,
             export_path=export_path,
         )
+
+    def _transcribe_with_model(
+        self,
+        model,
+        video_url: str,
+        duration_hint: float,
+        progress: ProgressCallback | None,
+    ) -> tuple[list[str], float]:
+        if self._can_pipeline_remote_audio(video_url, duration_hint, progress):
+            try:
+                return self._transcribe_chunked_remote(
+                    model,
+                    video_url,
+                    duration_hint,
+                    progress,
+                )
+            except _ChunkedDecodeError as exc:
+                _raise_if_cancelled(progress)
+                _log(
+                    progress,
+                    f"分块音频预处理失败，自动回退整段流式解码：{exc}",
+                    "warning",
+                )
+                _report(progress, 12, "分块解码不可用，正在回退整段流式音频处理")
+        return self._transcribe_single_stream(model, video_url, progress)
+
+    def _should_fallback_to_cpu(self, exc: BaseException) -> bool:
+        return self.config.asr_device in {"cuda", "auto"} and _is_cuda_runtime_error(exc)
+
+    def _load_cpu_fallback_model(
+        self,
+        progress: ProgressCallback | None,
+        gpu_error: BaseException,
+    ):
+        _raise_if_cancelled(progress)
+        _log(
+            progress,
+            f"GPU 转写运行库不可用，自动回退 CPU int8：{gpu_error}",
+            "warning",
+        )
+        _report(progress, 8, "GPU 运行库不可用，正在切换 CPU int8 转写")
+        try:
+            model = self._get_model(
+                progress,
+                device="cpu",
+                compute_type="int8",
+            )
+        except Exception as exc:
+            raise LocalTranscriptionError(
+                f"GPU 运行库不可用，CPU 回退模型加载失败：{exc}"
+            ) from exc
+        _clear_detail(progress)
+        return model
 
     def _can_pipeline_remote_audio(
         self,
@@ -392,7 +454,13 @@ class LocalTranscriptionService:
         temporary.replace(export_path)
         return export_path
 
-    def _get_model(self, progress: ProgressCallback | None = None):
+    def _get_model(
+        self,
+        progress: ProgressCallback | None = None,
+        *,
+        device: str | None = None,
+        compute_type: str | None = None,
+    ):
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:
@@ -400,10 +468,17 @@ class LocalTranscriptionService:
                 "缺少 faster-whisper，请先重新安装 requirements.txt 中的依赖"
             ) from exc
 
+        effective_device = device or self.config.asr_device
+        if effective_device == "auto":
+            from .environment import resolve_auto_device
+
+            effective_device = resolve_auto_device()
+            _log(progress, f"自动选择 ASR 推理设备：{effective_device}", "info")
+        effective_compute_type = compute_type or self.config.asr_compute_type
         key = (
             self.config.asr_model,
-            self.config.asr_device,
-            self.config.asr_compute_type,
+            effective_device,
+            effective_compute_type,
             self.config.asr_cpu_threads,
             self.config.asr_num_workers,
             str(self.config.asr_models_dir),
@@ -418,8 +493,8 @@ class LocalTranscriptionService:
                 _report(progress, 8, "正在加载本地语音识别模型")
                 model = WhisperModel(
                     model_path,
-                    device=self.config.asr_device,
-                    compute_type=self.config.asr_compute_type,
+                    device=effective_device,
+                    compute_type=effective_compute_type,
                     cpu_threads=self.config.asr_cpu_threads,
                     num_workers=self.config.asr_num_workers,
                     local_files_only=True,
@@ -817,6 +892,38 @@ def _transcription_slot(limit: int, progress: ProgressCallback | None = None):
         with _TRANSCRIPTION_CONDITION:
             _ACTIVE_TRANSCRIPTIONS = max(0, _ACTIVE_TRANSCRIPTIONS - 1)
             _TRANSCRIPTION_CONDITION.notify_all()
+
+
+_CUDA_RUNTIME_ERROR_MARKERS = (
+    "cublas",
+    "cudnn",
+    "cuda runtime",
+    "cuda driver",
+    "cuda error",
+    "libcuda",
+    "nvcuda",
+)
+
+
+def _is_cuda_runtime_error(exc: BaseException) -> bool:
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        identity = id(current)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        message = str(current).lower()
+        if any(marker in message for marker in _CUDA_RUNTIME_ERROR_MARKERS):
+            return True
+        cause = getattr(current, "__cause__", None)
+        context = getattr(current, "__context__", None)
+        if isinstance(cause, BaseException):
+            pending.append(cause)
+        if isinstance(context, BaseException):
+            pending.append(context)
+    return False
 
 
 def _to_simplified_chinese(text: str) -> str:
