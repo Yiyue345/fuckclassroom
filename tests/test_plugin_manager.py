@@ -5,7 +5,7 @@ import json
 import tempfile
 import unittest
 import zipfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from fuckclassroom import __version__ as APP_VERSION
@@ -776,6 +776,22 @@ def build_plugin():
             with self.assertRaisesRegex(PluginManagerError, "内部 Worker 保留能力"):
                 manager.descriptor_map()
 
+
+    def test_playwright_probe_uses_launch_instead_of_executable_path(self) -> None:
+        playwright = MagicMock()
+        playwright.chromium.executable_path = "/definitely/missing/chromium"
+        browser = MagicMock()
+        playwright.chromium.launch.return_value = browser
+        context = MagicMock()
+        context.__enter__.return_value = playwright
+        context.__exit__.return_value = False
+
+        PluginManager._successful_dependency_probes.discard("playwright_chromium")
+        with patch("playwright.sync_api.sync_playwright", return_value=context):
+            self.assertTrue(PluginManager._probe_dependency("playwright_chromium"))
+
+        playwright.chromium.launch.assert_called_once_with(headless=True)
+        browser.close.assert_called_once_with()
 
     def test_importable_module_is_not_missing_when_distribution_name_differs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
