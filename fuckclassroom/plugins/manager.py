@@ -236,10 +236,12 @@ class PluginManager:
         selected = self._load_selected()
         selected.add(plugin_id)
         desired = self._expand_dependencies(selected)
-        # Validate every plugin that would enter the runtime before persisting
-        # the enable request. Built-in and external plugins use the same
-        # required-dependency semantics.
-        for enabled_id in sorted(desired):
+        # Only validate the plugin requested by this operation and its actual
+        # dependency chain. Unrelated configured plugins may be unavailable
+        # because of their own missing dependencies and must not block this
+        # enable request.
+        validation_ids = self._expand_dependencies({plugin_id})
+        for enabled_id in sorted(validation_ids):
             descriptor = descriptors[enabled_id]
             compatibility = self.compatibility_status(descriptor)
             if not compatibility["compatible"]:
