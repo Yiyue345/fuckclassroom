@@ -160,12 +160,12 @@ _BUILTINS: tuple[PluginDescriptor, ...] = (
 
 
 class PluginManager:
-    _dependency_probe_cache: dict[str, tuple[float, bool]] = {}
-    _dependency_probe_cache_lock = threading.Lock()
     _dependency_probe_cache_ttl_seconds = 30.0
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self._dependency_probe_cache: dict[str, tuple[float, bool]] = {}
+        self._dependency_probe_cache_lock = threading.Lock()
         self.plugin_dir = config.data_dir / "plugins"
         self.state_path = config.data_dir / "plugin_state.json"
         self._runtime_override: frozenset[str] | None = None
@@ -887,28 +887,26 @@ class PluginManager:
             rpc_permissions=tuple(rpc_permissions),
         )
 
-    @classmethod
     def invalidate_dependency_probe_cache(
-        cls,
+        self,
         probes: Iterable[str] | None = None,
     ) -> None:
-        with cls._dependency_probe_cache_lock:
+        with self._dependency_probe_cache_lock:
             if probes is None:
-                cls._dependency_probe_cache.clear()
+                self._dependency_probe_cache.clear()
                 return
             for probe in probes:
-                cls._dependency_probe_cache.pop(str(probe), None)
+                self._dependency_probe_cache.pop(str(probe), None)
 
-    @classmethod
-    def _probe_dependency(cls, probe: str) -> bool:
+    def _probe_dependency(self, probe: str) -> bool:
         now = time.monotonic()
-        with cls._dependency_probe_cache_lock:
-            cached = cls._dependency_probe_cache.get(probe)
+        with self._dependency_probe_cache_lock:
+            cached = self._dependency_probe_cache.get(probe)
             if cached is not None:
                 cached_at, cached_result = cached
-                if now - cached_at < cls._dependency_probe_cache_ttl_seconds:
+                if now - cached_at < self._dependency_probe_cache_ttl_seconds:
                     return cached_result
-                cls._dependency_probe_cache.pop(probe, None)
+                self._dependency_probe_cache.pop(probe, None)
 
         if probe == "playwright_chromium":
             script = (
@@ -930,8 +928,8 @@ class PluginManager:
             except (OSError, subprocess.TimeoutExpired):
                 available = False
 
-            with cls._dependency_probe_cache_lock:
-                cls._dependency_probe_cache[probe] = (time.monotonic(), available)
+            with self._dependency_probe_cache_lock:
+                self._dependency_probe_cache[probe] = (time.monotonic(), available)
             return available
         return True
 
