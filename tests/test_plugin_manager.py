@@ -554,6 +554,45 @@ def build_plugin():
             self.assertEqual(reload_calls, [True])
 
 
+    def test_plugin_toggle_json_409_preserves_backend_detail(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "plugins" / "future_app"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "future_app",
+                        "name": "Future App",
+                        "api_version": PLUGIN_API_VERSION,
+                        "app_requires": ">=99",
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='future_app', name='Future App')\n",
+                encoding="utf-8",
+            )
+            config = AppConfig(data_dir=root)
+            app = create_app(config)
+            from fastapi.testclient import TestClient
+
+            with TestClient(app) as client:
+                response = client.post(
+                    "/plugins/future_app/enable",
+                    headers={"Accept": "application/json"},
+                )
+
+            self.assertEqual(response.status_code, 409)
+            detail = response.json()["detail"]
+            self.assertIn("插件 Future App 不兼容", detail)
+            self.assertIn("需要 FuckClassroom >=99", detail)
+
     def test_process_plugin_rpc_manifest_is_validated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
