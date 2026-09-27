@@ -20,17 +20,23 @@ class LabSelectionTests(unittest.TestCase):
         plugin_root = data_dir / "plugins" / "lab_selection"
         shutil.copytree(Path("fuckclassroom/plugins/lab_selection"), plugin_root)
 
-        entry = plugin_root / "plugin.py"
-        entry_text = entry.read_text(encoding="utf-8")
-        entry_text = entry_text.replace(
-            "from ...core.plugins import NavigationGroup, NavigationItem, PluginSpec, UIAsset",
-            "from fuckclassroom.core.plugins import NavigationGroup, NavigationItem, PluginSpec, UIAsset",
-        )
-        entry_text = entry_text.replace(
-            'id="lab_selection", name="实验课选课", order=21,',
-            'id="lab_selection", name="实验课选课", order=21, api_version=1, requires=("core_ui",),',
-        )
-        entry.write_text(entry_text, encoding="utf-8")
+        import_replacements = {
+            "from ...core.plugins": "from fuckclassroom.core.plugins",
+            "from ...course_selection.models": "from fuckclassroom.course_selection.models",
+            "from ...web.responses": "from fuckclassroom.web.responses",
+            "from ...auth.academic": "from fuckclassroom.auth.academic",
+            "from ...core.atomic": "from fuckclassroom.core.atomic",
+        }
+        for python_file in plugin_root.glob("*.py"):
+            source = python_file.read_text(encoding="utf-8")
+            for before, after in import_replacements.items():
+                source = source.replace(before, after)
+            if python_file.name == "plugin.py":
+                source = source.replace(
+                    'id="lab_selection", name="实验课选课", order=21,',
+                    'id="lab_selection", name="实验课选课", order=21, api_version=1, requires=("core_ui",),',
+                )
+            python_file.write_text(source, encoding="utf-8")
         (plugin_root / "plugin.json").write_text(
             json.dumps(
                 {
