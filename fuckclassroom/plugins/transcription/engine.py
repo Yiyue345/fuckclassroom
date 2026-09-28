@@ -1134,10 +1134,10 @@ def _transcription_slot(limit: int, progress: ProgressCallback | None = None):
 def _model_maintenance_window():
     global _MODEL_MAINTENANCE
     with _TRANSCRIPTION_CONDITION:
-        if _ACTIVE_TRANSCRIPTIONS > 0:
-            raise LocalTranscriptionError("当前有本地转写任务运行，完成或取消后再删除模型")
         while _MODEL_MAINTENANCE:
             _TRANSCRIPTION_CONDITION.wait(timeout=1.0)
+        if _ACTIVE_TRANSCRIPTIONS > 0:
+            raise LocalTranscriptionError("当前有本地转写任务运行，完成或取消后再删除模型")
         _MODEL_MAINTENANCE = True
     try:
         yield
