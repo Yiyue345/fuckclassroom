@@ -274,6 +274,7 @@
 .plugin-tech-grid strong { display: block; overflow: hidden; color: var(--text-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-manage-row.danger { justify-content: flex-start; border-color: color-mix(in srgb, var(--red) 24%, var(--border)); background: color-mix(in srgb, var(--red-soft) 74%, var(--surface)); color: var(--red); }
 .plugin-remove-detail { gap: 10px; }
+.plugin-remove-blocker { grid-column: 1 / -1; margin: 2px 2px 0; color: var(--red); font-size: 11px; line-height: 1.5; }
 
 .plugin-list-empty { display: grid; min-height: 220px; place-items: center; align-content: center; gap: 8px; color: var(--text-muted); text-align: center; }
 .plugin-list-empty p { margin: 0; font-size: var(--font-sm); }
