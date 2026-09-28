@@ -153,7 +153,8 @@ class SidebarNavigationTests(unittest.TestCase):
         )
         self.assertIn("applyFilters()", template)
         self.assertIn("selectPlugin(", template)
-        self.assertIn("fetch('/api/plugins/runtime-status'", template)
+        self.assertIn("pageFetch('/api/plugins/runtime-status'", template)
+        self.assertIn("signal: pageSignal", template)
         self.assertIn(".plugin-manager-layout {", styles)
         self.assertIn(
             "grid-template-columns: minmax(0, 1.39fr) minmax(360px, 1fr)",
