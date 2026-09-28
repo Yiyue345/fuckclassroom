@@ -96,23 +96,41 @@ class UIContractTests(unittest.TestCase):
             panel_context={
                 "asr_runtime": runtime,
                 "asr_models": ["tiny", "base", "small", "medium", "large-v3", "turbo"],
+                "asr_model_size_labels": {"small": "约 440 MB"},
+                "asr_model_statuses": [
+                    {
+                        "model": "small",
+                        "installed": True,
+                        "size_bytes": 461373440,
+                        "size_label": "440.0 MB",
+                        "path": "snapshot",
+                    },
+                ],
+                "asr_model_status_error": "",
             },
         )
-        self.assertIn('id="asr_model" name="asr_model"', html)
-        self.assertIn('<option value="small" selected>small</option>', html)
-        self.assertNotIn('name="asr_model" type="text"', html)
+        self.assertIn('id="asr_model" name="asr_model" type="hidden" value="small"', html)
+        self.assertIn('data-asr-model-trigger', html)
+        self.assertIn('data-asr-model-menu', html)
+        self.assertNotIn('<select class="select" id="asr_model"', html)
         self.assertIn('value="cuda" selected', html)
         self.assertIn('value="float16" selected', html)
         self.assertIn('name="asr_cpu_threads" type="number" value="4" min="1" max="64" step="1"', html)
 
-    def test_transcription_model_manager_exposes_download_delete_and_progress(self):
+    def test_transcription_model_actions_are_integrated_into_selector(self):
         registry = build_plugin_registry(ALL)
         env = environment(registry)
         settings = AppSettings().to_public_dict()
         settings.update(asr_model="small")
-        html = env.get_template("transcription_models.html").render(
+        html = env.get_template("transcription_settings.html").render(
             settings=settings,
             panel_context={
+                "asr_runtime": {},
+                "asr_models": ["small", "medium"],
+                "asr_model_size_labels": {
+                    "small": "约 440 MB",
+                    "medium": "约 1.4 GB",
+                },
                 "asr_model_statuses": [
                     {
                         "model": "small",
@@ -133,18 +151,22 @@ class UIContractTests(unittest.TestCase):
             },
         )
 
-        self.assertIn('id="transcription-models"', html)
         normalized_html = " ".join(html.split())
-        self.assertIn("small · 当前选择", normalized_html)
+        self.assertIn('data-asr-model-picker', html)
+        self.assertIn('data-asr-model-row', html)
+        self.assertIn('data-asr-model-action="delete"', html)
+        self.assertIn('data-asr-model-action="download"', html)
         self.assertIn("已安装 · 1.0 KB", normalized_html)
-        self.assertIn('/settings/transcription/models/small/delete', html)
-        self.assertIn('/settings/transcription/models/medium/download', html)
-        self.assertIn('data-inline-task', html)
-        self.assertIn('data-task-status="#asr-model-task-status"', html)
+        self.assertIn("未安装 · 约 1.4 GB", normalized_html)
+        self.assertIn("asr-model-task-status", html)
+        self.assertIn("/settings/transcription/models/", html)
+        self.assertNotIn("语音模型管理", html)
 
         transcription = registry.get("transcription")
-        panels = {panel.key: panel for panel in transcription.settings_panels}
-        self.assertFalse(panels["transcription-models"].in_form)
+        self.assertEqual(
+            [panel.key for panel in transcription.settings_panels],
+            ["transcription"],
+        )
         self.assertIsNotNone(transcription.route_factory)
 
     def test_transcription_settings_disable_unavailable_cuda_and_compute_types(self):
