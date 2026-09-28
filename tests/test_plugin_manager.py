@@ -604,6 +604,100 @@ def build_plugin():
             self.assertIsNotNone(spec.shutdown)
 
 
+    def test_plugin_remove_api_deletes_disabled_external_plugin(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "plugins" / "remove_demo"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "remove_demo",
+                        "name": "Remove Demo",
+                        "version": "1.2.3",
+                        "api_version": PLUGIN_API_VERSION,
+                        "requires": [],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='remove_demo', name='Remove Demo')\n",
+                encoding="utf-8",
+            )
+            (root / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui"]}),
+                encoding="utf-8",
+            )
+            app = create_app(AppConfig(data_dir=root))
+            from fastapi.testclient import TestClient
+
+            with TestClient(app) as client:
+                response = client.delete("/api/plugins/remove_demo")
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["action"], "remove")
+            self.assertEqual(payload["plugin_id"], "remove_demo")
+            self.assertEqual(payload["name"], "Remove Demo")
+            self.assertEqual(payload["version"], "1.2.3")
+            self.assertFalse(plugin_root.exists())
+
+    def test_plugin_remove_api_returns_404_for_missing_plugin(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(AppConfig(data_dir=Path(directory)))
+            from fastapi.testclient import TestClient
+
+            with TestClient(app) as client:
+                response = client.delete("/api/plugins/not_found")
+
+            self.assertEqual(response.status_code, 404)
+            self.assertEqual(response.json()["detail"], "插件不存在：not_found")
+
+    def test_plugin_remove_api_rejects_builtin_and_running_plugins(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "plugins" / "running_demo"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "running_demo",
+                        "name": "Running Demo",
+                        "api_version": PLUGIN_API_VERSION,
+                        "requires": ["core_ui"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='running_demo', name='Running Demo', requires=('core_ui',))\n",
+                encoding="utf-8",
+            )
+            (root / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui", "running_demo"]}),
+                encoding="utf-8",
+            )
+            app = create_app(AppConfig(data_dir=root))
+            from fastapi.testclient import TestClient
+
+            with TestClient(app) as client:
+                builtin = client.delete("/api/plugins/core_ui")
+                running = client.delete("/api/plugins/running_demo")
+
+            self.assertEqual(builtin.status_code, 409)
+            self.assertIn("内置插件不能删除", builtin.json()["detail"])
+            self.assertEqual(running.status_code, 409)
+            self.assertIn("当前仍在运行", running.json()["detail"])
+            self.assertTrue(plugin_root.exists())
+
     def test_plugin_toggle_supports_json_without_page_redirect(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = AppConfig(data_dir=Path(directory))
