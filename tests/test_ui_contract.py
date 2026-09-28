@@ -105,6 +105,47 @@ class UIContractTests(unittest.TestCase):
         self.assertIn('value="float16" selected', html)
         self.assertIn('name="asr_cpu_threads" type="number" value="4" min="1" max="64" step="1"', html)
 
+    def test_transcription_model_manager_exposes_download_delete_and_progress(self):
+        registry = build_plugin_registry(ALL)
+        env = environment(registry)
+        settings = AppSettings().to_public_dict()
+        settings.update(asr_model="small")
+        html = env.get_template("transcription_models.html").render(
+            settings=settings,
+            panel_context={
+                "asr_model_statuses": [
+                    {
+                        "model": "small",
+                        "installed": True,
+                        "size_bytes": 1024,
+                        "size_label": "1.0 KB",
+                        "path": "snapshot",
+                    },
+                    {
+                        "model": "medium",
+                        "installed": False,
+                        "size_bytes": 0,
+                        "size_label": "",
+                        "path": "",
+                    },
+                ],
+                "asr_model_status_error": "",
+            },
+        )
+
+        self.assertIn('id="transcription-models"', html)
+        self.assertIn("small · 当前选择", html)
+        self.assertIn("已安装 · 1.0 KB", html)
+        self.assertIn('/settings/transcription/models/small/delete', html)
+        self.assertIn('/settings/transcription/models/medium/download', html)
+        self.assertIn('data-inline-task', html)
+        self.assertIn('data-task-status="#asr-model-task-status"', html)
+
+        transcription = registry.get("transcription")
+        panels = {panel.key: panel for panel in transcription.settings_panels}
+        self.assertFalse(panels["transcription-models"].in_form)
+        self.assertIsNotNone(transcription.route_factory)
+
     def test_transcription_settings_disable_unavailable_cuda_and_compute_types(self):
         env = environment(build_plugin_registry(ALL))
         settings = AppSettings().to_public_dict()
