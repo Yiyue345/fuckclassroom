@@ -749,6 +749,43 @@ def build_plugin():
             with self.assertRaisesRegex(PluginManagerError, "不兼容"):
                 manager.enable("future_rpc")
 
+    def test_registry_in_process_manifest_accepts_null_rpc_version(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "lab_selection"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "lab_selection",
+                        "name": "实验课选课",
+                        "api_version": PLUGIN_API_VERSION,
+                        "execution": "in_process",
+                        "route_prefix": None,
+                        "rpc_api_version": None,
+                        "rpc_permissions": [],
+                        "requires": ["core_ui"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='lab_selection', name='实验课选课', requires=('core_ui',))\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+
+            descriptor = manager.descriptor_map()["lab_selection"]
+
+            self.assertEqual(descriptor.execution, "in_process")
+            self.assertEqual(descriptor.route_prefix, "")
+            self.assertEqual(descriptor.rpc_api_version, PLUGIN_RPC_API_VERSION)
+            self.assertEqual(descriptor.rpc_permissions, ())
+            self.assertTrue(manager.compatibility_status(descriptor)["compatible"])
+
     def test_rpc_fields_are_rejected_for_in_process_plugins(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
