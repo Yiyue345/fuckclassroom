@@ -9,6 +9,7 @@ from unittest.mock import patch
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.plugins.transcription.engine import (
     LocalTranscriptionService,
+    _MODEL_CACHE,
     _transcription_slot,
 )
 from fuckclassroom.plugins.transcription.environment import (
@@ -190,6 +191,127 @@ class AsrModelManagementTests(unittest.TestCase):
 
         self.assertEqual((device, compute_type), ("cuda", "float16"))
         self.assertFalse(any(level == "warning" for level, _ in messages))
+
+    def test_get_model_uses_resolved_runtime_and_logs_effective_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = AppConfig(data_dir=Path(directory))
+            config.asr_device = "auto"
+            config.asr_compute_type = "float16"
+            service = LocalTranscriptionService(config)
+            progress = _Progress()
+            captured = {}
+
+            class FakeWhisperModel:
+                def __init__(self, model_path, **kwargs):
+                    captured["model_path"] = model_path
+                    captured.update(kwargs)
+
+            fake_whisper = ModuleType("faster_whisper")
+            fake_whisper.WhisperModel = FakeWhisperModel  # type: ignore[attr-defined]
+            capabilities = AsrRuntimeCapabilities(
+                cpu_compute_types=("int8", "float32", "default"),
+                cuda_compute_types=(),
+                cuda_available=False,
+                cuda_reason="CUDA unavailable",
+                cuda_device_count=0,
+                auto_device="cpu",
+                ctranslate2_version="test",
+            )
+
+            _MODEL_CACHE.clear()
+            try:
+                with (
+                    patch.dict("sys.modules", {"faster_whisper": fake_whisper}),
+                    patch(
+                        "fuckclassroom.plugins.transcription.environment.detect_asr_runtime",
+                        return_value=capabilities,
+                    ),
+                    patch.object(service, "_model_cache_identity", return_value="repo:test/model"),
+                    patch.object(service, "_ensure_model_files", return_value="snapshot"),
+                ):
+                    service._get_model(progress)
+            finally:
+                _MODEL_CACHE.clear()
+
+            self.assertEqual(captured["device"], "cpu")
+            self.assertEqual(captured["compute_type"], "int8")
+            self.assertEqual(config.asr_device, "auto")
+            self.assertEqual(config.asr_compute_type, "float16")
+            self.assertTrue(
+                any(
+                    "device=cpu" in message and "compute_type=int8" in message
+                    for _, message in progress.logs
+                )
+            )
+
+    def test_delete_alias_releases_all_cached_models_for_shared_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = AppConfig(data_dir=Path(directory))
+            service = LocalTranscriptionService(config)
+            repo_id = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+            repo_dir = (
+                config.asr_models_dir
+                / "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo"
+            )
+            repo_dir.mkdir(parents=True)
+            (repo_dir / "model.bin").write_bytes(b"model")
+            _MODEL_CACHE.clear()
+            _MODEL_CACHE[("repo:" + repo_id, "cuda", "float16", 1, 1, "x")] = object()
+            _MODEL_CACHE[("turbo", "cuda", "float16", 1, 1, "x")] = object()
+            _MODEL_CACHE[("large-v3-turbo", "cpu", "int8", 1, 1, "x")] = object()
+
+            try:
+                with (
+                    patch.object(service, "_validate_managed_model", return_value="turbo"),
+                    patch.object(service, "_model_repo_id", return_value=repo_id),
+                    patch.object(
+                        service,
+                        "_model_aliases_for_repo",
+                        return_value=("turbo", "large-v3-turbo"),
+                    ),
+                ):
+                    result = service.delete_model("turbo")
+                remaining = dict(_MODEL_CACHE)
+            finally:
+                _MODEL_CACHE.clear()
+
+            self.assertTrue(result["deleted"])
+            self.assertEqual(result["repo_id"], repo_id)
+            self.assertEqual(set(result["aliases"]), {"turbo", "large-v3-turbo"})
+            self.assertEqual(remaining, {})
+            self.assertFalse(repo_dir.exists())
+
+    def test_model_status_exposes_shared_repo_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot"
+            snapshot.mkdir()
+            for name in ("config.json", "model.bin", "tokenizer.json", "vocabulary.json"):
+                (snapshot / name).write_bytes(b"x")
+
+            fake_hub = ModuleType("huggingface_hub")
+            fake_hub.snapshot_download = lambda *args, **kwargs: str(snapshot)  # type: ignore[attr-defined]
+            service = LocalTranscriptionService(AppConfig(data_dir=root))
+            repo_id = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+
+            with (
+                patch.dict("sys.modules", {"huggingface_hub": fake_hub}),
+                patch.object(service, "_validate_managed_model", return_value="turbo"),
+                patch.object(service, "_model_repo_id", return_value=repo_id),
+                patch.object(
+                    service,
+                    "_model_aliases_for_repo",
+                    return_value=("turbo", "large-v3-turbo"),
+                ),
+            ):
+                status = service.model_status("turbo")
+
+            self.assertTrue(status["installed"])
+            self.assertEqual(status["repo_id"], repo_id)
+            self.assertEqual(
+                set(status["aliases"]),
+                {"turbo", "large-v3-turbo"},
+            )
 
     def test_process_proxy_exposes_model_management_calls(self) -> None:
         host = _FakeHost()
