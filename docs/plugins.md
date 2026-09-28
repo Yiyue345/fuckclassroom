@@ -296,6 +296,35 @@ PLUGIN_API_VERSION = 1
 
 当前应用版本来自 `fuckclassroom.__version__`，插件管理页会同时显示当前 FuckClassroom、Plugin API 与 RPC API 版本。
 
+## 插件移除 API
+
+后端提供独立的 JSON 接口用于后续前端接入：
+
+```http
+DELETE /api/plugins/{plugin_id}
+```
+
+删除成功返回：
+
+```json
+{
+  "ok": true,
+  "action": "remove",
+  "plugin_id": "example",
+  "name": "Example Plugin",
+  "version": "1.2.3",
+  "message": "插件 Example Plugin 已移除"
+}
+```
+
+约束：
+
+- 只能删除外部插件；内置插件返回 `409 Conflict`。
+- 插件仍被配置为启用或仍存在于当前 Runtime 时返回 `409 Conflict`，调用方应先停用并等待 Runtime 卸载。
+- 插件不存在返回 `404 Not Found`。
+- 插件配置为只读时返回 `409 Conflict`。
+- 成功删除时插件已不在 Runtime 中，因此接口不会额外触发热重载。
+
 ## Registry 下载器
 
 插件管理页提供“在线插件”入口，默认读取：
