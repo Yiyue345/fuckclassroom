@@ -17,7 +17,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -287,7 +287,15 @@ class PluginManager:
         self._save_selected(selected)
         return desired
 
-    def install_from_path(self, raw_path: str) -> PluginDescriptor:
+    def install_from_path(
+        self,
+        raw_path: str,
+        *,
+        replace: bool = False,
+        expected_id: str = "",
+        expected_version: str = "",
+        expected_runtime: Mapping[str, object] | None = None,
+    ) -> PluginDescriptor:
         self._ensure_mutable()
         value = raw_path.strip().strip('"')
         if not value:
@@ -308,17 +316,148 @@ class PluginManager:
                 raise PluginManagerError("只支持插件目录或 .zip 插件包")
 
             descriptor = self._read_external_manifest(root)
+            self._validate_registry_expectations(
+                descriptor,
+                expected_id=expected_id,
+                expected_version=expected_version,
+                expected_runtime=expected_runtime,
+            )
             if descriptor.id in {item.id for item in self.builtin_descriptors}:
                 raise PluginManagerError("不能覆盖内置插件")
+
             destination = self.plugin_dir / descriptor.id
-            if destination.exists():
+            if destination.exists() and not replace:
                 raise PluginManagerError(f"插件已存在：{descriptor.id}")
+            if replace and destination.exists():
+                if descriptor.id in self.desired_enabled():
+                    raise PluginManagerError("更新插件前请先停用该插件及依赖它的插件")
+
+            incoming = self.plugin_dir / f".{descriptor.id}.incoming-{uuid.uuid4().hex}"
+            backup = self.plugin_dir / f".{descriptor.id}.backup-{uuid.uuid4().hex}"
             try:
-                shutil.copytree(root, destination)
+                shutil.copytree(root, incoming)
+                prepared = self._read_external_manifest(incoming)
+                self._validate_registry_expectations(
+                    prepared,
+                    expected_id=expected_id,
+                    expected_version=expected_version,
+                    expected_runtime=expected_runtime,
+                )
+
+                if destination.exists():
+                    destination.replace(backup)
+                    try:
+                        incoming.replace(destination)
+                    except OSError:
+                        if backup.exists() and not destination.exists():
+                            backup.replace(destination)
+                        raise
+                    shutil.rmtree(backup, ignore_errors=True)
+                else:
+                    incoming.replace(destination)
+            except PluginManagerError:
+                raise
             except OSError as exc:
-                raise PluginManagerError(f"复制插件文件失败：{exc}") from exc
+                if backup.exists() and not destination.exists():
+                    try:
+                        backup.replace(destination)
+                    except OSError:
+                        pass
+                raise PluginManagerError(f"写入插件文件失败：{exc}") from exc
+            finally:
+                shutil.rmtree(incoming, ignore_errors=True)
+                if backup.exists() and destination.exists():
+                    shutil.rmtree(backup, ignore_errors=True)
 
         return self._read_external_manifest(self.plugin_dir / descriptor.id)
+
+    @staticmethod
+    def _validate_registry_expectations(
+        descriptor: PluginDescriptor,
+        *,
+        expected_id: str = "",
+        expected_version: str = "",
+        expected_runtime: Mapping[str, object] | None = None,
+    ) -> None:
+        if expected_id and descriptor.id != expected_id:
+            raise PluginManagerError(
+                f"插件包 ID {descriptor.id} 与 Registry 声明 {expected_id} 不一致"
+            )
+        if expected_version and descriptor.version != expected_version:
+            raise PluginManagerError(
+                f"插件包版本 {descriptor.version} 与 Registry 声明 {expected_version} 不一致"
+            )
+        if expected_runtime is None:
+            return
+
+        def mismatch(field: str, actual: object, expected: object) -> None:
+            if actual != expected:
+                raise PluginManagerError(
+                    f"插件包与 Registry 运行时声明不一致：{field} "
+                    f"(package={actual!r}, registry={expected!r})"
+                )
+
+        try:
+            expected_api = int(expected_runtime.get("api_version"))
+        except (TypeError, ValueError) as exc:
+            raise PluginManagerError("Registry api_version 无效") from exc
+        mismatch("api_version", int(descriptor.api_version), expected_api)
+        mismatch(
+            "app_requires",
+            descriptor.app_requires,
+            str(expected_runtime.get("app_requires") or ""),
+        )
+        mismatch(
+            "execution",
+            descriptor.execution,
+            str(expected_runtime.get("execution") or ""),
+        )
+        mismatch("entry", descriptor.entry, str(expected_runtime.get("entry") or ""))
+
+        raw_requires = expected_runtime.get("requires", [])
+        if not isinstance(raw_requires, list):
+            raise PluginManagerError("Registry requires 必须是数组")
+        mismatch("requires", tuple(descriptor.requires), tuple(str(item) for item in raw_requires))
+
+        raw_python = expected_runtime.get("python_requires", [])
+        if not isinstance(raw_python, list):
+            raise PluginManagerError("Registry python_requires 必须是数组")
+        expected_python: list[tuple[str, str, bool]] = []
+        for item in raw_python:
+            if not isinstance(item, Mapping):
+                raise PluginManagerError("Registry python_requires 项格式无效")
+            expected_python.append(
+                (
+                    str(item.get("requirement") or ""),
+                    str(item.get("import") or ""),
+                    bool(item.get("optional")),
+                )
+            )
+        actual_python = [
+            (item.requirement, item.import_name, bool(item.optional))
+            for item in descriptor.python_requirements
+        ]
+        mismatch("python_requires", tuple(actual_python), tuple(expected_python))
+
+        if descriptor.execution == "process":
+            mismatch(
+                "route_prefix",
+                descriptor.route_prefix,
+                str(expected_runtime.get("route_prefix") or ""),
+            )
+            try:
+                expected_rpc_api = int(expected_runtime.get("rpc_api_version"))
+            except (TypeError, ValueError) as exc:
+                raise PluginManagerError("Registry rpc_api_version 无效") from exc
+            mismatch("rpc_api_version", int(descriptor.rpc_api_version), expected_rpc_api)
+            raw_permissions = expected_runtime.get("rpc_permissions", [])
+            if not isinstance(raw_permissions, list):
+                raise PluginManagerError("Registry rpc_permissions 必须是数组")
+            mismatch(
+                "rpc_permissions",
+                tuple(descriptor.rpc_permissions),
+                tuple(str(item) for item in raw_permissions),
+            )
 
     def remove(self, plugin_id: str, *, current_enabled: Iterable[str] = ()) -> None:
         self._ensure_mutable()
@@ -813,6 +952,8 @@ class PluginManager:
             return []
         items: list[PluginDescriptor] = []
         for child in sorted(self.plugin_dir.iterdir()):
+            if child.name.startswith("."):
+                continue
             if not child.is_dir() or not (child / "plugin.json").is_file():
                 continue
             items.append(self._read_external_manifest(child))
