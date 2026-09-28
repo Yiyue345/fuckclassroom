@@ -116,6 +116,65 @@ def build_settings_context(services, request) -> dict[str, object]:
     }
 
 
+def build_model_settings_context(services, request) -> dict[str, object]:
+    del request
+    model_names = list(available_asr_models())
+    service = services.maybe("transcription_service")
+    if service is None:
+        return {
+            "asr_model_statuses": [
+                {
+                    "model": name,
+                    "installed": False,
+                    "size_bytes": 0,
+                    "size_label": "",
+                    "path": "",
+                }
+                for name in model_names
+            ],
+            "asr_model_status_error": "语音转写服务尚未启动",
+        }
+
+    try:
+        statuses = service.model_statuses()
+    except Exception as exc:  # Settings should remain usable when the worker is unavailable.
+        return {
+            "asr_model_statuses": [
+                {
+                    "model": name,
+                    "installed": False,
+                    "size_bytes": 0,
+                    "size_label": "",
+                    "path": "",
+                }
+                for name in model_names
+            ],
+            "asr_model_status_error": str(exc),
+        }
+
+    by_name = {
+        str(item.get("model") or ""): dict(item)
+        for item in statuses
+        if isinstance(item, dict)
+    }
+    return {
+        "asr_model_statuses": [
+            by_name.get(
+                name,
+                {
+                    "model": name,
+                    "installed": False,
+                    "size_bytes": 0,
+                    "size_label": "",
+                    "path": "",
+                },
+            )
+            for name in model_names
+        ],
+        "asr_model_status_error": "",
+    }
+
+
 def available_asr_models() -> tuple[str, ...]:
     try:
         from faster_whisper.utils import _MODELS as model_repositories
