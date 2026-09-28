@@ -78,8 +78,8 @@
             data-plugin-desired-enabled="{{ 'true' if plugin.desired_enabled else 'false' }}"
             data-plugin-current-enabled="{{ 'true' if plugin.current_enabled else 'false' }}"
             data-plugin-external="{{ 'false' if plugin.builtin else 'true' }}"
-            data-plugin-static-needs-action="{{ 'true' if (plugin.compatibility_state != 'compatible' or plugin.missing_required_dependencies or plugin.missing_optional_dependencies) else 'false' }}"
-            data-plugin-needs-action="{{ 'true' if (plugin.compatibility_state != 'compatible' or plugin.missing_required_dependencies or plugin.missing_optional_dependencies or plugin.restart_required) else 'false' }}"
+            data-plugin-static-needs-action="{{ 'true' if (plugin.compatibility_state != 'compatible' or plugin.missing_plugin_dependencies or plugin.missing_required_dependencies or plugin.missing_optional_dependencies) else 'false' }}"
+            data-plugin-needs-action="{{ 'true' if (plugin.compatibility_state != 'compatible' or plugin.missing_plugin_dependencies or plugin.missing_required_dependencies or plugin.missing_optional_dependencies or plugin.restart_required) else 'false' }}"
             data-plugin-locked="{{ 'true' if plugin.locked else 'false' }}"
             data-plugin-compatible="{{ 'true' if plugin.compatible else 'false' }}"
             data-plugin-compatibility-state="{{ plugin.compatibility_state }}"
@@ -109,7 +109,9 @@
                   <span class="plugin-summary-chip {{ 'green' if plugin.compatibility_severity == 'success' else ('amber' if plugin.compatibility_severity == 'warning' else 'red') }}"
                     title="{{ plugin.compatibility_message }}">{{ plugin.compatibility_label }}</span>
 
-                  {% if plugin.missing_required_dependencies %}
+                  {% if plugin.missing_plugin_dependencies %}
+                    <span class="plugin-summary-chip plugin-state-badge red" data-plugin-state-badge data-default-class="red" data-default-text="缺少插件依赖">缺少插件依赖</span>
+                  {% elif plugin.missing_required_dependencies %}
                     <span class="plugin-summary-chip plugin-state-badge red" data-plugin-state-badge data-default-class="red" data-default-text="缺少依赖">缺少依赖</span>
                   {% elif plugin.missing_optional_dependencies %}
                     <span class="plugin-summary-chip plugin-state-badge amber" data-plugin-state-badge data-default-class="amber" data-default-text="可选扩展">可选扩展</span>
@@ -271,7 +273,9 @@
           <section class="plugin-dependency-box">
             <header>
               <strong>依赖检查结果</strong>
-              {% if plugin.missing_required_dependencies %}
+              {% if plugin.missing_plugin_dependencies %}
+                <span class="plugin-detail-chip red">缺少插件依赖</span>
+              {% elif plugin.missing_required_dependencies %}
                 <span class="plugin-detail-chip red">缺少必需依赖</span>
               {% elif plugin.missing_optional_dependencies %}
                 <span class="plugin-detail-chip amber">缺少可选扩展</span>
@@ -279,6 +283,11 @@
                 <span class="plugin-detail-chip green">已就绪</span>
               {% endif %}
             </header>
+            {% if plugin.missing_plugin_dependencies %}
+              <div class="notice error plugin-detail-notice">
+                <span>缺少插件依赖：{{ plugin.missing_plugin_dependencies|join(", ") }}。请先安装这些插件后再启用当前插件。</span>
+              </div>
+            {% endif %}
             {% if plugin.dependencies %}
               <div class="plugin-dependency-list">
                 {% for dependency in plugin.dependencies %}
@@ -869,7 +878,15 @@
       if (disposed()) return;
       removePluginFromPage(id);
       finishOperation(true);
-      window.FuckClassroomUI?.showToast?.('插件已移除', payload.message || (name + ' 已移除'));
+      if (payload.cleanup_warning) {
+        window.FuckClassroomUI?.showToast?.(
+          '插件已移除，残留目录待清理',
+          payload.cleanup_warning,
+          true
+        );
+      } else {
+        window.FuckClassroomUI?.showToast?.('插件已移除', payload.message || (name + ' 已移除'));
+      }
 
       try {
         const refreshed = await refreshShellChrome();

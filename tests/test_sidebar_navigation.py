@@ -197,6 +197,10 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("finishOperation(true);", template)
         self.assertIn("const refreshed = await refreshShellChrome();", template)
         self.assertIn("插件已删除，但界面刷新失败", template)
+        self.assertIn("payload.cleanup_warning", template)
+        self.assertIn("插件已移除，残留目录待清理", template)
+        self.assertIn("plugin.missing_plugin_dependencies", template)
+        self.assertIn("缺少插件依赖", template)
         self.assertNotIn('action="/plugins/{{ plugin.id }}/remove"', template)
 
         self.assertIn('id="plugin-zip-button"', template)
@@ -217,6 +221,8 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("含 Ed25519 签名", registry_template)
         self.assertIn("安装时仍会执行 SHA-256 与 Ed25519 验证", registry_template)
         self.assertNotIn(">已签名</span>", registry_template)
+        self.assertIn("plugin.missing_plugin_dependencies", registry_template)
+        self.assertIn("补齐依赖前不能启用", registry_template)
 
         self.assertIn(
             "grid-template-columns: minmax(0, 1.24fr) minmax(440px, .76fr)",

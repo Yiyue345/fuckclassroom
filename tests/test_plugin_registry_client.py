@@ -32,13 +32,18 @@ class FakeRegistryClient(PluginRegistryClient):
             raise AssertionError(f"Unexpected Registry request: {url}") from exc
 
 
-def runtime(*, api_version: int = PLUGIN_API_VERSION, app_requires: str = ">=99"):
+def runtime(
+    *,
+    api_version: int = PLUGIN_API_VERSION,
+    app_requires: str = ">=99",
+    requires: list[str] | None = None,
+):
     return {
         "api_version": api_version,
         "app_requires": app_requires,
         "execution": "in_process",
         "entry": "plugin.py",
-        "requires": [],
+        "requires": list(requires or []),
         "python_requires": [],
         "route_prefix": None,
         "rpc_api_version": None,
@@ -139,6 +144,23 @@ class PluginRegistryClientTests(unittest.TestCase):
             self.assertEqual(row["action"], "install")
             self.assertEqual(row["compatibility_state"], "app_version_mismatch")
             self.assertEqual(row["compatibility_label"], "⚠ 主程序版本不满足")
+
+    def test_catalog_reports_missing_plugin_dependencies_before_install(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            responses = registry_responses()
+            key = "https://registry.example/api/v1/plugins/demo/versions/1.5.0.json"
+            responses[key] = {
+                **responses[key],
+                "runtime": runtime(requires=["base_plugin"]),
+            }
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            client = FakeRegistryClient(manager, responses)
+
+            rows = client.catalog()
+
+            self.assertEqual(rows[0]["required_plugins"], ["base_plugin"])
+            self.assertEqual(rows[0]["missing_plugin_dependencies"], ["base_plugin"])
+            self.assertEqual(rows[0]["action"], "install")
 
     def test_update_is_blocked_while_installed_plugin_is_active(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -464,6 +464,7 @@ class LocalTranscriptionService:
     def model_status(self, model_name: str) -> dict[str, object]:
         configured = self._validate_managed_model(model_name)
         repo_id = self._model_repo_id(configured)
+        aliases = self._model_aliases_for_repo(repo_id)
         try:
             from huggingface_hub import snapshot_download
         except ImportError as exc:
@@ -483,6 +484,8 @@ class LocalTranscriptionService:
         except Exception:
             return {
                 "model": configured,
+                "repo_id": repo_id,
+                "aliases": list(aliases),
                 "installed": False,
                 "size_bytes": 0,
                 "size_label": "",
@@ -493,6 +496,8 @@ class LocalTranscriptionService:
         size_bytes = self._snapshot_size(snapshot) if installed else 0
         return {
             "model": configured,
+            "repo_id": repo_id,
+            "aliases": list(aliases),
             "installed": installed,
             "size_bytes": size_bytes,
             "size_label": _format_bytes(size_bytes) if size_bytes else "",
@@ -535,8 +540,14 @@ class LocalTranscriptionService:
         repo_cache = self.config.asr_models_dir / cache_name
         lock_cache = self.config.asr_models_dir / ".locks" / cache_name
 
+        aliases = self._model_aliases_for_repo(repo_id)
+        cache_identity = f"repo:{repo_id}"
         with _MODEL_LOCK:
-            for key in [key for key in _MODEL_CACHE if key and key[0] == configured]:
+            for key in [
+                key
+                for key in _MODEL_CACHE
+                if key and (key[0] == cache_identity or key[0] in aliases)
+            ]:
                 _MODEL_CACHE.pop(key, None)
             gc.collect()
             existed = repo_cache.exists()
@@ -552,6 +563,8 @@ class LocalTranscriptionService:
 
         return {
             "model": configured,
+            "repo_id": repo_id,
+            "aliases": list(aliases),
             "deleted": existed,
         }
 
@@ -592,6 +605,27 @@ class LocalTranscriptionService:
             raise LocalTranscriptionError(f"不支持的 faster-whisper 模型：{model_name}")
         return str(repo_id)
 
+    def _model_aliases_for_repo(self, repo_id: str) -> tuple[str, ...]:
+        from .environment import available_asr_models
+
+        aliases: list[str] = []
+        for candidate in available_asr_models():
+            try:
+                if self._model_repo_id(candidate) == repo_id:
+                    aliases.append(candidate)
+            except LocalTranscriptionError:
+                continue
+        return tuple(aliases)
+
+    def _model_cache_identity(self, model_name: str) -> str:
+        local_candidate = Path(model_name).expanduser()
+        if local_candidate.is_dir():
+            try:
+                return f"path:{local_candidate.resolve()}"
+            except OSError:
+                return f"path:{local_candidate}"
+        return f"repo:{self._model_repo_id(model_name)}"
+
     @staticmethod
     def _validate_managed_model(model_name: str) -> str:
         configured = str(model_name or "").strip()
@@ -615,15 +649,28 @@ class LocalTranscriptionService:
                 "缺少 faster-whisper，请先重新安装 requirements.txt 中的依赖"
             ) from exc
 
-        effective_device = device or self.config.asr_device
-        if effective_device == "auto":
-            from .environment import resolve_auto_device
+        from .environment import resolve_asr_runtime_config
 
-            effective_device = resolve_auto_device()
-            _log(progress, f"自动选择 ASR 推理设备：{effective_device}", "info")
-        effective_compute_type = compute_type or self.config.asr_compute_type
+        requested_device = device or self.config.asr_device
+        requested_compute_type = compute_type or self.config.asr_compute_type
+        (
+            effective_device,
+            effective_compute_type,
+            runtime_messages,
+        ) = resolve_asr_runtime_config(
+            requested_device,
+            requested_compute_type,
+        )
+        for level, message in runtime_messages:
+            _log(progress, message, level)
+        _log(
+            progress,
+            f"本次 ASR 运行配置：device={effective_device}, "
+            f"compute_type={effective_compute_type}",
+            "info",
+        )
         key = (
-            self.config.asr_model,
+            self._model_cache_identity(self.config.asr_model),
             effective_device,
             effective_compute_type,
             self.config.asr_cpu_threads,

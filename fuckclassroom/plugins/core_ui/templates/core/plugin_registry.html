@@ -55,6 +55,9 @@
             {% else %}
               <span class="plugin-state-badge">SHA-256</span>
             {% endif %}
+            {% if plugin.missing_plugin_dependencies %}
+              <span class="plugin-state-badge amber">缺少插件依赖</span>
+            {% endif %}
             {% if plugin.status == "deprecated" %}
               <span class="plugin-state-badge amber">已弃用</span>
             {% endif %}
@@ -74,6 +77,11 @@
           {% if plugin.compatibility_message and plugin.compatibility_state != "compatible" %}
             <div class="notice {{ 'warning' if plugin.compatibility_severity == 'warning' else 'error' }} plugin-detail-notice">
               <span>{{ plugin.compatibility_message }}</span>
+            </div>
+          {% endif %}
+          {% if plugin.missing_plugin_dependencies %}
+            <div class="notice warning plugin-detail-notice">
+              <span>缺少插件依赖：{{ plugin.missing_plugin_dependencies|join(", ") }}。可以先下载安装，但补齐依赖前不能启用。</span>
             </div>
           {% endif %}
 
