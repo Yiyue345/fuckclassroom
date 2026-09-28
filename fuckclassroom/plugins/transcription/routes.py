@@ -13,7 +13,7 @@ def build_router(context) -> APIRouter:
 
     @router.post("/settings/transcription/models/{model_name}/download")
     def download_model(request: Request, model_name: str) -> Response:
-        result_url = "/settings#transcription-models"
+        result_url = "/settings#transcription"
 
         def worker(progress):
             transcription_service.download_model(model_name, progress=progress)
@@ -24,7 +24,7 @@ def build_router(context) -> APIRouter:
 
     @router.post("/settings/transcription/models/{model_name}/delete")
     def delete_model(request: Request, model_name: str) -> Response:
-        result_url = "/settings#transcription-models"
+        result_url = "/settings#transcription"
 
         def worker(progress):
             transcription_service.delete_model(model_name, progress=progress)
