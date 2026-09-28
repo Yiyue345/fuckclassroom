@@ -535,8 +535,14 @@ class LocalTranscriptionService:
         repo_cache = self.config.asr_models_dir / cache_name
         lock_cache = self.config.asr_models_dir / ".locks" / cache_name
 
+        aliases = self._model_aliases_for_repo(repo_id)
+        cache_identity = f"repo:{repo_id}"
         with _MODEL_LOCK:
-            for key in [key for key in _MODEL_CACHE if key and key[0] == configured]:
+            for key in [
+                key
+                for key in _MODEL_CACHE
+                if key and (key[0] == cache_identity or key[0] in aliases)
+            ]:
                 _MODEL_CACHE.pop(key, None)
             gc.collect()
             existed = repo_cache.exists()
@@ -552,6 +558,8 @@ class LocalTranscriptionService:
 
         return {
             "model": configured,
+            "repo_id": repo_id,
+            "aliases": list(aliases),
             "deleted": existed,
         }
 
