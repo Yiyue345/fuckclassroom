@@ -1037,10 +1037,25 @@ class PluginManager:
         elif route_prefix:
             raise PluginManagerError("route_prefix 仅适用于 execution=process 的插件")
 
-        try:
-            rpc_api_version = int(payload.get("rpc_api_version", PLUGIN_RPC_API_VERSION))
-        except (TypeError, ValueError) as exc:
-            raise PluginManagerError("plugin.json 的 rpc_api_version 必须是整数") from exc
+        raw_rpc_api_version = payload.get("rpc_api_version")
+        if execution == "process":
+            if raw_rpc_api_version is None:
+                raw_rpc_api_version = PLUGIN_RPC_API_VERSION
+            try:
+                rpc_api_version = int(raw_rpc_api_version)
+            except (TypeError, ValueError) as exc:
+                raise PluginManagerError("plugin.json 的 rpc_api_version 必须是整数") from exc
+            if rpc_api_version < 1:
+                raise PluginManagerError("plugin.json 的 rpc_api_version 必须大于等于 1")
+        else:
+            if raw_rpc_api_version is not None:
+                raise PluginManagerError(
+                    "rpc_api_version 仅适用于 execution=process 的插件；"
+                    "in_process 插件应省略该字段或设为 null"
+                )
+            # Keep the descriptor field concrete for backward-compatible status/UI code.
+            # The value is ignored for in-process plugins.
+            rpc_api_version = PLUGIN_RPC_API_VERSION
 
         rpc_permissions_payload = payload.get("rpc_permissions", [])
         if not isinstance(rpc_permissions_payload, list):
@@ -1057,9 +1072,9 @@ class PluginManager:
                 )
             if permission not in rpc_permissions:
                 rpc_permissions.append(permission)
-        if execution != "process" and (rpc_permissions or "rpc_api_version" in payload):
+        if execution != "process" and rpc_permissions:
             raise PluginManagerError(
-                "rpc_api_version/rpc_permissions 仅适用于 execution=process 的插件"
+                "rpc_permissions 仅适用于 execution=process 的插件"
             )
 
         return PluginDescriptor(
