@@ -147,13 +147,11 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("plugin-summary-side", template)
         self.assertIn("plugin-summary-chips", template)
         self.assertIn("plugin-summary-status-row", template)
-        self.assertIn("plugin-summary-helper", template)
         self.assertIn('data-plugin-runtime-label="{{ plugin.id }}"', template)
         self.assertIn('data-plugin-open-detail="{{ plugin.id }}"', template)
         self.assertIn("plugin.compatibility_label", template)
         self.assertIn("plugin.compatibility_severity", template)
         self.assertIn("plugin.compatibility_message", template)
-        self.assertIn("扩展能力", template)
         self.assertIn("可选扩展", template)
 
         # Detail cards follow the supplied large plugin detail panel.
@@ -176,6 +174,9 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn('data-plugin-remove="{{ plugin.id }}"', template)
         self.assertIn("const removeButtons = Array.from(document.querySelectorAll('[data-plugin-remove]'))", template)
         self.assertIn("function removePluginFromPage(id)", template)
+        self.assertIn("function syncRemoveButtons(id, desiredEnabled, currentEnabled, options = {})", template)
+        self.assertIn("const disabled = !mutable || desiredEnabled || currentEnabled || busy", template)
+        self.assertIn("syncRemoveButtons(id, desiredEnabled, currentEnabled, { busy })", template)
         self.assertIn("rows.splice(rowIndex, 1)", template)
         self.assertIn("details.splice(detailIndex, 1)", template)
         self.assertIn("method: 'DELETE'", template)
@@ -274,7 +275,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260928-2",
+            "/plugins/core_ui/static/core_ui.css?v=20260928-3",
             registry.stylesheets,
         )
         self.assertIn(
