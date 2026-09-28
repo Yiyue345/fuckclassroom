@@ -50,7 +50,7 @@ def build_plugin() -> PluginSpec:
             UIAsset("/static/vendor/hls.min.js?v=1.7.3", pages=("course_detail",)),
             UIAsset("course_media.css?v=20260922-1", "style", ("course_detail",)),
             UIAsset("course_media_fit.css?v=20260922-1", "style", ("course_detail",)),
-            UIAsset("course_media.js?v=20260927-1", pages=("course_detail",)),
+            UIAsset("course_media.js?v=20260928-1", pages=("course_detail",)),
             UIAsset("course_media_fit.js?v=20260927-1", pages=("course_detail",)),
         ),
         name="课程录播",
