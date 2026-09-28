@@ -108,11 +108,89 @@ def detect_asr_runtime() -> AsrRuntimeCapabilities:
     )
 
 
+_MODEL_DOWNLOAD_SIZE_LABELS = {
+    "tiny": "约 70 MB",
+    "tiny.en": "约 70 MB",
+    "base": "约 130 MB",
+    "base.en": "约 130 MB",
+    "small": "约 440 MB",
+    "small.en": "约 440 MB",
+    "medium": "约 1.4 GB",
+    "medium.en": "约 1.4 GB",
+    "large-v1": "约 2.8 GB",
+    "large-v2": "约 2.8 GB",
+    "large-v3": "约 2.8 GB",
+    "large-v3-turbo": "约 1.6 GB",
+    "turbo": "约 1.6 GB",
+}
+
+
 def build_settings_context(services, request) -> dict[str, object]:
-    del services, request
-    return {
+    context = {
         "asr_runtime": detect_asr_runtime().to_context(),
         "asr_models": list(available_asr_models()),
+        "asr_model_size_labels": dict(_MODEL_DOWNLOAD_SIZE_LABELS),
+    }
+    context.update(build_model_settings_context(services, request))
+    return context
+
+
+def build_model_settings_context(services, request) -> dict[str, object]:
+    del request
+    model_names = list(available_asr_models())
+    service = services.maybe("transcription_service")
+    if service is None:
+        return {
+            "asr_model_statuses": [
+                {
+                    "model": name,
+                    "installed": False,
+                    "size_bytes": 0,
+                    "size_label": "",
+                    "path": "",
+                }
+                for name in model_names
+            ],
+            "asr_model_status_error": "语音转写服务尚未启动",
+        }
+
+    try:
+        statuses = service.model_statuses()
+    except Exception as exc:  # Settings should remain usable when the worker is unavailable.
+        return {
+            "asr_model_statuses": [
+                {
+                    "model": name,
+                    "installed": False,
+                    "size_bytes": 0,
+                    "size_label": "",
+                    "path": "",
+                }
+                for name in model_names
+            ],
+            "asr_model_status_error": str(exc),
+        }
+
+    by_name = {
+        str(item.get("model") or ""): dict(item)
+        for item in statuses
+        if isinstance(item, dict)
+    }
+    return {
+        "asr_model_statuses": [
+            by_name.get(
+                name,
+                {
+                    "model": name,
+                    "installed": False,
+                    "size_bytes": 0,
+                    "size_label": "",
+                    "path": "",
+                },
+            )
+            for name in model_names
+        ],
+        "asr_model_status_error": "",
     }
 
 

@@ -22,6 +22,47 @@ class TranscriptionProcessProxy:
     def __init__(self, host: ProcessPluginHost) -> None:
         self.host = host
 
+    def model_statuses(self) -> list[dict[str, object]]:
+        try:
+            payload = self.host.call_sync(
+                "transcription.model_statuses",
+                {},
+                timeout=60,
+            )
+        except ProcessPluginError as exc:
+            raise LocalTranscriptionError(str(exc)) from exc
+        if not isinstance(payload, list):
+            raise LocalTranscriptionError("语音模型状态返回格式错误")
+        return [dict(item) for item in payload if isinstance(item, dict)]
+
+    def download_model(self, model_name: str, progress=None) -> dict[str, object]:
+        try:
+            payload = self.host.call_sync(
+                "transcription.download_model",
+                {"model": model_name},
+                progress=progress,
+                timeout=8 * 60 * 60,
+            )
+        except ProcessPluginError as exc:
+            raise LocalTranscriptionError(str(exc)) from exc
+        if not isinstance(payload, dict):
+            raise LocalTranscriptionError("语音模型下载返回格式错误")
+        return dict(payload)
+
+    def delete_model(self, model_name: str, progress=None) -> dict[str, object]:
+        try:
+            payload = self.host.call_sync(
+                "transcription.delete_model",
+                {"model": model_name},
+                progress=progress,
+                timeout=120,
+            )
+        except ProcessPluginError as exc:
+            raise LocalTranscriptionError(str(exc)) from exc
+        if not isinstance(payload, dict):
+            raise LocalTranscriptionError("语音模型删除返回格式错误")
+        return dict(payload)
+
     def transcribe_url(
         self,
         video_url: str,

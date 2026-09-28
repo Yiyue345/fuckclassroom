@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% set active_system = "common" %}
+{% set active_nav = "plugins" %}
+
+{% block title %}在线插件 · 学业助手{% endblock %}
+{% block page_title %}在线插件{% endblock %}
+
+{% block content %}
+<div class="plugin-manager-page plugin-market-shell">
+  <header class="plugin-page-head">
+    <div>
+      <a class="eyebrow-link" href="/plugins">← 返回已安装插件</a>
+      <h1>在线插件</h1>
+      <p>从 Registry 选择最高兼容稳定版；下载后校验大小、SHA-256，并在提供签名时验证 Publisher Ed25519 签名。</p>
+    </div>
+  </header>
+
+  {% if error %}
+    <div class="notice error plugin-page-notice"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>
+  {% endif %}
+  {% if notice %}
+    <div class="notice success plugin-page-notice"><svg class="icon"><use href="/static/icons.svg#circle-check"></use></svg><span>{{ notice }}</span></div>
+  {% endif %}
+  {% if not plugin_config_mutable %}
+    <div class="notice warning plugin-page-notice">
+      <svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg>
+      <span>当前插件配置为只读，只能浏览 Registry，不能安装或更新。</span>
+    </div>
+  {% endif %}
+
+  <section class="plugin-market-meta surface">
+    <span>Registry v1 · Stable channel</span>
+    <span class="mono">{{ registry_url }}</span>
+  </section>
+
+  {% if registry_plugins %}
+    <section class="plugin-market-grid" aria-label="Registry 插件">
+      {% for plugin in registry_plugins %}
+        <article class="plugin-market-card surface">
+          <header class="plugin-market-head">
+            <span class="plugin-market-icon">{{ plugin.name[:1] }}</span>
+            <div class="plugin-market-title">
+              <strong>{{ plugin.name }}</strong>
+              <span class="mono">{{ plugin.id }} · {{ plugin.publisher }}{% if plugin.official %} · 官方{% endif %}</span>
+            </div>
+          </header>
+
+          <p class="plugin-market-summary">{{ plugin.summary or "该插件未提供简介。" }}</p>
+
+          <div class="plugin-market-badges">
+            <span class="plugin-state-badge {{ 'green' if plugin.compatibility_severity == 'success' else ('amber' if plugin.compatibility_severity == 'warning' else 'red') }}"
+              title="{{ plugin.compatibility_message }}">{{ plugin.compatibility_label }}</span>
+            {% if plugin.signed %}
+              <span class="plugin-state-badge green">已签名</span>
+            {% else %}
+              <span class="plugin-state-badge">SHA-256</span>
+            {% endif %}
+            {% if plugin.status == "deprecated" %}
+              <span class="plugin-state-badge amber">已弃用</span>
+            {% endif %}
+          </div>
+
+          <div class="plugin-market-version">
+            <div>
+              <span>本地版本</span>
+              <strong class="mono">{{ plugin.installed_version or "未安装" }}</strong>
+            </div>
+            <div>
+              <span>可安装版本</span>
+              <strong class="mono">{{ ("v" ~ plugin.target_version) if plugin.target_version else "无" }}{% if plugin.channel %} · {{ plugin.channel }}{% endif %}</strong>
+            </div>
+          </div>
+
+          {% if plugin.compatibility_message and plugin.compatibility_state != "compatible" %}
+            <div class="notice {{ 'warning' if plugin.compatibility_severity == 'warning' else 'error' }} plugin-detail-notice">
+              <span>{{ plugin.compatibility_message }}</span>
+            </div>
+          {% endif %}
+
+          <div class="plugin-market-actions">
+            <span class="mono">{{ plugin.released_at or "" }}</span>
+            {% if plugin.action in ["install", "update"] %}
+              <form method="post" action="/plugins/registry/{{ plugin.id }}/install">
+                <button class="plugin-market-install" type="submit"
+                  {% if not plugin_config_mutable or plugin.update_blocked %}disabled{% endif %}
+                  title="{% if plugin.update_blocked %}更新前请先停用插件及依赖它的插件{% elif not plugin_config_mutable %}当前插件配置为只读{% else %}{{ '更新插件' if plugin.action == 'update' else '下载并安装插件' }}{% endif %}">
+                  {{ "更新" if plugin.action == "update" else "安装" }}
+                </button>
+              </form>
+            {% elif plugin.action == "installed" %}
+              <button class="plugin-market-install" type="button" disabled>已安装</button>
+            {% else %}
+              <button class="plugin-market-install" type="button" disabled>不可安装</button>
+            {% endif %}
+          </div>
+        </article>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="plugin-market-empty surface">
+      <strong>Registry 暂无已发布插件</strong>
+      <span>草稿不会进入公开 Index。插件 Release 被 Registry 导入后会自动出现在这里，不需要更新客户端。</span>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

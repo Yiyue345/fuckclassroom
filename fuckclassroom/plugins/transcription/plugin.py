@@ -27,6 +27,11 @@ def build_settings_context(services, request):
     return build(services, request)
 
 
+def build_routes(context: PluginContext):
+    from .routes import build_router
+    return build_router(context)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="transcription",
@@ -34,6 +39,7 @@ def build_plugin() -> PluginSpec:
         order=30,
         requires=("processing",),
         service_factory=setup_services,
+        route_factory=build_routes,
         startup=startup,
         shutdown=shutdown,
         template_dir=PLUGIN_DIR / "templates",

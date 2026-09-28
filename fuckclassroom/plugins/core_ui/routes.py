@@ -15,6 +15,7 @@ from ...core.plugins import PluginContext
 from ...core.tasks import cancel_registered_task
 from ...web.responses import task_started_response
 from ..manager import PluginManagerError
+from ..registry_client import PluginRegistryClient, PluginRegistryError
 from ..rpc import PLUGIN_RPC_API_VERSION
 
 
@@ -44,6 +45,7 @@ def build_router(context: PluginContext) -> APIRouter:
     credential_store = services.get("credential_store")
     verification_broker = services.get("verification_broker")
     plugin_manager = services.get("plugin_manager")
+    registry_client = PluginRegistryClient(plugin_manager)
     plugin_reload = services.maybe("plugin_reload")
     plugin_reload_background = services.maybe("plugin_reload_background")
     plugin_reload_status = services.maybe("plugin_reload_status")
@@ -135,6 +137,111 @@ def build_router(context: PluginContext) -> APIRouter:
                     or any(bool(item.get("restart_required")) for item in rows),
             },
         )
+
+    @router.get("/plugins/registry", response_class=HTMLResponse)
+    def plugin_registry_page(request: Request) -> HTMLResponse:
+        error = request.query_params.get("error")
+        rows: list[dict[str, object]] = []
+        try:
+            rows = registry_client.catalog(
+                current_enabled=plugin_registry.plugin_ids,
+            )
+        except (PluginRegistryError, PluginManagerError) as exc:
+            error = str(exc)
+        return templates.TemplateResponse(
+            request,
+            "core/plugin_registry.html",
+            {
+                "registry_plugins": rows,
+                "registry_url": registry_client.registry_url,
+                "plugin_config_mutable": plugin_manager.mutable,
+                "notice": request.query_params.get("notice"),
+                "error": error,
+            },
+        )
+
+    @router.get("/api/plugins/registry")
+    def plugin_registry_api() -> JSONResponse:
+        try:
+            rows = registry_client.catalog(
+                current_enabled=plugin_registry.plugin_ids,
+            )
+        except (PluginRegistryError, PluginManagerError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=502)
+        return JSONResponse(
+            {
+                "registry_url": registry_client.registry_url,
+                "plugins": rows,
+            }
+        )
+
+    @router.post("/plugins/registry/{plugin_id}/install")
+    def install_registry_plugin(request: Request, plugin_id: str) -> Response:
+        if not plugin_manager.mutable:
+            message = "当前插件配置为只读，不能从 Registry 安装插件"
+            if "application/json" in request.headers.get("accept", ""):
+                return JSONResponse({"detail": message}, status_code=409)
+            return RedirectResponse(
+                f"/plugins/registry?error={quote(message)}",
+                status_code=303,
+            )
+        try:
+            plan = registry_client.resolve_install_plan(
+                plugin_id,
+                current_enabled=plugin_registry.plugin_ids,
+            )
+        except (PluginRegistryError, PluginManagerError) as exc:
+            if "application/json" in request.headers.get("accept", ""):
+                return JSONResponse({"detail": str(exc)}, status_code=409)
+            return RedirectResponse(
+                f"/plugins/registry?error={quote(str(exc))}",
+                status_code=303,
+            )
+
+        if plan.action not in {"install", "update"}:
+            message = (
+                "插件已是当前可安装的最新版本"
+                if plan.action == "installed"
+                else plan.compatibility_message or "当前没有可安装版本"
+            )
+            if "application/json" in request.headers.get("accept", ""):
+                return JSONResponse({"detail": message}, status_code=409)
+            return RedirectResponse(
+                f"/plugins/registry?error={quote(message)}",
+                status_code=303,
+            )
+        if plan.update_blocked:
+            message = "更新前请先停用该插件及依赖它的插件，等待 Runtime 卸载完成"
+            if "application/json" in request.headers.get("accept", ""):
+                return JSONResponse({"detail": message}, status_code=409)
+            return RedirectResponse(
+                f"/plugins/registry?error={quote(message)}",
+                status_code=303,
+            )
+
+        current_enabled = tuple(plugin_registry.plugin_ids)
+
+        def worker(progress):
+            descriptor, action, signed = registry_client.install(
+                plugin_id,
+                current_enabled=current_enabled,
+                progress=progress,
+            )
+            verification = "SHA-256 + Ed25519" if signed else "SHA-256"
+            action_text = "更新" if action == "update" else "安装"
+            progress.log(
+                f"{action_text}完成：{descriptor.id}@{descriptor.version}，完整性校验：{verification}"
+            )
+            return (
+                f"/plugins/registry?notice="
+                f"{quote(f'{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用')}"
+            )
+
+        task = task_manager.start(
+            f"{'更新' if plan.action == 'update' else '下载'}插件 · {plan.name}",
+            worker,
+        )
+        return task_started_response(request, task, "/plugins/registry")
 
     def plugin_action_response(
         request: Request,

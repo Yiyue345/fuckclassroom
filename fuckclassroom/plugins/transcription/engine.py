@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gc
+import shutil
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -95,19 +97,19 @@ class LocalTranscriptionService:
                     export_path=export_path,
                 )
 
-        _report(progress, 4, "正在准备本地语音识别模型")
-        using_cpu_fallback = False
-        try:
-            model = self._get_model(progress)
-        except LocalTranscriptionError as exc:
-            if not self._should_fallback_to_cpu(exc):
-                raise
-            model = self._load_cpu_fallback_model(progress, exc)
-            using_cpu_fallback = True
-        _clear_detail(progress)
-
         duration_hint = max(0.0, float(duration_hint_seconds or 0.0))
         with _transcription_slot(self.config.asr_max_concurrent_tasks, progress):
+            _report(progress, 4, "正在准备本地语音识别模型")
+            using_cpu_fallback = False
+            try:
+                model = self._get_model(progress)
+            except LocalTranscriptionError as exc:
+                if not self._should_fallback_to_cpu(exc):
+                    raise
+                model = self._load_cpu_fallback_model(progress, exc)
+                using_cpu_fallback = True
+            _clear_detail(progress)
+
             try:
                 lines, duration = self._transcribe_with_model(
                     model,
@@ -454,6 +456,151 @@ class LocalTranscriptionService:
         temporary.replace(export_path)
         return export_path
 
+    def model_statuses(self) -> list[dict[str, object]]:
+        from .environment import available_asr_models
+
+        return [self.model_status(model) for model in available_asr_models()]
+
+    def model_status(self, model_name: str) -> dict[str, object]:
+        configured = self._validate_managed_model(model_name)
+        repo_id = self._model_repo_id(configured)
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as exc:
+            raise LocalTranscriptionError(
+                "缺少模型管理依赖，请重新安装 requirements.txt"
+            ) from exc
+
+        try:
+            snapshot = Path(
+                snapshot_download(
+                    repo_id,
+                    cache_dir=str(self.config.asr_models_dir),
+                    allow_patterns=_MODEL_ALLOW_PATTERNS,
+                    local_files_only=True,
+                )
+            )
+        except Exception:
+            return {
+                "model": configured,
+                "installed": False,
+                "size_bytes": 0,
+                "size_label": "",
+                "path": "",
+            }
+
+        installed = self._snapshot_complete(snapshot)
+        size_bytes = self._snapshot_size(snapshot) if installed else 0
+        return {
+            "model": configured,
+            "installed": installed,
+            "size_bytes": size_bytes,
+            "size_label": _format_bytes(size_bytes) if size_bytes else "",
+            "path": str(snapshot) if installed else "",
+        }
+
+    def download_model(
+        self,
+        model_name: str,
+        progress: ProgressCallback | None = None,
+    ) -> dict[str, object]:
+        configured = self._validate_managed_model(model_name)
+        _report(progress, 0, f"正在准备下载语音模型 {configured}")
+        with _MODEL_LOCK:
+            self.config.asr_models_dir.mkdir(parents=True, exist_ok=True)
+            self._ensure_model_files(
+                _ModelDownloadProgress(progress),
+                model_name=configured,
+            )
+        status = self.model_status(configured)
+        if not status["installed"]:
+            raise LocalTranscriptionError(f"语音模型 {configured} 下载后仍未检测到完整缓存")
+        _report(
+            progress,
+            100,
+            f"语音模型 {configured} 下载完成"
+            + (f"（{status['size_label']}）" if status["size_label"] else ""),
+        )
+        return status
+
+    def delete_model(self, model_name: str) -> dict[str, object]:
+        configured = self._validate_managed_model(model_name)
+        repo_id = self._model_repo_id(configured)
+
+        with _TRANSCRIPTION_CONDITION:
+            if _ACTIVE_TRANSCRIPTIONS > 0:
+                raise LocalTranscriptionError("当前有本地转写任务运行，完成或取消后再删除模型")
+
+        cache_name = "models--" + repo_id.replace("/", "--")
+        repo_cache = self.config.asr_models_dir / cache_name
+        lock_cache = self.config.asr_models_dir / ".locks" / cache_name
+
+        with _MODEL_LOCK:
+            for key in [key for key in _MODEL_CACHE if key and key[0] == configured]:
+                _MODEL_CACHE.pop(key, None)
+            gc.collect()
+            existed = repo_cache.exists()
+            try:
+                if repo_cache.exists():
+                    shutil.rmtree(repo_cache)
+                if lock_cache.exists():
+                    shutil.rmtree(lock_cache)
+            except OSError as exc:
+                raise LocalTranscriptionError(
+                    f"删除语音模型 {configured} 失败：{exc}"
+                ) from exc
+
+        return {
+            "model": configured,
+            "deleted": existed,
+        }
+
+    @staticmethod
+    def _snapshot_complete(snapshot: Path) -> bool:
+        required = ("config.json", "model.bin", "tokenizer.json")
+        if not all((snapshot / name).is_file() for name in required):
+            return False
+        return any(snapshot.glob("vocabulary.*"))
+
+    @staticmethod
+    def _snapshot_size(snapshot: Path) -> int:
+        total = 0
+        seen: set[str] = set()
+        for item in snapshot.rglob("*"):
+            if not item.is_file():
+                continue
+            try:
+                resolved = str(item.resolve())
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                total += item.stat().st_size
+            except OSError:
+                continue
+        return total
+
+    @staticmethod
+    def _model_repo_id(model_name: str) -> str:
+        try:
+            from faster_whisper.utils import _MODELS as model_repositories
+        except ImportError as exc:
+            raise LocalTranscriptionError(
+                "缺少 faster-whisper，请先重新安装 requirements.txt 中的依赖"
+            ) from exc
+        repo_id = model_repositories.get(model_name)
+        if not repo_id:
+            raise LocalTranscriptionError(f"不支持的 faster-whisper 模型：{model_name}")
+        return str(repo_id)
+
+    @staticmethod
+    def _validate_managed_model(model_name: str) -> str:
+        configured = str(model_name or "").strip()
+        from .environment import available_asr_models
+
+        if configured not in set(available_asr_models()):
+            raise LocalTranscriptionError(f"模型管理不支持该 faster-whisper 模型：{configured}")
+        return configured
+
     def _get_model(
         self,
         progress: ProgressCallback | None = None,
@@ -506,8 +653,13 @@ class LocalTranscriptionService:
             _MODEL_CACHE[key] = model
             return model
 
-    def _ensure_model_files(self, progress: ProgressCallback | None = None) -> str:
-        configured = self.config.asr_model
+    def _ensure_model_files(
+        self,
+        progress: ProgressCallback | None = None,
+        *,
+        model_name: str | None = None,
+    ) -> str:
+        configured = model_name or self.config.asr_model
         local_candidate = Path(configured).expanduser()
         if local_candidate.is_dir():
             return str(local_candidate)
@@ -649,6 +801,38 @@ class LocalTranscriptionService:
             )
         except Exception as exc:
             raise LocalTranscriptionError(f"语音模型下载完成但本地快照不可用：{exc}") from exc
+
+
+class _ModelDownloadProgress:
+    """Map model-detail progress to the standalone model task's main progress bar."""
+
+    def __init__(self, progress: ProgressCallback | None) -> None:
+        self.progress = progress
+
+    def __call__(self, percent: int, message: str) -> None:
+        _report(self.progress, percent, message)
+
+    def detail(self, percent: int, message: str) -> None:
+        _report(self.progress, percent, message)
+
+    def clear_detail(self) -> None:
+        clear = getattr(self.progress, "clear_detail", None)
+        if callable(clear):
+            clear()
+
+    def log(self, message: str, level: str = "info") -> None:
+        log = getattr(self.progress, "log", None)
+        if callable(log):
+            log(message, level)
+
+    @property
+    def cancel_requested(self) -> bool:
+        return bool(getattr(self.progress, "cancel_requested", False))
+
+    def raise_if_cancelled(self) -> None:
+        raise_if_cancelled = getattr(self.progress, "raise_if_cancelled", None)
+        if callable(raise_if_cancelled):
+            raise_if_cancelled()
 
 
 class _TranscriptionProgress:
