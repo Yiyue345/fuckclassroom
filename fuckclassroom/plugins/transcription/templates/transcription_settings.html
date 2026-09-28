@@ -231,9 +231,18 @@
   const taskProgress = picker.querySelector('[data-asr-model-task-progress]');
   if (!input || !trigger || !menu || !selectedName || !selectedMeta) return;
 
+  const pageRuntime = window.FuckClassroomPage?.current?.();
+  const pageSignal = pageRuntime?.signal;
+  const listenerOptions = pageSignal ? { signal: pageSignal } : undefined;
   const rows = () => Array.from(menu.querySelectorAll('[data-asr-model-row]'));
   const actions = () => Array.from(menu.querySelectorAll('[data-asr-model-action]'));
-  const sleep = (ms) => new Promise(resolve => window.setTimeout(resolve, ms));
+  const sleep = pageRuntime?.sleep
+    ? (ms) => pageRuntime.sleep(ms)
+    : (ms) => new Promise(resolve => window.setTimeout(resolve, ms));
+  const schedule = pageRuntime?.setTimeout
+    ? (callback, ms) => pageRuntime.setTimeout(callback, ms)
+    : (callback, ms) => window.setTimeout(callback, ms);
+  const disposed = () => Boolean(pageSignal?.aborted || !picker.isConnected);
 
   const setOpen = (open) => {
     trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -296,7 +305,11 @@
     try {
       const response = await fetch(
         '/settings/transcription/models/' + encodeURIComponent(model) + '/' + action,
-        { method: 'POST', headers: { Accept: 'application/json' } },
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+          signal: pageSignal,
+        },
       );
       if (!response.ok) {
         let message = action === 'download' ? '模型下载失败' : '模型删除失败';
@@ -310,10 +323,11 @@
       const started = await response.json();
       if (!started.status_url) throw new Error('模型任务没有返回状态地址');
 
-      while (true) {
+      while (!disposed()) {
         const taskResponse = await fetch(started.status_url, {
           headers: { Accept: 'application/json' },
           cache: 'no-store',
+          signal: pageSignal,
         });
         if (!taskResponse.ok) throw new Error('读取模型任务进度失败');
         const task = await taskResponse.json();
@@ -325,15 +339,16 @@
           const row = button.closest('[data-asr-model-row]');
           renderRowState(row, action === 'download');
           showTask(action === 'download' ? model + ' 下载完成' : model + ' 已删除', 100, 'success');
-          window.setTimeout(() => taskBox?.classList.add('hidden'), 1400);
+          schedule(() => taskBox?.classList.add('hidden'), 1400);
           return;
         }
         await sleep(600);
       }
     } catch (error) {
+      if (disposed() || error?.name === 'AbortError') return;
       showTask(error?.message || '模型任务失败', 100, 'error');
     } finally {
-      actions().forEach(item => { item.disabled = false; });
+      if (!disposed()) actions().forEach(item => { item.disabled = false; });
     }
   };
 
@@ -351,11 +366,11 @@
 
   document.addEventListener('click', event => {
     if (!picker.contains(event.target)) setOpen(false);
-  });
+  }, listenerOptions);
 
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape') setOpen(false);
-  });
+  }, listenerOptions);
 })();
 
 (() => {
