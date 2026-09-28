@@ -4,6 +4,14 @@
   const card = D.querySelector("[data-ppt-card]");
   if (!stage || !card) return;
 
+  const pageRuntime = window.FuckClassroomPage?.current?.();
+  const pageSignal = pageRuntime?.signal;
+  const schedule = pageRuntime?.setTimeout
+    ? (callback, delay) => pageRuntime.setTimeout(callback, delay)
+    : (callback, delay) => window.setTimeout(callback, delay);
+  const disposed = () => Boolean(pageSignal?.aborted || !stage.isConnected);
+  const pageFetch = (input, init = {}) => window.fetch(input, { ...init, signal: pageSignal });
+
   const scheduled = new Set();
   const pending = [];
   const MAX_PENDING_PAGES = 4;
@@ -36,7 +44,7 @@
       await navigator.clipboard.writeText(value);
       const previous = button.textContent;
       button.textContent = "已复制";
-      window.setTimeout(() => { button.textContent = previous; }, 1500);
+      schedule(() => { if (button.isConnected) button.textContent = previous; }, 1500);
     } catch (_) {
       window.prompt("复制二维码内容：", value);
     }
@@ -134,15 +142,15 @@
   }
 
   async function scanRequest(item) {
-    if (scannerUnavailable || currentLiveEndpoint(item.slideId) !== item.endpoint) return;
+    if (disposed() || scannerUnavailable || currentLiveEndpoint(item.slideId) !== item.endpoint) return;
     try {
-      const response = await fetch(item.endpoint, {
+      const response = await pageFetch(item.endpoint, {
         method: "POST",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
       });
       const payload = await response.json().catch(() => ({}));
-      if (currentLiveEndpoint(item.slideId) !== item.endpoint) return;
+      if (disposed() || currentLiveEndpoint(item.slideId) !== item.endpoint) return;
       if (!response.ok) {
         if (response.status === 503) {
           scannerUnavailable = true;
@@ -158,16 +166,17 @@
         || platformMatches[0];
       if (platformMatch) showMatch(platformMatch, item);
     } catch (error) {
+      if (disposed() || error?.name === "AbortError") return;
       console.warn("Live PPT QR scan failed:", error);
       showRequestError(error?.message || "请稍后重试。");
     }
   }
 
   async function drainQueue() {
-    if (draining || scannerUnavailable) return;
+    if (disposed() || draining || scannerUnavailable) return;
     draining = true;
     try {
-      while (pending.length && !scannerUnavailable) {
+      while (!disposed() && pending.length && !scannerUnavailable) {
         // QR tokens can rotate every few seconds, so always prefer the newest PPT snapshot.
         await scanRequest(pending.pop());
       }
@@ -177,7 +186,7 @@
   }
 
   function queuePage(page) {
-    if (scannerUnavailable || !page?.classList?.contains("live-ppt-slide")) return;
+    if (disposed() || scannerUnavailable || !page?.classList?.contains("live-ppt-slide")) return;
     const slideId = page.dataset.liveSlideId;
     if (!slideId) return;
     const endpoint = currentLiveEndpoint(slideId);
@@ -201,8 +210,11 @@
 
   stage.querySelectorAll(".live-ppt-slide").forEach(queuePage);
   D.querySelectorAll("[data-lesson-row]").forEach((row) => row.addEventListener("click", hideNotice));
-  D.addEventListener("academic:page-before-swap", () => {
+  const cleanupPage = () => {
     observer.disconnect();
     pending.length = 0;
-  }, { once: true });
+    scheduled.clear();
+  };
+  pageRuntime?.onDispose?.(cleanupPage);
+  D.addEventListener("academic:page-before-swap", cleanupPage, { once: true, signal: pageSignal });
 })();
