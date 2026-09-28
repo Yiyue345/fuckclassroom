@@ -175,7 +175,7 @@ button.plugin-manage-row:hover, summary.plugin-manage-row:hover { border-color: 
   .plugin-row { grid-template-columns: 38px minmax(0, 1fr); }
   .plugin-row-actions {
     grid-column: 2;
-    grid-template-columns: minmax(0, auto) 40px minmax(0, auto) 18px;
+    grid-template-columns: max-content 40px minmax(0, 1fr) 18px;
     grid-template-rows: 25px;
     justify-content: start;
     gap: 8px;
@@ -206,7 +206,7 @@ button.plugin-manage-row:hover, summary.plugin-manage-row:hover { border-color: 
   .plugin-result-count { margin-left: auto; }
   .plugin-list { gap: 12px; }
   .plugin-row { grid-template-columns: 38px minmax(0, 1fr); }
-  .plugin-row-actions { grid-column: 2; grid-template-columns: auto 40px auto 18px; grid-template-rows: 25px; justify-content: start; gap: 8px; margin-top: 2px; }
+  .plugin-row-actions { grid-column: 2; grid-template-columns: max-content 40px minmax(0, 1fr) 18px; grid-template-rows: 25px; justify-content: stretch; gap: 8px; margin-top: 2px; }
 }
 @media (max-width: 600px) {
   .plugin-page-head { min-height: 0; align-items: center; margin-bottom: 18px; }
@@ -219,7 +219,7 @@ button.plugin-manage-row:hover, summary.plugin-manage-row:hover { border-color: 
   .plugin-result-count { margin-left: 0; }
   .plugin-list-panel { padding: 10px; }
   .plugin-row { min-height: 0; padding: 14px 12px; }
-  .plugin-row-actions { grid-column: 1 / -1; grid-template-columns: auto 40px auto 18px; margin-top: 4px; }
+  .plugin-row-actions { grid-column: 1 / -1; grid-template-columns: max-content 40px minmax(0, 1fr) 18px; margin-top: 4px; }
   .plugin-detail { padding: 18px; }
   .plugin-detail-meta, .plugin-tech-grid { grid-template-columns: minmax(0, 1fr); }
   .plugin-dependency-row { grid-template-columns: 7px minmax(0, 1fr) auto; }
