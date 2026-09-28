@@ -278,11 +278,16 @@
       const visibleParams = new URLSearchParams(params);
       visibleParams.delete("page");
       if (!disposed()) {
-        history.replaceState(
-          { ...(history.state || {}), scrollY: window.scrollY },
-          "",
-          "/selection/catalog?" + visibleParams.toString()
-        );
+        const visibleUrl = "/selection/catalog?" + visibleParams.toString();
+        if (window.FuckClassroomShell?.replaceUrl) {
+          window.FuckClassroomShell.replaceUrl(visibleUrl, { scrollY: window.scrollY });
+        } else {
+          history.replaceState(
+            { ...(history.state || {}), scrollY: window.scrollY },
+            "",
+            visibleUrl
+          );
+        }
       }
       hideStatus();
     } catch (error) {
