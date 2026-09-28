@@ -235,7 +235,7 @@ class LiveClassroomTests(unittest.TestCase):
         self.assertIn("data-ppt-slides-url", detail)
         self.assertIn("进入直播", detail)
         self.assertIn("window.Hls", script)
-        self.assertIn("window.setTimeout(poll, 3000)", script)
+        self.assertIn("pageTimeout(poll, 3000)", script)
         self.assertIn('pptStage.style.aspectRatio', script)
         self.assertIn("snapshotSlides.length > exportSlides.length", script)
         self.assertIn("aspect-ratio: 16 / 9", styles)
