@@ -296,6 +296,29 @@ PLUGIN_API_VERSION = 1
 
 当前应用版本来自 `fuckclassroom.__version__`，插件管理页会同时显示当前 FuckClassroom、Plugin API 与 RPC API 版本。
 
+## Registry 下载器
+
+插件管理页提供“在线插件”入口，默认读取：
+
+```text
+https://yiyue345.github.io/f-classroom-plugin-website/api/v1/registry.json
+```
+
+开发或镜像环境可以通过 `FUCKCLASSROOM_PLUGIN_REGISTRY_URL` 覆盖入口。远程 Registry 必须使用 HTTPS；仅 loopback 本地开发允许 HTTP。
+
+客户端下载时不会直接采用 `latest_published`，而是依次读取版本详情，排除 yanked 和非 stable 版本，再按 Plugin API / RPC API 选择最高可加载 SemVer。主程序 `app_requires` 不满足只显示警告，不会单独阻止安装。
+
+安装流程会：
+
+1. 校验 Registry JSON 只能在同一 API Origin/路径下解析相对链接；
+2. 仅接受 GitHub Release HTTPS ZIP；
+3. 严格核对 Registry 声明的文件名、字节数与 SHA-256；
+4. Artifact 含 `ed25519-sha256-v1` 签名时，从 Publisher API 取得登记公钥并强制验签；
+5. 解压后再次核对 `plugin.json` 的 ID、版本和 runtime 声明与 Registry 记录一致；
+6. 新插件默认保持停用；更新已有插件时要求先停用插件及依赖它的插件，再进行同文件系统原子替换。
+
+下载与校验在任务中心执行，因此进度和错误会同时进入任务日志、控制台和本次启动日志文件。
+
 ## Manifest 懒加载
 
 `plugin.py` 只保留插件元数据以及轻量 hook。Service/Lifecycle/Route 实现都在 hook 被 runtime 调用时再 import，因此禁用插件不会仅仅因为 registry 枚举了全部内置插件就加载其实现模块。
