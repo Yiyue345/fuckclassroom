@@ -153,14 +153,19 @@ class SidebarNavigationTests(unittest.TestCase):
         )
         self.assertIn("applyFilters()", template)
         self.assertIn("selectPlugin(", template)
-        self.assertIn("fetch('/api/plugins/runtime-status'", template)
+        self.assertIn("pageFetch('/api/plugins/runtime-status'", template)
         self.assertIn(".plugin-manager-layout {", styles)
         self.assertIn(
             "grid-template-columns: minmax(0, 1.39fr) minmax(360px, 1fr)",
             styles,
         )
-        self.assertIn(".plugin-list-panel { height: 714px;", styles)
+        self.assertIn(".plugin-list-panel { container-type: inline-size; height: 714px; overflow-x: hidden;", styles)
         self.assertIn(".plugin-row.is-selected {", styles)
+        self.assertIn("box-sizing: border-box; grid-template-columns: 38px minmax(0, 1fr) minmax(164px, 176px)", styles)
+        self.assertIn(".plugin-row-actions > * { min-width: 0; }", styles)
+        self.assertIn("max-width: 100%; box-sizing: border-box;", styles)
+        self.assertIn("@container (max-width: 620px)", styles)
+        self.assertIn("grid-template-columns: max-content 40px minmax(0, 1fr) 18px", styles)
         self.assertIn(".plugin-detail-panel { position: sticky;", styles)
         self.assertIn(".plugin-add-button {", styles)
         self.assertIn("plugin-operation-status", template)
@@ -202,6 +207,12 @@ class SidebarNavigationTests(unittest.TestCase):
         )
         self.assertIn(".plugin-row-error {", styles)
         self.assertIn("if (activeOperationCount > 0)", template)
+        self.assertIn("window.FuckClassroomPage?.current?.()", template)
+        self.assertIn("function pageFetch(input, init = {})", template)
+        self.assertIn("if (disposed()) return;", template)
+        self.assertIn("error?.name === 'AbortError'", template)
+        self.assertIn("window.FuckClassroomShell?.navigate", template)
+        self.assertNotIn("window.location.href = '/plugins?notice='", template)
         self.assertIn(".plugin-operation-done {", styles)
         self.assertNotIn("本机路径", template)
         self.assertNotIn("外部插件包格式", template)
@@ -215,7 +226,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260927-1",
+            "/plugins/core_ui/static/core_ui.css?v=20260928-1",
             registry.stylesheets,
         )
         self.assertIn(
@@ -305,6 +316,9 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("function allowNavigation()", shell)
         self.assertIn("restoringHistory = true", shell)
         self.assertIn("history.go(historyIndex - targetHistoryIndex)", shell)
+        self.assertIn("function replaceUrl(url, state = {})", shell)
+        self.assertIn("displayedUrl = window.location.href", shell)
+        self.assertIn("window.FuckClassroomShell = Object.freeze({ navigate, initPage, replaceUrl })", shell)
         self.assertIn("window.FuckClassroomUI?.initPage?.(pageRoot)", shell)
         self.assertIn("function initPage(rootNode = document)", app)
         self.assertIn("data-inline-task", app)
@@ -312,7 +326,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("body.pjax-loading", styles)
         self.assertIn("/static/app.css?v=20260927-1", base)
         self.assertIn("/static/app.js?v=20260927-2", base)
-        self.assertIn("/static/shell.js?v=20260927-3", base)
+        self.assertIn("/static/shell.js?v=20260928-1", base)
 
     def test_selection_async_flows_share_pjax_page_lifecycle(self) -> None:
         selection_ui = Path(
@@ -333,9 +347,30 @@ class SidebarNavigationTests(unittest.TestCase):
 
         self.assertIn("while (!disposed())", selection_ui)
         self.assertIn("while (!disposed())", catalog)
-        self.assertIn("if (!disposed()) {\n        history.replaceState(", catalog)
+        self.assertIn("window.FuckClassroomShell?.replaceUrl", catalog)
+        self.assertIn("window.FuckClassroomShell.replaceUrl(visibleUrl", catalog)
         self.assertIn("selection_ui.js?v=20260927-2", plugin)
-        self.assertIn("selection_catalog.js?v=20260927-1", plugin)
+        self.assertIn("selection_catalog.js?v=20260928-1", plugin)
+
+    def test_course_media_async_flows_share_pjax_page_lifecycle(self) -> None:
+        media = Path(
+            "fuckclassroom/plugins/classroom/static/course_media.js"
+        ).read_text(encoding="utf-8")
+        plugin = Path(
+            "fuckclassroom/plugins/classroom/plugin.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("window.FuckClassroomPage?.current?.()", media)
+        self.assertIn("function pageFetch(input, init = {})", media)
+        self.assertIn("signal: pageSignal", media)
+        self.assertIn("pageRuntime?.onDispose?.(cleanupPage)", media)
+        self.assertIn("pptLoadToken += 1", media)
+        self.assertIn("videoLoadToken += 1", media)
+        self.assertIn("if (disposed() || token !== pptLoadToken)", media)
+        self.assertIn("if (disposed() || token !== videoLoadToken)", media)
+        self.assertNotIn("const pageController = new AbortController()", media)
+        self.assertNotIn("await fetch(", media)
+        self.assertIn("course_media.js?v=20260928-1", plugin)
 
     def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:
         template = Path("templates/base.html").read_text(encoding="utf-8")

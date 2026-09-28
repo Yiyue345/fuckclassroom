@@ -293,6 +293,22 @@
   let activeFilter = 'all';
   let selectedId = rows.find((row) => row.classList.contains('is-selected'))?.dataset.pluginId || rows[0]?.dataset.pluginId || '';
   const pendingToggleOperations = new Map();
+  const pageRuntime = window.FuckClassroomPage?.current?.();
+  const pageSignal = pageRuntime?.signal;
+  const pageTimeout = pageRuntime?.setTimeout
+    ? (callback, delay) => pageRuntime.setTimeout(callback, delay)
+    : (callback, delay) => window.setTimeout(callback, delay);
+  const pageClearTimeout = pageRuntime?.clearTimeout
+    ? (timer) => pageRuntime.clearTimeout(timer)
+    : (timer) => window.clearTimeout(timer);
+
+  function disposed() {
+    return Boolean(pageSignal?.aborted);
+  }
+
+  function pageFetch(input, init = {}) {
+    return window.fetch(input, { ...init, signal: pageSignal });
+  }
 
   function rowFor(id) {
     return rows.find((row) => row.dataset.pluginId === id) || null;
@@ -469,13 +485,17 @@
   searchInput?.addEventListener('input', applyFilters);
 
   async function refreshShellChrome() {
-    const response = await fetch('/plugins', {
+    if (disposed()) return;
+    const response = await pageFetch('/plugins', {
       headers: { Accept: 'text/html' },
       cache: 'no-store',
     });
-    if (!response.ok) return;
-    const documentCopy = new DOMParser().parseFromString(await response.text(), 'text/html');
+    if (!response.ok || disposed()) return;
+    const html = await response.text();
+    if (disposed()) return;
+    const documentCopy = new DOMParser().parseFromString(html, 'text/html');
     for (const selector of ['.sidebar-nav', '.session-list', '.top-actions .session-pair']) {
+      if (disposed()) return;
       const current = document.querySelector(selector);
       const next = documentCopy.querySelector(selector);
       if (current && next) current.replaceChildren(...Array.from(next.childNodes).map((node) => node.cloneNode(true)));
@@ -483,12 +503,14 @@
   }
 
   async function waitForRuntime() {
-    const response = await fetch('/api/plugins/runtime-status', {
+    if (disposed()) return null;
+    const response = await pageFetch('/api/plugins/runtime-status', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
     if (!response.ok) throw new Error('读取插件运行状态失败（' + response.status + '）');
     const status = await response.json();
+    if (disposed()) return null;
     syncCards(status);
     return status;
   }
@@ -522,12 +544,13 @@
 
       let configurationSaved = false;
       try {
-        const response = await fetch(form.action, {
+        const response = await pageFetch(form.action, {
           method: 'POST',
           headers: { Accept: 'application/json' },
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || '插件状态修改失败');
+        if (disposed()) return;
         configurationSaved = true;
 
         const desired = new Set(payload.desired_enabled || []);
@@ -536,13 +559,16 @@
         });
 
         const status = await waitForRuntime();
+        if (!status || disposed()) return;
         pendingToggleOperations.delete(id);
         syncCards(status);
         if (!status.last_error && !status.restart_required) {
           await refreshShellChrome();
+          if (disposed()) return;
         }
         finishOperation(!status.last_error);
       } catch (error) {
+        if (disposed() || error?.name === 'AbortError') return;
         const message = error instanceof Error ? error.message : String(error);
         pendingToggleOperations.delete(id);
         finishOperation(false);
@@ -552,8 +578,10 @@
         } else {
           try {
             const status = await waitForRuntime();
+            if (!status || disposed()) return;
             syncCards({ ...status, last_error: status.last_error || message });
-          } catch (_) {
+          } catch (runtimeError) {
+            if (disposed() || runtimeError?.name === 'AbortError') return;
             setPluginState(id, requestedEnabled, !requestedEnabled, { error: message });
           }
         }
@@ -575,7 +603,7 @@
 
   function showOperationStatus(state) {
     if (!operationStatus || !operationLoading || !operationDone) return;
-    window.clearTimeout(operationStatusTimer);
+    pageClearTimeout(operationStatusTimer);
     operationStatus.classList.remove('hidden');
     const done = state === 'done';
     operationLoading.classList.toggle('hidden', done);
@@ -583,7 +611,7 @@
     operationStatus.classList.toggle('is-done', done);
     operationStatus.setAttribute('aria-label', done ? '操作完成' : '正在处理插件操作');
     if (done) {
-      operationStatusTimer = window.setTimeout(() => {
+      operationStatusTimer = pageTimeout(() => {
         operationStatus.classList.add('hidden');
       }, 1600);
     }
@@ -591,7 +619,7 @@
 
   function hideOperationStatus() {
     if (!operationStatus) return;
-    window.clearTimeout(operationStatusTimer);
+    pageClearTimeout(operationStatusTimer);
     operationStatus.classList.add('hidden');
   }
 
@@ -635,7 +663,7 @@
     uploadStatus.textContent = '';
     uploadStatus.classList.remove('is-error');
     try {
-      const response = await fetch('/plugins/install-upload', {
+      const response = await pageFetch('/plugins/install-upload', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/zip',
@@ -645,8 +673,15 @@
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || '插件安装失败');
-      window.location.href = '/plugins?notice=' + encodeURIComponent(payload.message || '插件已添加');
+      if (disposed()) return;
+      const destination = '/plugins?notice=' + encodeURIComponent(payload.message || '插件已添加');
+      if (window.FuckClassroomShell?.navigate) {
+        await window.FuckClassroomShell.navigate(destination);
+      } else {
+        window.location.assign(destination);
+      }
     } catch (error) {
+      if (disposed() || error?.name === 'AbortError') return;
       uploadStatus.textContent = error instanceof Error ? error.message : String(error);
       uploadStatus.classList.add('is-error');
       setUploadBusy(false);
