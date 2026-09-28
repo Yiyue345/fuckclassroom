@@ -195,8 +195,6 @@ class AsrModelManagementTests(unittest.TestCase):
     def test_get_model_uses_resolved_runtime_and_logs_effective_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = AppConfig(data_dir=Path(directory))
-            config.asr_device = "auto"
-            config.asr_compute_type = "float16"
             service = LocalTranscriptionService(config)
             progress = _Progress()
             captured = {}
@@ -221,6 +219,13 @@ class AsrModelManagementTests(unittest.TestCase):
             _MODEL_CACHE.clear()
             try:
                 with (
+                    patch.dict(
+                        "os.environ",
+                        {
+                            "FUCKCLASSROOM_ASR_DEVICE": "auto",
+                            "FUCKCLASSROOM_ASR_COMPUTE_TYPE": "float16",
+                        },
+                    ),
                     patch.dict("sys.modules", {"faster_whisper": fake_whisper}),
                     patch(
                         "fuckclassroom.plugins.transcription.environment.detect_asr_runtime",
@@ -230,13 +235,13 @@ class AsrModelManagementTests(unittest.TestCase):
                     patch.object(service, "_ensure_model_files", return_value="snapshot"),
                 ):
                     service._get_model(progress)
+                    self.assertEqual(config.asr_device, "auto")
+                    self.assertEqual(config.asr_compute_type, "float16")
             finally:
                 _MODEL_CACHE.clear()
 
             self.assertEqual(captured["device"], "cpu")
             self.assertEqual(captured["compute_type"], "int8")
-            self.assertEqual(config.asr_device, "auto")
-            self.assertEqual(config.asr_compute_type, "float16")
             self.assertTrue(
                 any(
                     "device=cpu" in message and "compute_type=int8" in message
