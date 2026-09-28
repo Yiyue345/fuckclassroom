@@ -2,6 +2,14 @@
   const root = document.getElementById("lab-app");
   if (!root) return;
 
+  const pageRuntime = window.FuckClassroomPage?.current?.();
+  const pageSignal = pageRuntime?.signal;
+  const schedule = pageRuntime?.setTimeout
+    ? (callback, delay) => pageRuntime.setTimeout(callback, delay)
+    : (callback, delay) => window.setTimeout(callback, delay);
+  const disposed = () => Boolean(pageSignal?.aborted || !root.isConnected);
+  const abortError = () => new DOMException("Page disposed", "AbortError");
+
   const elements = {
     message: document.querySelector("[data-lab-message]"),
     messageBox: document.getElementById("lab-message"),
@@ -71,14 +79,17 @@
     : "—";
 
   async function api(path, params, body) {
+    if (disposed()) throw abortError();
     const response = await fetch("/api/lab-selection/" + path + (params ? "?" + new URLSearchParams(params) : ""), {
       method: body ? "POST" : "GET",
       headers: body ? {"Content-Type": "application/json"} : {},
       body: body ? JSON.stringify(body) : undefined,
       cache: "no-store",
+      signal: pageSignal,
     });
     let data;
     try { data = await response.json(); } catch { data = {}; }
+    if (disposed()) throw abortError();
     if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "请求失败，请检查输入或重新登录本科教务");
     return data;
   }
@@ -93,9 +104,11 @@
     try {
       await action();
     } catch (error) {
+      if (disposed() || error?.name === "AbortError") return;
       setMessage(error && error.message ? error.message : "请求失败", "error");
     } finally {
       busy = false;
+      if (disposed()) return;
       root.removeAttribute("aria-busy");
       controls.forEach(([el, disabled]) => { if (el.isConnected) el.disabled = disabled; });
       elements.prev.disabled = page <= 1;
@@ -281,6 +294,7 @@
       details.dataset.loaded = "true";
       setMessage(groups.length ? `已更新“${courseName(course)}”的实验与已选状态。` : "尚未发布实验选课安排。", groups.length ? "success" : "warning");
     } catch (error) {
+      if (disposed() || error?.name === "AbortError") return;
       body.replaceChildren(node("div", "table-empty", error.message));
       throw error;
     }
@@ -399,7 +413,9 @@
       elements.waitlistCount.textContent = String(active);
       elements.waitlistMessage.textContent = jobs.length ? `更新于 ${new Date().toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit"})}` : "候补期间需保持应用运行，重启应用后会继续。";
     } catch (error) {
-      elements.waitlistMessage.textContent = error.message;
+      if (!disposed() && error?.name !== "AbortError") {
+        elements.waitlistMessage.textContent = error.message;
+      }
     } finally {
       loadingWaitlist = false;
     }
@@ -446,6 +462,14 @@
   });
   document.getElementById("lab-waitlist-refresh").addEventListener("click", loadWaitlist);
 
+  function scheduleWaitlistRefresh() {
+    schedule(async () => {
+      if (disposed()) return;
+      if (!document.hidden) await loadWaitlist();
+      if (!disposed()) scheduleWaitlistRefresh();
+    }, 10000);
+  }
+
   loadWaitlist();
-  window.setInterval(() => { if (!document.hidden) loadWaitlist(); }, 10000);
+  scheduleWaitlistRefresh();
 })();
