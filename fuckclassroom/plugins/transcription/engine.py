@@ -97,19 +97,19 @@ class LocalTranscriptionService:
                     export_path=export_path,
                 )
 
-        _report(progress, 4, "正在准备本地语音识别模型")
-        using_cpu_fallback = False
-        try:
-            model = self._get_model(progress)
-        except LocalTranscriptionError as exc:
-            if not self._should_fallback_to_cpu(exc):
-                raise
-            model = self._load_cpu_fallback_model(progress, exc)
-            using_cpu_fallback = True
-        _clear_detail(progress)
-
         duration_hint = max(0.0, float(duration_hint_seconds or 0.0))
         with _transcription_slot(self.config.asr_max_concurrent_tasks, progress):
+            _report(progress, 4, "正在准备本地语音识别模型")
+            using_cpu_fallback = False
+            try:
+                model = self._get_model(progress)
+            except LocalTranscriptionError as exc:
+                if not self._should_fallback_to_cpu(exc):
+                    raise
+                model = self._load_cpu_fallback_model(progress, exc)
+                using_cpu_fallback = True
+            _clear_detail(progress)
+
             try:
                 lines, duration = self._transcribe_with_model(
                     model,
