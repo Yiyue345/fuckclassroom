@@ -83,6 +83,7 @@
             data-plugin-locked="{{ 'true' if plugin.locked else 'false' }}"
             data-plugin-compatible="{{ 'true' if plugin.compatible else 'false' }}"
             data-plugin-compatibility-state="{{ plugin.compatibility_state }}"
+            data-plugin-dependents="{{ plugin.dependents|join(', ') }}"
             data-plugin-mutable="{{ 'true' if plugin_config_mutable else 'false' }}">
 
             <div class="plugin-summary-main">
@@ -142,16 +143,6 @@
                   </form>
                 </div>
 
-                <div class="plugin-summary-label">扩展能力</div>
-                <p class="plugin-summary-helper">
-                  {% if plugin.missing_optional_dependencies %}
-                    有可选扩展尚未安装，可在详情中查看并修复。
-                  {% elif plugin.dependencies %}
-                    运行依赖已检查，可在详情中查看版本、类型与修复选项。
-                  {% else %}
-                    无额外运行依赖，可直接使用该插件提供的能力。
-                  {% endif %}
-                </p>
               </div>
 
               <div class="plugin-summary-actions">
@@ -159,8 +150,8 @@
                   <button class="plugin-delete-button" type="button"
                     data-plugin-remove="{{ plugin.id }}"
                     data-plugin-remove-name="{{ plugin.name }}"
-                    {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
-                    title="{% if plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}移除外部插件{% endif %}">
+                    {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled or plugin.dependents %}disabled{% endif %}
+                    title="{% if plugin.dependents %}仍被以下插件依赖：{{ plugin.dependents|join(', ') }}{% elif plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}移除外部插件{% endif %}">
                     <svg class="plugin-trash-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M3 6h18"></path>
                       <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
@@ -343,8 +334,8 @@
               <button class="plugin-manage-row danger plugin-remove-detail" type="button"
                 data-plugin-remove="{{ plugin.id }}"
                 data-plugin-remove-name="{{ plugin.name }}"
-                {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
-                title="{% if plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
+                {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled or plugin.dependents %}disabled{% endif %}
+                title="{% if plugin.dependents %}仍被以下插件依赖：{{ plugin.dependents|join(', ') }}{% elif plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
                 <svg class="plugin-trash-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M3 6h18"></path>
                   <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
@@ -354,6 +345,9 @@
                 </svg>
                 <span>移除插件</span>
               </button>
+              {% if plugin.dependents %}
+                <p class="plugin-remove-blocker" data-plugin-remove-blocker="{{ plugin.id }}">无法移除：仍被 {{ plugin.dependents|join(", ") }} 依赖。</p>
+              {% endif %}
             {% endif %}
           </div>
         </section>
@@ -415,6 +409,34 @@
     return removeButtons.filter((button) => button.dataset.pluginRemove === id);
   }
 
+  function syncRemoveButtons(id, desiredEnabled, currentEnabled, options = {}) {
+    const row = rowFor(id);
+    if (!row) return;
+    const mutable = row.dataset.pluginMutable === 'true';
+    const dependents = String(row.dataset.pluginDependents || '').trim();
+    const busy = Boolean(options.busy);
+    const disabled = !mutable || Boolean(dependents) || desiredEnabled || currentEnabled || busy;
+
+    let title = '移除外部插件';
+    if (!mutable) {
+      title = '当前插件配置为只读';
+    } else if (dependents) {
+      title = '仍被以下插件依赖：' + dependents;
+    } else if (busy) {
+      title = '正在应用插件状态，请稍候';
+    } else if (currentEnabled) {
+      title = '请先停用插件并等待 Runtime 卸载';
+    } else if (desiredEnabled) {
+      title = '请先停用插件';
+    }
+
+    removeButtonsFor(id).forEach((button) => {
+      button.disabled = disabled;
+      button.title = title;
+      if (!busy) button.removeAttribute('aria-busy');
+    });
+  }
+
   function removePluginFromPage(id) {
     const rowIndex = rows.findIndex((row) => row.dataset.pluginId === id);
     if (rowIndex >= 0) {
@@ -436,6 +458,33 @@
     }
 
     pendingToggleOperations.delete(id);
+
+    rows.forEach((row) => {
+      const dependents = String(row.dataset.pluginDependents || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .filter((value) => value !== id);
+      row.dataset.pluginDependents = dependents.join(', ');
+
+      const blocker = document.querySelector(
+        '[data-plugin-remove-blocker="' + CSS.escape(row.dataset.pluginId) + '"]'
+      );
+      if (blocker) {
+        if (dependents.length) {
+          blocker.textContent = '无法移除：仍被 ' + dependents.join(', ') + ' 依赖。';
+        } else {
+          blocker.remove();
+        }
+      }
+
+      syncRemoveButtons(
+        row.dataset.pluginId,
+        row.dataset.pluginDesiredEnabled === 'true',
+        row.dataset.pluginCurrentEnabled === 'true'
+      );
+    });
+
     if (selectedId === id) selectedId = '';
     applyFilters();
   }
@@ -559,6 +608,7 @@
       busy,
       error: errorMessage,
     });
+    syncRemoveButtons(id, desiredEnabled, currentEnabled, { busy });
 
     const badge = row.querySelector('[data-plugin-state-badge]');
     if (badge) {
@@ -662,21 +712,22 @@
   searchInput?.addEventListener('input', applyFilters);
 
   async function refreshShellChrome() {
-    if (disposed()) return;
+    if (disposed()) return false;
     const response = await pageFetch('/plugins', {
       headers: { Accept: 'text/html' },
       cache: 'no-store',
     });
-    if (!response.ok || disposed()) return;
+    if (!response.ok || disposed()) return false;
     const html = await response.text();
-    if (disposed()) return;
+    if (disposed()) return false;
     const documentCopy = new DOMParser().parseFromString(html, 'text/html');
     for (const selector of ['.sidebar-nav', '.session-list', '.top-actions .session-pair']) {
-      if (disposed()) return;
+      if (disposed()) return false;
       const current = document.querySelector(selector);
       const next = documentCopy.querySelector(selector);
       if (current && next) current.replaceChildren(...Array.from(next.childNodes).map((node) => node.cloneNode(true)));
     }
+    return true;
   }
 
   async function waitForRuntime() {
@@ -718,6 +769,12 @@
         requestedEnabled,
         row?.dataset.pluginCurrentEnabled === 'true',
         { pending: true, busy: true }
+      );
+      syncRemoveButtons(
+        id,
+        requestedEnabled,
+        row?.dataset.pluginCurrentEnabled === 'true',
+        { busy: true }
       );
       if (badge) {
         badge.className = 'plugin-summary-chip plugin-state-badge amber';
@@ -787,20 +844,14 @@
       });
       beginOperation();
 
+      let payload;
       try {
         const response = await pageFetch('/api/plugins/' + encodeURIComponent(id), {
           method: 'DELETE',
           headers: { Accept: 'application/json' },
         });
-        const payload = await response.json().catch(() => ({}));
+        payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || '插件移除失败（' + response.status + '）');
-        if (disposed()) return;
-
-        removePluginFromPage(id);
-        await refreshShellChrome();
-        if (disposed()) return;
-        finishOperation(true);
-        window.FuckClassroomUI?.showToast?.('插件已移除', payload.message || (name + ' 已移除'));
       } catch (error) {
         if (disposed() || error?.name === 'AbortError') return;
         const message = error instanceof Error ? error.message : String(error);
@@ -812,6 +863,30 @@
         showPluginError(id, message);
         finishOperation(false);
         window.FuckClassroomUI?.showToast?.('插件移除失败', message, true);
+        return;
+      }
+
+      if (disposed()) return;
+      removePluginFromPage(id);
+      finishOperation(true);
+      window.FuckClassroomUI?.showToast?.('插件已移除', payload.message || (name + ' 已移除'));
+
+      try {
+        const refreshed = await refreshShellChrome();
+        if (!refreshed && !disposed()) {
+          window.FuckClassroomUI?.showToast?.(
+            '插件已删除，但界面刷新失败',
+            '插件文件已删除，请刷新页面以同步导航。',
+            true
+          );
+        }
+      } catch (error) {
+        if (disposed() || error?.name === 'AbortError') return;
+        window.FuckClassroomUI?.showToast?.(
+          '插件已删除，但界面刷新失败',
+          '插件文件已删除，请刷新页面以同步导航。',
+          true
+        );
       }
     });
   });

@@ -155,7 +155,6 @@
 .plugin-summary-status-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 22px; }
 .plugin-runtime-value { min-width: 0; color: #12b76a; font-size: 16px; font-weight: 700; }
 .plugin-runtime-value.is-off { color: var(--text-muted); }
-.plugin-summary-helper { margin: 0 0 18px; color: #475467; font-size: 13px; line-height: 1.62; }
 .plugin-summary-actions { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; }
 .plugin-summary-built-in-note { color: var(--text-muted); font-size: 12px; }
 .plugin-card-more { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 0; border-radius: 50%; background: #f8fafc; color: #98a2b3; padding: 0; font-size: 19px; line-height: 1; }
@@ -275,6 +274,7 @@
 .plugin-tech-grid strong { display: block; overflow: hidden; color: var(--text-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-manage-row.danger { justify-content: flex-start; border-color: color-mix(in srgb, var(--red) 24%, var(--border)); background: color-mix(in srgb, var(--red-soft) 74%, var(--surface)); color: var(--red); }
 .plugin-remove-detail { gap: 10px; }
+.plugin-remove-blocker { grid-column: 1 / -1; margin: 2px 2px 0; color: var(--red); font-size: 11px; line-height: 1.5; }
 
 .plugin-list-empty { display: grid; min-height: 220px; place-items: center; align-content: center; gap: 8px; color: var(--text-muted); text-align: center; }
 .plugin-list-empty p { margin: 0; font-size: var(--font-sm); }
