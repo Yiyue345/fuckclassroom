@@ -142,16 +142,6 @@
                   </form>
                 </div>
 
-                <div class="plugin-summary-label">扩展能力</div>
-                <p class="plugin-summary-helper">
-                  {% if plugin.missing_optional_dependencies %}
-                    有可选扩展尚未安装，可在详情中查看并修复。
-                  {% elif plugin.dependencies %}
-                    运行依赖已检查，可在详情中查看版本、类型与修复选项。
-                  {% else %}
-                    无额外运行依赖，可直接使用该插件提供的能力。
-                  {% endif %}
-                </p>
               </div>
 
               <div class="plugin-summary-actions">
@@ -415,6 +405,31 @@
     return removeButtons.filter((button) => button.dataset.pluginRemove === id);
   }
 
+  function syncRemoveButtons(id, desiredEnabled, currentEnabled, options = {}) {
+    const row = rowFor(id);
+    if (!row) return;
+    const mutable = row.dataset.pluginMutable === 'true';
+    const busy = Boolean(options.busy);
+    const disabled = !mutable || desiredEnabled || currentEnabled || busy;
+
+    let title = '移除外部插件';
+    if (!mutable) {
+      title = '当前插件配置为只读';
+    } else if (busy) {
+      title = '正在应用插件状态，请稍候';
+    } else if (currentEnabled) {
+      title = '请先停用插件并等待 Runtime 卸载';
+    } else if (desiredEnabled) {
+      title = '请先停用插件';
+    }
+
+    removeButtonsFor(id).forEach((button) => {
+      button.disabled = disabled;
+      button.title = title;
+      if (!busy) button.removeAttribute('aria-busy');
+    });
+  }
+
   function removePluginFromPage(id) {
     const rowIndex = rows.findIndex((row) => row.dataset.pluginId === id);
     if (rowIndex >= 0) {
@@ -559,6 +574,7 @@
       busy,
       error: errorMessage,
     });
+    syncRemoveButtons(id, desiredEnabled, currentEnabled, { busy });
 
     const badge = row.querySelector('[data-plugin-state-badge]');
     if (badge) {
@@ -718,6 +734,12 @@
         requestedEnabled,
         row?.dataset.pluginCurrentEnabled === 'true',
         { pending: true, busy: true }
+      );
+      syncRemoveButtons(
+        id,
+        requestedEnabled,
+        row?.dataset.pluginCurrentEnabled === 'true',
+        { busy: true }
       );
       if (badge) {
         badge.className = 'plugin-summary-chip plugin-state-badge amber';
