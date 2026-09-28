@@ -193,6 +193,19 @@ class UiModularizationTests(unittest.TestCase):
         self.assertIn('error?.name === "AbortError"', app_script)
         self.assertIn("window.FuckClassroomShell?.navigate", app_script)
 
+        # #48: plugin manager async operations are scoped to the current PJAX generation.
+        plugin_manager = Path(
+            "fuckclassroom/plugins/core_ui/templates/core/plugin_manager.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("const pageRuntime = window.FuckClassroomPage?.current?.()", plugin_manager)
+        self.assertIn("const pageSignal = pageRuntime?.signal", plugin_manager)
+        self.assertIn("return fetch(url, { ...options, signal: pageSignal })", plugin_manager)
+        self.assertIn("if (!pageIsActive()) return", plugin_manager)
+        self.assertIn("if (isPageAbort(error)) return", plugin_manager)
+        self.assertIn("pageRuntime.setTimeout(callback, delay)", plugin_manager)
+        self.assertIn("window.FuckClassroomShell?.navigate", plugin_manager)
+        self.assertNotIn("window.location.href = '/plugins?notice='", plugin_manager)
+
         # #19: idle pages no longer poll auth every 800 ms forever.
         self.assertNotIn("window.setInterval(pollAuthChallenge, 800)", app_script)
         self.assertIn("return 15000", app_script)
