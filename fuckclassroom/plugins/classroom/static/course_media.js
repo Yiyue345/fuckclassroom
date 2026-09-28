@@ -1,7 +1,22 @@
 (() => {
   const D = document;
-  const pageController = new AbortController();
-  const pageSignal = pageController.signal;
+  const pageRuntime = window.FuckClassroomPage?.current?.();
+  const pageSignal = pageRuntime?.signal;
+  const pageTimeout = pageRuntime?.setTimeout
+    ? (callback, delay) => pageRuntime.setTimeout(callback, delay)
+    : (callback, delay) => window.setTimeout(callback, delay);
+  const pageClearTimeout = pageRuntime?.clearTimeout
+    ? (timer) => pageRuntime.clearTimeout(timer)
+    : (timer) => window.clearTimeout(timer);
+  let pageDisposed = false;
+
+  function disposed() {
+    return pageDisposed || Boolean(pageSignal?.aborted);
+  }
+
+  function pageFetch(input, init = {}) {
+    return window.fetch(input, { ...init, signal: pageSignal });
+  }
   const XML = (source) => new DOMParser().parseFromString(source, "application/xml");
   const all = (node, localName) => [...node.getElementsByTagName("*")].filter((item) => item.localName === localName);
   const one = (node, localName) => all(node, localName)[0];
@@ -331,7 +346,7 @@
   }
 
   function stopLivePptPolling() {
-    if (livePptTimer) window.clearTimeout(livePptTimer);
+    if (livePptTimer) pageClearTimeout(livePptTimer);
     livePptTimer = 0;
   }
 
@@ -373,11 +388,12 @@
   }
 
   async function fetchPptSnapshots(endpoint) {
-    if (!endpoint) return [];
+    if (!endpoint || disposed()) return [];
     if (pptSnapshotCache.has(endpoint)) return pptSnapshotCache.get(endpoint);
-    const response = await fetch(endpoint, { credentials: "same-origin", cache: "no-store" });
+    const response = await pageFetch(endpoint, { credentials: "same-origin", cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
+    if (disposed()) return [];
     const slides = Array.isArray(payload.slides) ? payload.slides : [];
     pptSnapshotCache.set(endpoint, slides);
     return slides;
@@ -392,27 +408,28 @@
     let afterId = 0;
 
     const poll = async () => {
-      if (token !== pptLoadToken || !endpoint) return;
+      if (disposed() || token !== pptLoadToken || !endpoint) return;
       try {
         const separator = endpoint.includes("?") ? "&" : "?";
-        const response = await fetch(`${endpoint}${separator}after_id=${afterId}`, { credentials: "same-origin" });
+        const response = await pageFetch(`${endpoint}${separator}after_id=${afterId}`, { credentials: "same-origin" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
-        if (token !== pptLoadToken) return;
+        if (disposed() || token !== pptLoadToken) return;
         const slides = Array.isArray(payload.slides) ? payload.slides : [];
         appendSnapshotSlides(slides);
         afterId = Math.max(afterId, num(payload.last_id), ...slides.map((slide) => num(slide.id)));
         if (!pptPages.length) resetPpt("等待教师推送 PPT…", "loading");
       } catch (error) {
-        if (token !== pptLoadToken) return;
+        if (disposed() || error?.name === "AbortError" || token !== pptLoadToken) return;
         if (!pptPages.length) resetPpt(`直播 PPT 暂时不可用：${error.message || error}`, "error");
       }
-      if (token === pptLoadToken) livePptTimer = window.setTimeout(poll, 3000);
+      if (!disposed() && token === pptLoadToken) livePptTimer = pageTimeout(poll, 3000);
     };
     poll();
   }
 
   async function loadPpt(row) {
+    if (disposed()) return;
     stopLivePptPolling();
     const token = ++pptLoadToken;
     if (row.dataset.live === "true") {
@@ -434,17 +451,18 @@
       try {
         exportSlides = pptCache.get(url) || [];
         if (!exportSlides.length) {
-          const response = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+          const response = await pageFetch(url, { credentials: "same-origin", cache: "no-store" });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           exportSlides = await parsePpt(await response.arrayBuffer());
           pptCache.set(url, exportSlides);
         }
       } catch (error) {
+        if (disposed() || error?.name === "AbortError") return;
         exportError = error;
       }
     }
     snapshotSlides = await snapshotPromise;
-    if (token !== pptLoadToken) return;
+    if (disposed() || token !== pptLoadToken) return;
 
     if (snapshotSlides.length > exportSlides.length) {
       pptCard.classList.add("live-mode");
@@ -478,6 +496,7 @@
   }
 
   function attachVideoSource(url, autoplay) {
+    if (disposed()) return;
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = url;
       video.load();
@@ -485,19 +504,21 @@
       return;
     }
     if (window.Hls?.isSupported()) {
-      hlsPlayer = new window.Hls({ liveSyncDurationCount: 3, maxLiveSyncPlaybackRate: 1.25 });
-      hlsPlayer.loadSource(url);
-      hlsPlayer.attachMedia(video);
-      hlsPlayer.on(window.Hls.Events.MANIFEST_PARSED, () => {
+      const player = new window.Hls({ liveSyncDurationCount: 3, maxLiveSyncPlaybackRate: 1.25 });
+      hlsPlayer = player;
+      player.loadSource(url);
+      player.attachMedia(video);
+      player.on(window.Hls.Events.MANIFEST_PARSED, () => {
+        if (disposed() || player !== hlsPlayer) return;
         if (autoplay) video.play().catch(() => {});
       });
-      hlsPlayer.on(window.Hls.Events.ERROR, (_event, data) => {
-        if (!data.fatal) return;
-        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) hlsPlayer.startLoad();
-        else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) hlsPlayer.recoverMediaError();
+      player.on(window.Hls.Events.ERROR, (_event, data) => {
+        if (disposed() || player !== hlsPlayer || !data.fatal) return;
+        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) player.startLoad();
+        else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) player.recoverMediaError();
         else {
-          hlsPlayer.destroy();
-          hlsPlayer = null;
+          player.destroy();
+          if (player === hlsPlayer) hlsPlayer = null;
           video.classList.add("hidden");
           videoEmpty.classList.remove("hidden");
           videoEmpty.textContent = "直播流连接失败，请稍后重试或在平台中打开";
@@ -509,6 +530,7 @@
   }
 
   async function loadVideo(row, autoplay = false) {
+    if (disposed()) return;
     const token = ++videoLoadToken;
     const url = row.dataset.videoUrl || "";
     destroyVideoSource();
@@ -518,17 +540,17 @@
       videoEmpty.textContent = "正在连接直播画面…";
       setLinkState(videoExternal, "");
       try {
-        const response = await fetch(row.dataset.liveInfoUrl, { credentials: "same-origin" });
+        const response = await pageFetch(row.dataset.liveInfoUrl, { credentials: "same-origin" });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
-        if (token !== videoLoadToken) return;
+        if (disposed() || token !== videoLoadToken) return;
         setLinkState(videoExternal, payload.official_url || "");
         if (!payload.is_live || !payload.playlist_url) throw new Error("直播流暂未就绪");
         videoEmpty.classList.add("hidden");
         video.classList.remove("hidden");
         attachVideoSource(payload.playlist_url, autoplay);
       } catch (error) {
-        if (token !== videoLoadToken) return;
+        if (disposed() || error?.name === "AbortError" || token !== videoLoadToken) return;
         video.classList.add("hidden");
         videoEmpty.classList.remove("hidden");
         videoEmpty.textContent = `直播加载失败：${error.message || error}`;
@@ -552,7 +574,7 @@
   }
 
   function selectLesson(row, options = {}) {
-    if (!row) return;
+    if (!row || disposed()) return;
     selectedRow = row;
     rows.forEach((candidate) => {
       const active = candidate === row;
@@ -622,11 +644,14 @@
   if (initialRow) selectLesson(initialRow);
 
   function cleanupPage() {
+    if (pageDisposed) return;
+    pageDisposed = true;
+    pptLoadToken += 1;
+    videoLoadToken += 1;
     stopLivePptPolling();
     destroyVideoSource();
-    pageController.abort();
   }
 
-  D.addEventListener("academic:page-before-swap", cleanupPage, { once: true, signal: pageSignal });
-  window.addEventListener("beforeunload", cleanupPage, { once: true, signal: pageSignal });
+  pageRuntime?.onDispose?.(cleanupPage);
+  window.addEventListener("beforeunload", cleanupPage, { once: true });
 })();
