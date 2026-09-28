@@ -69,6 +69,14 @@
     form.addEventListener('submit', () => {
       const statusBox = document.querySelector(form.dataset.taskStatus || '');
       hideDetail(statusBox);
+
+      if (form.matches('[data-transcription-form], [data-transcription-attempt]')) {
+        const outputUrl = form.dataset.transcriptionOutputUrl || '';
+        if (outputUrl) {
+          markTranscriptionIncomplete(outputUrl);
+          if (statusBox) statusBox.dataset.transcriptionOutputUrl = outputUrl;
+        }
+      }
     }, { capture: true });
   });
 
@@ -80,7 +88,7 @@
   ));
 
   function cacheKey(outputUrl) {
-    return 'fuckclassroom:transcribed:' + outputUrl;
+    return 'fuckclassroom:transcribed:v2:' + outputUrl;
   }
 
   function cacheCompleted(outputUrl) {
@@ -96,6 +104,14 @@
       return window.sessionStorage.getItem(cacheKey(outputUrl)) === '1';
     } catch (_) {
       return false;
+    }
+  }
+
+  function clearCachedCompleted(outputUrl) {
+    try {
+      window.sessionStorage.removeItem(cacheKey(outputUrl));
+    } catch (_) {
+      // Session storage may be unavailable in hardened browser modes.
     }
   }
 
@@ -135,8 +151,23 @@
     });
   }
 
-  async function checkTranscriptionComplete(outputUrl) {
-    if (isCachedCompleted(outputUrl)) {
+  function markTranscriptionIncomplete(outputUrl) {
+    clearCachedCompleted(outputUrl);
+    matchingTranscriptionNodes(outputUrl).forEach((node) => {
+      if (node.matches('form[data-transcription-form]')) {
+        node.classList.remove('hidden');
+        node.removeAttribute('aria-busy');
+        const button = node.querySelector('[data-transcription-submit], [data-task-submit]');
+        if (button && button.dataset.transcriptionWasDisabled !== 'true') button.disabled = false;
+        delete button?.dataset.transcriptionWasDisabled;
+      } else if (node.matches('[data-transcription-complete]')) {
+        node.classList.add('hidden');
+      }
+    });
+  }
+
+  async function checkTranscriptionComplete(outputUrl, { ignoreCache = false } = {}) {
+    if (!ignoreCache && isCachedCompleted(outputUrl)) {
       markTranscriptionComplete(outputUrl);
       return;
     }
@@ -150,7 +181,7 @@
       if (!response.ok) throw new Error(String(response.status));
       const documentText = await response.text();
       const resultDocument = new DOMParser().parseFromString(documentText, 'text/html');
-      if (resultDocument.querySelector('[data-output-transcript]')) {
+      if (resultDocument.querySelector('[data-output-transcript-complete]')) {
         markTranscriptionComplete(outputUrl);
         return;
       }
@@ -178,9 +209,24 @@
 
   document.addEventListener('academic:task-progress', (event) => {
     const task = event.detail?.task;
-    renderTaskDetail(task, event.detail?.statusBox);
-    if (task?.status === 'succeeded' && task.result_url) {
-      markTranscriptionComplete(String(task.result_url));
+    const statusBox = event.detail?.statusBox;
+    renderTaskDetail(task, statusBox);
+
+    const outputUrl = String(
+      task?.result_url
+      || statusBox?.dataset?.transcriptionOutputUrl
+      || ''
+    );
+    if (!outputUrl) return;
+
+    if (task?.status === 'failed' || task?.status === 'cancelled') {
+      markTranscriptionIncomplete(outputUrl);
+      return;
+    }
+
+    if (task?.status === 'succeeded') {
+      clearCachedCompleted(outputUrl);
+      checkTranscriptionComplete(outputUrl, { ignoreCache: true });
     }
   }, { signal: pageSignal });
 
