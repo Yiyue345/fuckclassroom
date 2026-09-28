@@ -263,6 +263,12 @@ class PluginManager:
         # because of their own missing dependencies and must not block this
         # enable request.
         validation_ids = self._expand_dependencies({plugin_id})
+        self._validate_descriptor_dependency_graph(
+            {
+                enabled_id: descriptors[enabled_id]
+                for enabled_id in validation_ids
+            }
+        )
         for enabled_id in sorted(validation_ids):
             descriptor = descriptors[enabled_id]
             compatibility = self.compatibility_status(descriptor)
@@ -336,6 +342,10 @@ class PluginManager:
             if descriptor.id in {item.id for item in self.builtin_descriptors}:
                 raise PluginManagerError("不能覆盖内置插件")
 
+            candidate_descriptors = self.descriptor_map()
+            candidate_descriptors[descriptor.id] = descriptor
+            self._validate_descriptor_dependency_graph(candidate_descriptors)
+
             destination = self.plugin_dir / descriptor.id
             if destination.exists() and not replace:
                 raise PluginManagerError(f"插件已存在：{descriptor.id}")
@@ -381,6 +391,35 @@ class PluginManager:
                     shutil.rmtree(backup, ignore_errors=True)
 
         return self._read_external_manifest(self.plugin_dir / descriptor.id)
+
+    @staticmethod
+    def _validate_descriptor_dependency_graph(
+        descriptors: Mapping[str, PluginDescriptor],
+    ) -> None:
+        visiting: list[str] = []
+        visiting_set: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(plugin_id: str) -> None:
+            if plugin_id in visited:
+                return
+            if plugin_id in visiting_set:
+                start = visiting.index(plugin_id)
+                cycle = visiting[start:] + [plugin_id]
+                raise PluginManagerError(
+                    "插件依赖存在循环：" + " -> ".join(cycle)
+                )
+            visiting.append(plugin_id)
+            visiting_set.add(plugin_id)
+            for dependency in descriptors[plugin_id].requires:
+                if dependency in descriptors:
+                    visit(dependency)
+            visiting.pop()
+            visiting_set.remove(plugin_id)
+            visited.add(plugin_id)
+
+        for plugin_id in sorted(descriptors):
+            visit(plugin_id)
 
     @staticmethod
     def _validate_registry_expectations(

@@ -752,6 +752,54 @@ def build_plugin():
             self.assertIn("core_ui", descriptors)
             self.assertTrue(stale.exists())
 
+    def test_install_rejects_plugin_that_would_create_dependency_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = root / "plugins" / "plugin_a"
+            installed.mkdir(parents=True)
+            (installed / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "plugin_a",
+                        "name": "Plugin A",
+                        "requires": ["plugin_b"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (installed / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin(): return PluginSpec(id='plugin_a', name='Plugin A', requires=('plugin_b',))\n",
+                encoding="utf-8",
+            )
+
+            source = root / "candidate"
+            source.mkdir()
+            (source / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "plugin_b",
+                        "name": "Plugin B",
+                        "requires": ["plugin_a"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (source / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin(): return PluginSpec(id='plugin_b', name='Plugin B', requires=('plugin_a',))\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root))
+
+            with self.assertRaisesRegex(PluginManagerError, "依赖存在循环"):
+                manager.install_from_path(str(source))
+
+            self.assertFalse((root / "plugins" / "plugin_b").exists())
+            self.assertTrue(installed.exists())
+
     def test_process_isolated_plugin_is_not_imported_in_parent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
