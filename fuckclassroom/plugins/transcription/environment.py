@@ -210,6 +210,47 @@ def resolve_auto_device() -> str:
     return detect_asr_runtime().auto_device
 
 
+def resolve_asr_runtime_config(
+    device: str,
+    compute_type: str,
+    *,
+    capabilities: AsrRuntimeCapabilities | None = None,
+) -> tuple[str, str, tuple[tuple[str, str], ...]]:
+    capabilities = capabilities or detect_asr_runtime()
+    requested_device = str(device or "auto").strip().lower() or "auto"
+    requested_compute_type = str(compute_type or "default").strip().lower() or "default"
+
+    resolved_device = (
+        capabilities.auto_device
+        if requested_device == "auto"
+        else requested_device
+    )
+    messages: list[tuple[str, str]] = []
+    if requested_device == "auto":
+        messages.append(("info", f"ASR auto 已解析为 {resolved_device.upper()}"))
+
+    supported = capabilities.compute_types_for(resolved_device)
+    resolved_compute_type = requested_compute_type
+    if supported and requested_compute_type not in supported:
+        resolved_compute_type = next(
+            (
+                candidate
+                for candidate in ("int8", "float32", "default")
+                if candidate in supported
+            ),
+            supported[0],
+        )
+        messages.append(
+            (
+                "warning",
+                f"{requested_compute_type} 不适用于当前 {resolved_device.upper()}，"
+                f"本次使用 {resolved_compute_type}",
+            )
+        )
+
+    return resolved_device, resolved_compute_type, tuple(messages)
+
+
 def _supported_compute_types(module, device: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
     try:
         supported = {str(item) for item in module.get_supported_compute_types(device)}
