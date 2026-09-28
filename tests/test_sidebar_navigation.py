@@ -64,7 +64,6 @@ class SidebarNavigationTests(unittest.TestCase):
                 "selection-network",
                 "network",
                 "transcription",
-                "transcription-models",
                 "ocr",
                 "ai",
                 "settings-actions",
