@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import ModuleType
@@ -144,6 +146,83 @@ class AsrModelManagementTests(unittest.TestCase):
                     "当前有本地转写任务运行",
                 ):
                     service.delete_model("small")
+
+    def test_delete_model_blocks_new_transcription_until_maintenance_finishes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = AppConfig(data_dir=Path(directory))
+            service = LocalTranscriptionService(config)
+            repo_id = "Systran/faster-whisper-small"
+            repo_dir = config.asr_models_dir / "models--Systran--faster-whisper-small"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / "model.bin").write_bytes(b"model")
+
+            delete_in_progress = threading.Event()
+            allow_delete = threading.Event()
+            transcription_entered = threading.Event()
+            delete_errors: list[BaseException] = []
+            original_rmtree = shutil.rmtree
+
+            def blocking_rmtree(path, *args, **kwargs):
+                if Path(path) == repo_dir:
+                    delete_in_progress.set()
+                    if not allow_delete.wait(timeout=3):
+                        raise RuntimeError("test timed out waiting to finish deletion")
+                return original_rmtree(path, *args, **kwargs)
+
+            def delete_worker() -> None:
+                try:
+                    service.delete_model("small")
+                except BaseException as exc:  # noqa: BLE001 - surfaced in assertion below.
+                    delete_errors.append(exc)
+
+            def transcription_worker() -> None:
+                with _transcription_slot(1, None):
+                    transcription_entered.set()
+
+            with (
+                patch.object(service, "_validate_managed_model", return_value="small"),
+                patch.object(service, "_model_repo_id", return_value=repo_id),
+                patch.object(service, "_model_aliases_for_repo", return_value=("small",)),
+                patch(
+                    "fuckclassroom.plugins.transcription.engine.shutil.rmtree",
+                    side_effect=blocking_rmtree,
+                ),
+            ):
+                delete_thread = threading.Thread(target=delete_worker)
+                delete_thread.start()
+                self.assertTrue(delete_in_progress.wait(timeout=2))
+
+                transcription_thread = threading.Thread(target=transcription_worker)
+                transcription_thread.start()
+                self.assertFalse(transcription_entered.wait(timeout=0.1))
+
+                allow_delete.set()
+                delete_thread.join(timeout=2)
+                self.assertFalse(delete_thread.is_alive())
+                self.assertFalse(delete_errors)
+
+                self.assertTrue(transcription_entered.wait(timeout=2))
+                transcription_thread.join(timeout=2)
+                self.assertFalse(transcription_thread.is_alive())
+
+    def test_delete_rejection_does_not_leave_model_maintenance_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            service = LocalTranscriptionService(AppConfig(data_dir=Path(directory)))
+            with (
+                patch.object(service, "_validate_managed_model", return_value="small"),
+                patch.object(service, "_model_repo_id", return_value="Systran/faster-whisper-small"),
+                _transcription_slot(1, None),
+            ):
+                with self.assertRaisesRegex(
+                    LocalTranscriptionError,
+                    "当前有本地转写任务运行",
+                ):
+                    service.delete_model("small")
+
+            entered = False
+            with _transcription_slot(1, None):
+                entered = True
+            self.assertTrue(entered)
 
     def test_runtime_resolver_falls_back_compute_type_after_auto_selects_cpu(self) -> None:
         capabilities = AsrRuntimeCapabilities(
