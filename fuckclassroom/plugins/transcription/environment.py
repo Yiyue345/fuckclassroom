@@ -108,12 +108,31 @@ def detect_asr_runtime() -> AsrRuntimeCapabilities:
     )
 
 
+_MODEL_DOWNLOAD_SIZE_LABELS = {
+    "tiny": "约 70 MB",
+    "tiny.en": "约 70 MB",
+    "base": "约 130 MB",
+    "base.en": "约 130 MB",
+    "small": "约 440 MB",
+    "small.en": "约 440 MB",
+    "medium": "约 1.4 GB",
+    "medium.en": "约 1.4 GB",
+    "large-v1": "约 2.8 GB",
+    "large-v2": "约 2.8 GB",
+    "large-v3": "约 2.8 GB",
+    "large-v3-turbo": "约 1.6 GB",
+    "turbo": "约 1.6 GB",
+}
+
+
 def build_settings_context(services, request) -> dict[str, object]:
-    del services, request
-    return {
+    context = {
         "asr_runtime": detect_asr_runtime().to_context(),
         "asr_models": list(available_asr_models()),
+        "asr_model_size_labels": dict(_MODEL_DOWNLOAD_SIZE_LABELS),
     }
+    context.update(build_model_settings_context(services, request))
+    return context
 
 
 def build_model_settings_context(services, request) -> dict[str, object]:
