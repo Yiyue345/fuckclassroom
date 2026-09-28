@@ -11,6 +11,10 @@ from fuckclassroom.plugins.transcription.engine import (
     LocalTranscriptionService,
     _transcription_slot,
 )
+from fuckclassroom.plugins.transcription.environment import (
+    AsrRuntimeCapabilities,
+    resolve_asr_runtime_config,
+)
 from fuckclassroom.plugins.transcription.errors import LocalTranscriptionError
 from fuckclassroom.plugins.transcription.services import TranscriptionProcessProxy
 
@@ -18,9 +22,13 @@ from fuckclassroom.plugins.transcription.services import TranscriptionProcessPro
 class _Progress:
     def __init__(self) -> None:
         self.events: list[tuple[int, str]] = []
+        self.logs: list[tuple[str, str]] = []
 
     def __call__(self, percent: int, message: str) -> None:
         self.events.append((percent, message))
+
+    def log(self, message: str, level: str = "info") -> None:
+        self.logs.append((level, message))
 
 
 class _FakeHost:
@@ -135,6 +143,53 @@ class AsrModelManagementTests(unittest.TestCase):
                     "当前有本地转写任务运行",
                 ):
                     service.delete_model("small")
+
+    def test_runtime_resolver_falls_back_compute_type_after_auto_selects_cpu(self) -> None:
+        capabilities = AsrRuntimeCapabilities(
+            cpu_compute_types=("int8", "float32", "default"),
+            cuda_compute_types=(),
+            cuda_available=False,
+            cuda_reason="CUDA unavailable",
+            cuda_device_count=0,
+            auto_device="cpu",
+            ctranslate2_version="test",
+        )
+
+        device, compute_type, messages = resolve_asr_runtime_config(
+            "auto",
+            "float16",
+            capabilities=capabilities,
+        )
+
+        self.assertEqual(device, "cpu")
+        self.assertEqual(compute_type, "int8")
+        self.assertIn(("info", "ASR auto 已解析为 CPU"), messages)
+        self.assertTrue(
+            any(
+                level == "warning" and "float16" in message and "int8" in message
+                for level, message in messages
+            )
+        )
+
+    def test_runtime_resolver_preserves_cuda_float16_when_supported(self) -> None:
+        capabilities = AsrRuntimeCapabilities(
+            cpu_compute_types=("int8", "float32", "default"),
+            cuda_compute_types=("int8", "float16", "float32", "default"),
+            cuda_available=True,
+            cuda_reason="",
+            cuda_device_count=1,
+            auto_device="cuda",
+            ctranslate2_version="test",
+        )
+
+        device, compute_type, messages = resolve_asr_runtime_config(
+            "auto",
+            "float16",
+            capabilities=capabilities,
+        )
+
+        self.assertEqual((device, compute_type), ("cuda", "float16"))
+        self.assertFalse(any(level == "warning" for level, _ in messages))
 
     def test_process_proxy_exposes_model_management_calls(self) -> None:
         host = _FakeHost()
