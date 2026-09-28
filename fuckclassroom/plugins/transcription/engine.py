@@ -464,6 +464,7 @@ class LocalTranscriptionService:
     def model_status(self, model_name: str) -> dict[str, object]:
         configured = self._validate_managed_model(model_name)
         repo_id = self._model_repo_id(configured)
+        aliases = self._model_aliases_for_repo(repo_id)
         try:
             from huggingface_hub import snapshot_download
         except ImportError as exc:
@@ -483,6 +484,8 @@ class LocalTranscriptionService:
         except Exception:
             return {
                 "model": configured,
+                "repo_id": repo_id,
+                "aliases": list(aliases),
                 "installed": False,
                 "size_bytes": 0,
                 "size_label": "",
@@ -493,6 +496,8 @@ class LocalTranscriptionService:
         size_bytes = self._snapshot_size(snapshot) if installed else 0
         return {
             "model": configured,
+            "repo_id": repo_id,
+            "aliases": list(aliases),
             "installed": installed,
             "size_bytes": size_bytes,
             "size_label": _format_bytes(size_bytes) if size_bytes else "",
