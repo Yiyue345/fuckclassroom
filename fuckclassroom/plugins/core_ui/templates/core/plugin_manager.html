@@ -601,11 +601,14 @@
         } else {
           try {
             const status = await waitForRuntime();
+            if (!pageIsActive()) return;
             syncCards({ ...status, last_error: status.last_error || message });
-          } catch (_) {
+          } catch (runtimeError) {
+            if (isPageAbort(runtimeError)) return;
             setPluginState(id, requestedEnabled, !requestedEnabled, { error: message });
           }
         }
+        if (!pageIsActive()) return;
         applyFilters();
       }
     });
