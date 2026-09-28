@@ -592,6 +592,27 @@ class LocalTranscriptionService:
             raise LocalTranscriptionError(f"不支持的 faster-whisper 模型：{model_name}")
         return str(repo_id)
 
+    def _model_aliases_for_repo(self, repo_id: str) -> tuple[str, ...]:
+        from .environment import available_asr_models
+
+        aliases: list[str] = []
+        for candidate in available_asr_models():
+            try:
+                if self._model_repo_id(candidate) == repo_id:
+                    aliases.append(candidate)
+            except LocalTranscriptionError:
+                continue
+        return tuple(aliases)
+
+    def _model_cache_identity(self, model_name: str) -> str:
+        local_candidate = Path(model_name).expanduser()
+        if local_candidate.is_dir():
+            try:
+                return f"path:{local_candidate.resolve()}"
+            except OSError:
+                return f"path:{local_candidate}"
+        return f"repo:{self._model_repo_id(model_name)}"
+
     @staticmethod
     def _validate_managed_model(model_name: str) -> str:
         configured = str(model_name or "").strip()
@@ -636,7 +657,7 @@ class LocalTranscriptionService:
             "info",
         )
         key = (
-            self.config.asr_model,
+            self._model_cache_identity(self.config.asr_model),
             effective_device,
             effective_compute_type,
             self.config.asr_cpu_threads,
