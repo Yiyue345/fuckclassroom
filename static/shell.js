@@ -363,14 +363,22 @@
     syncNavigationState(nextDocument);
   }
 
-  function saveCurrentHistoryScroll() {
-    const state = {
+  function replaceUrl(url, state = {}) {
+    const target = new URL(url, window.location.href);
+    const nextState = {
       ...(history.state || {}),
+      ...state,
       fuckClassroomPjax: true,
       fuckClassroomHistoryIndex: historyIndex,
-      scrollY: window.scrollY,
     };
-    history.replaceState(state, '', displayedUrl);
+    history.replaceState(nextState, '', target.href);
+    displayedUrl = target.href;
+    return target.href;
+  }
+
+  function saveCurrentHistoryScroll() {
+    displayedUrl = window.location.href;
+    replaceUrl(displayedUrl, { scrollY: window.scrollY });
   }
 
   function allowNavigation() {
@@ -557,7 +565,7 @@
   );
 
   initPage(document);
-  window.FuckClassroomShell = Object.freeze({ navigate, initPage });
+  window.FuckClassroomShell = Object.freeze({ navigate, initPage, replaceUrl });
 
   const restoreInitialIntervalCapture = beginIntervalCapture();
   window.setTimeout(() => {
