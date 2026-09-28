@@ -51,7 +51,7 @@
             <span class="plugin-state-badge {{ 'green' if plugin.compatibility_severity == 'success' else ('amber' if plugin.compatibility_severity == 'warning' else 'red') }}"
               title="{{ plugin.compatibility_message }}">{{ plugin.compatibility_label }}</span>
             {% if plugin.signed %}
-              <span class="plugin-state-badge green">已签名</span>
+              <span class="plugin-state-badge green" title="安装时仍会执行 SHA-256 与 Ed25519 验证">含 Ed25519 签名</span>
             {% else %}
               <span class="plugin-state-badge">SHA-256</span>
             {% endif %}
