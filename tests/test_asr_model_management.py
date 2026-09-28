@@ -7,7 +7,11 @@ from types import ModuleType
 from unittest.mock import patch
 
 from fuckclassroom.core.config import AppConfig
-from fuckclassroom.plugins.transcription.engine import LocalTranscriptionService
+from fuckclassroom.plugins.transcription.engine import (
+    LocalTranscriptionService,
+    _transcription_slot,
+)
+from fuckclassroom.plugins.transcription.errors import LocalTranscriptionError
 from fuckclassroom.plugins.transcription.services import TranscriptionProcessProxy
 
 
@@ -117,6 +121,20 @@ class AsrModelManagementTests(unittest.TestCase):
 
             self.assertTrue(result["deleted"])
             self.assertFalse(repo_dir.exists())
+
+    def test_delete_model_is_blocked_while_transcription_slot_is_active(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            service = LocalTranscriptionService(AppConfig(data_dir=Path(directory)))
+            with (
+                patch.object(service, "_validate_managed_model", return_value="small"),
+                patch.object(service, "_model_repo_id", return_value="Systran/faster-whisper-small"),
+                _transcription_slot(1, None),
+            ):
+                with self.assertRaisesRegex(
+                    LocalTranscriptionError,
+                    "当前有本地转写任务运行",
+                ):
+                    service.delete_model("small")
 
     def test_process_proxy_exposes_model_management_calls(self) -> None:
         host = _FakeHost()
