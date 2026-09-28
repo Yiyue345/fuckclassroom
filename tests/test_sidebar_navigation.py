@@ -150,7 +150,9 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("plugin-summary-helper", template)
         self.assertIn('data-plugin-runtime-label="{{ plugin.id }}"', template)
         self.assertIn('data-plugin-open-detail="{{ plugin.id }}"', template)
-        self.assertIn("✓ 兼容", template)
+        self.assertIn("plugin.compatibility_label", template)
+        self.assertIn("plugin.compatibility_severity", template)
+        self.assertIn("plugin.compatibility_message", template)
         self.assertIn("扩展能力", template)
         self.assertIn("可选扩展", template)
 
