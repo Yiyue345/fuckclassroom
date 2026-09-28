@@ -122,7 +122,7 @@ class SidebarNavigationTests(unittest.TestCase):
             ["classroom"],
         )
 
-    def test_plugin_manager_matches_split_panel_design(self) -> None:
+    def test_plugin_manager_matches_redesigned_cards(self) -> None:
         template = Path(
             "fuckclassroom/plugins/core_ui/templates/core/plugin_manager.html"
         ).read_text(encoding="utf-8")
@@ -140,11 +140,36 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn('class="plugin-manager-layout"', template)
         self.assertIn('class="plugin-list-panel surface"', template)
         self.assertIn('class="plugin-detail-panel surface"', template)
-        self.assertIn("data-plugin-row", template)
-        self.assertIn("data-plugin-detail", template)
-        self.assertIn("plugin-dependency-box", template)
-        self.assertIn("plugin-manage-row", template)
+
+        # Summary cards follow the supplied two-column status/control card.
+        self.assertIn("plugin-summary-card", template)
+        self.assertIn("plugin-summary-main", template)
+        self.assertIn("plugin-summary-side", template)
+        self.assertIn("plugin-summary-chips", template)
+        self.assertIn("plugin-summary-status-row", template)
+        self.assertIn("plugin-summary-helper", template)
+        self.assertIn('data-plugin-runtime-label="{{ plugin.id }}"', template)
+        self.assertIn('data-plugin-open-detail="{{ plugin.id }}"', template)
+        self.assertIn("✓ 兼容", template)
+        self.assertIn("扩展能力", template)
+        self.assertIn("可选扩展", template)
+
+        # Detail cards follow the supplied large plugin detail panel.
+        self.assertIn("plugin-detail-card", template)
+        self.assertIn("plugin-detail-status", template)
+        self.assertIn("plugin-detail-meta-grid", template)
+        self.assertIn("plugin-detail-description-card", template)
+        self.assertIn("plugin-manage-bottom", template)
+        self.assertIn("依赖检查结果", template)
         self.assertIn("查看插件技术信息", template)
+        self.assertIn('data-plugin-runtime-chip="{{ plugin.id }}"', template)
+
+        # Trash actions use the Lucide Trash2 geometry, not the uploaded demo SVG.
+        self.assertIn('viewBox="0 0 24 24"', template)
+        self.assertIn('<path d="M3 6h18"></path>', template)
+        self.assertIn('<path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>', template)
+        self.assertIn("plugin-trash-icon", template)
+
         self.assertIn('id="plugin-zip-button"', template)
         self.assertIn('onchange="this.form.requestSubmit()"', template)
         self.assertEqual(
@@ -153,22 +178,30 @@ class SidebarNavigationTests(unittest.TestCase):
         )
         self.assertIn("applyFilters()", template)
         self.assertIn("selectPlugin(", template)
+        self.assertIn("syncRuntimeIndicators(", template)
         self.assertIn("pageFetch('/api/plugins/runtime-status'", template)
-        self.assertIn("signal: pageSignal", template)
-        self.assertIn(".plugin-manager-layout {", styles)
+        self.assertIn("data-plugin-row", template)
+        self.assertIn("data-plugin-detail", template)
+        self.assertIn("plugin-dependency-box", template)
+        self.assertIn("plugin-manage-row", template)
+
         self.assertIn(
-            "grid-template-columns: minmax(0, 1.39fr) minmax(360px, 1fr)",
+            "grid-template-columns: minmax(0, 1.24fr) minmax(440px, .76fr)",
             styles,
         )
-        self.assertIn(".plugin-list-panel { container-type: inline-size; height: 714px; overflow-x: hidden;", styles)
-        self.assertIn(".plugin-row.is-selected {", styles)
-        self.assertIn("box-sizing: border-box; grid-template-columns: 38px minmax(0, 1fr) minmax(164px, 176px)", styles)
-        self.assertIn(".plugin-row-actions > * { min-width: 0; }", styles)
-        self.assertIn("max-width: 100%; box-sizing: border-box;", styles)
-        self.assertIn("@container (max-width: 620px)", styles)
-        self.assertIn("grid-template-columns: max-content 40px minmax(0, 1fr) 18px", styles)
-        self.assertIn(".plugin-detail-panel { position: sticky;", styles)
-        self.assertIn(".plugin-add-button {", styles)
+        self.assertIn("grid-template-columns: minmax(0, 1fr) 220px", styles)
+        self.assertIn("border-radius: 24px", styles)
+        self.assertIn("min-height: 244px", styles)
+        self.assertIn("box-shadow: 0 10px 28px rgba(16, 24, 40, .08)", styles)
+        self.assertIn(".plugin-summary-side {", styles)
+        self.assertIn("border-left: 1px solid", styles)
+        self.assertIn(".plugin-detail-panel.surface {", styles)
+        self.assertIn("border-radius: 28px", styles)
+        self.assertIn(".plugin-detail-meta-grid {", styles)
+        self.assertIn(".plugin-dependency-box {", styles)
+        self.assertIn("@container (max-width: 760px)", styles)
+        self.assertIn("@media (max-width: 1280px)", styles)
+
         self.assertIn("plugin-operation-status", template)
         self.assertIn("data-operation-loading", template)
         self.assertIn("data-operation-done", template)
@@ -210,6 +243,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("if (activeOperationCount > 0)", template)
         self.assertIn("window.FuckClassroomPage?.current?.()", template)
         self.assertIn("function pageFetch(input, init = {})", template)
+        self.assertIn("signal: pageSignal", template)
         self.assertIn("if (disposed()) return;", template)
         self.assertIn("error?.name === 'AbortError'", template)
         self.assertIn("window.FuckClassroomShell?.navigate", template)
@@ -227,7 +261,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260928-1",
+            "/plugins/core_ui/static/core_ui.css?v=20260928-2",
             registry.stylesheets,
         )
         self.assertIn(
