@@ -156,20 +156,20 @@
 
               <div class="plugin-summary-actions">
                 {% if not plugin.builtin %}
-                  <form method="post" action="/plugins/{{ plugin.id }}/remove" data-plugin-operation-form>
-                    <button class="plugin-delete-button" type="submit"
-                      {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
-                      title="{% if plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}移除外部插件{% endif %}">
-                      <svg class="plugin-trash-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M3 6h18"></path>
-                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
-                        <line x1="10" x2="10" y1="11" y2="17"></line>
-                        <line x1="14" x2="14" y1="11" y2="17"></line>
-                      </svg>
-                      <span>移除插件</span>
-                    </button>
-                  </form>
+                  <button class="plugin-delete-button" type="button"
+                    data-plugin-remove="{{ plugin.id }}"
+                    data-plugin-remove-name="{{ plugin.name }}"
+                    {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
+                    title="{% if plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}移除外部插件{% endif %}">
+                    <svg class="plugin-trash-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M3 6h18"></path>
+                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                      <line x1="10" x2="10" y1="11" y2="17"></line>
+                      <line x1="14" x2="14" y1="11" y2="17"></line>
+                    </svg>
+                    <span>移除插件</span>
+                  </button>
                 {% else %}
                   <span class="plugin-summary-built-in-note">内置插件</span>
                 {% endif %}
@@ -340,20 +340,20 @@
             </details>
 
             {% if not plugin.builtin %}
-              <form method="post" action="/plugins/{{ plugin.id }}/remove" data-plugin-operation-form>
-                <button class="plugin-manage-row danger plugin-remove-detail" type="submit"
-                  {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
-                  title="{% if plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
-                  <svg class="plugin-trash-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M3 6h18"></path>
-                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
-                    <line x1="10" x2="10" y1="11" y2="17"></line>
-                    <line x1="14" x2="14" y1="11" y2="17"></line>
-                  </svg>
-                  <span>移除插件</span>
-                </button>
-              </form>
+              <button class="plugin-manage-row danger plugin-remove-detail" type="button"
+                data-plugin-remove="{{ plugin.id }}"
+                data-plugin-remove-name="{{ plugin.name }}"
+                {% if not plugin_config_mutable or plugin.current_enabled or plugin.desired_enabled %}disabled{% endif %}
+                title="{% if plugin.current_enabled %}请先停用插件并等待 Runtime 卸载{% elif plugin.desired_enabled %}请先停用插件{% else %}删除插件文件{% endif %}">
+                <svg class="plugin-trash-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 6h18"></path>
+                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                  <line x1="10" x2="10" y1="11" y2="17"></line>
+                  <line x1="14" x2="14" y1="11" y2="17"></line>
+                </svg>
+                <span>移除插件</span>
+              </button>
             {% endif %}
           </div>
         </section>
@@ -377,6 +377,7 @@
   const rows = Array.from(document.querySelectorAll('[data-plugin-row]'));
   const details = Array.from(document.querySelectorAll('[data-plugin-detail]'));
   const toggleForms = Array.from(document.querySelectorAll('.plugin-toggle-form[data-plugin-id]'));
+  const removeButtons = Array.from(document.querySelectorAll('[data-plugin-remove]'));
   const filterButtons = Array.from(document.querySelectorAll('[data-plugin-filter]'));
   const searchInput = document.getElementById('plugin-search-input');
   const countLabel = document.getElementById('plugin-result-count');
@@ -408,6 +409,35 @@
 
   function formsFor(id) {
     return toggleForms.filter((form) => form.dataset.pluginId === id);
+  }
+
+  function removeButtonsFor(id) {
+    return removeButtons.filter((button) => button.dataset.pluginRemove === id);
+  }
+
+  function removePluginFromPage(id) {
+    const rowIndex = rows.findIndex((row) => row.dataset.pluginId === id);
+    if (rowIndex >= 0) {
+      rows[rowIndex].remove();
+      rows.splice(rowIndex, 1);
+    }
+
+    const detailIndex = details.findIndex((panel) => panel.dataset.pluginDetail === id);
+    if (detailIndex >= 0) {
+      details[detailIndex].remove();
+      details.splice(detailIndex, 1);
+    }
+
+    for (let index = toggleForms.length - 1; index >= 0; index -= 1) {
+      if (toggleForms[index].dataset.pluginId === id) toggleForms.splice(index, 1);
+    }
+    for (let index = removeButtons.length - 1; index >= 0; index -= 1) {
+      if (removeButtons[index].dataset.pluginRemove === id) removeButtons.splice(index, 1);
+    }
+
+    pendingToggleOperations.delete(id);
+    if (selectedId === id) selectedId = '';
+    applyFilters();
   }
 
   function clearPluginError(row) {
@@ -739,6 +769,49 @@
           }
         }
         applyFilters();
+      }
+    });
+  });
+
+  removeButtons.forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.pluginRemove || '';
+      const name = button.dataset.pluginRemoveName || id;
+      if (!id || button.disabled || disposed()) return;
+      if (!window.confirm('确定移除插件“' + name + '”？插件文件将从本地删除。')) return;
+
+      const buttons = removeButtonsFor(id);
+      buttons.forEach((item) => {
+        item.disabled = true;
+        item.setAttribute('aria-busy', 'true');
+      });
+      beginOperation();
+
+      try {
+        const response = await pageFetch('/api/plugins/' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers: { Accept: 'application/json' },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || '插件移除失败（' + response.status + '）');
+        if (disposed()) return;
+
+        removePluginFromPage(id);
+        await refreshShellChrome();
+        if (disposed()) return;
+        finishOperation(true);
+        window.FuckClassroomUI?.showToast?.('插件已移除', payload.message || (name + ' 已移除'));
+      } catch (error) {
+        if (disposed() || error?.name === 'AbortError') return;
+        const message = error instanceof Error ? error.message : String(error);
+        buttons.forEach((item) => {
+          if (!item.isConnected) return;
+          item.disabled = false;
+          item.removeAttribute('aria-busy');
+        });
+        showPluginError(id, message);
+        finishOperation(false);
+        window.FuckClassroomUI?.showToast?.('插件移除失败', message, true);
       }
     });
   });
