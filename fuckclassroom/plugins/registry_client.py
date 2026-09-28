@@ -66,6 +66,8 @@ class RegistryInstallPlan:
     channel: str
     released_at: str
     signed: bool
+    required_plugins: tuple[str, ...]
+    missing_plugin_dependencies: tuple[str, ...]
     version_record: Mapping[str, object] | None
 
     def to_public_dict(self) -> dict[str, object]:
@@ -88,6 +90,8 @@ class RegistryInstallPlan:
             "channel": self.channel,
             "released_at": self.released_at,
             "signed": self.signed,
+            "required_plugins": list(self.required_plugins),
+            "missing_plugin_dependencies": list(self.missing_plugin_dependencies),
         }
 
 
@@ -287,6 +291,18 @@ class PluginRegistryClient:
             action = "install"
 
         artifact = chosen.get("artifact", {}) if chosen else {}
+        runtime = chosen.get("runtime", {}) if chosen else {}
+        raw_requires = runtime.get("requires", []) if isinstance(runtime, Mapping) else []
+        required_plugins = (
+            tuple(str(item) for item in raw_requires)
+            if isinstance(raw_requires, list)
+            else ()
+        )
+        missing_plugin_dependencies = tuple(
+            dependency
+            for dependency in required_plugins
+            if dependency not in descriptors
+        )
         return RegistryInstallPlan(
             plugin_id=plugin_id,
             name=str(detail.get("name") or entry.get("name") or plugin_id),
@@ -308,6 +324,8 @@ class PluginRegistryClient:
             channel=str(chosen.get("channel") or "") if chosen else "",
             released_at=str(chosen.get("released_at") or "") if chosen else "",
             signed=isinstance(artifact, Mapping) and isinstance(artifact.get("signature"), Mapping),
+            required_plugins=required_plugins,
+            missing_plugin_dependencies=missing_plugin_dependencies,
             version_record=chosen,
         )
 
