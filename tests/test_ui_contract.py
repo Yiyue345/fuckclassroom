@@ -134,8 +134,9 @@ class UIContractTests(unittest.TestCase):
         )
 
         self.assertIn('id="transcription-models"', html)
-        self.assertIn("small · 当前选择", html)
-        self.assertIn("已安装 · 1.0 KB", html)
+        normalized_html = " ".join(html.split())
+        self.assertIn("small · 当前选择", normalized_html)
+        self.assertIn("已安装 · 1.0 KB", normalized_html)
         self.assertIn('/settings/transcription/models/small/delete', html)
         self.assertIn('/settings/transcription/models/medium/download', html)
         self.assertIn('data-inline-task', html)
