@@ -27,6 +27,16 @@ def build_settings_context(services, request):
     return build(services, request)
 
 
+def build_model_settings_context(services, request):
+    from .environment import build_model_settings_context as build
+    return build(services, request)
+
+
+def build_routes(context: PluginContext):
+    from .routes import build_router
+    return build_router(context)
+
+
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="transcription",
@@ -34,6 +44,7 @@ def build_plugin() -> PluginSpec:
         order=30,
         requires=("processing",),
         service_factory=setup_services,
+        route_factory=build_routes,
         startup=startup,
         shutdown=shutdown,
         template_dir=PLUGIN_DIR / "templates",
@@ -45,6 +56,14 @@ def build_plugin() -> PluginSpec:
                 order=50,
                 checkbox_fields=("asr_use_batched", "asr_simplified_chinese"),
                 context_factory=build_settings_context,
+            ),
+            SettingsPanel(
+                key="transcription-models",
+                label="语音模型",
+                template="transcription_models.html",
+                order=51,
+                in_form=False,
+                context_factory=build_model_settings_context,
             ),
         ),
     )
