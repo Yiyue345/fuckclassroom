@@ -223,7 +223,13 @@ class PluginRegistryClientTests(unittest.TestCase):
             (plugin / "plugin.py").write_text("# old\n", encoding="utf-8")
 
             archive = root / "demo-2.0.0.zip"
-            new_manifest = {**old_manifest, "version": "2.0.0"}
+            new_manifest = {
+                **old_manifest,
+                "version": "2.0.0",
+                "route_prefix": None,
+                "rpc_api_version": None,
+                "rpc_permissions": [],
+            }
             with zipfile.ZipFile(archive, "w") as package:
                 package.writestr("plugin.json", json.dumps(new_manifest))
                 package.writestr("plugin.py", "# new\n")
