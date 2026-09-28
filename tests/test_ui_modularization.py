@@ -177,15 +177,28 @@ class UiModularizationTests(unittest.TestCase):
         # #21: transient HTTP failures retry; missing/expired tasks stop with feedback.
         self.assertIn("response.status === 404 || response.status === 410", task_script)
         self.assertIn("正在重试", task_script)
-        self.assertIn("window.setTimeout(refreshTask, 1500)", task_script)
-        self.assertIn("task_status.js?v=20260926-1", task_template)
+        self.assertIn("schedule(refreshTask, 1500)", task_script)
+        self.assertIn("task_status.js?v=20260927-1", task_template)
+
+        # #46: task detail polling is scoped to the current PJAX page.
+        self.assertIn("window.FuckClassroomPage?.current?.()", task_script)
+        self.assertIn("signal: pageSignal", task_script)
+        self.assertIn("schedule(refreshTask, 1500)", task_script)
+        self.assertNotIn("window.setTimeout(refreshTask, 1500)", task_script)
+
+        # #47: inline task polling aborts when its originating page is replaced.
+        self.assertIn("const pageRuntime = window.FuckClassroomPage?.current?.()", app_script)
+        self.assertIn("while (!pageSignal || !pageSignal.aborted)", app_script)
+        self.assertIn("signal: pageSignal", app_script)
+        self.assertIn('error?.name === "AbortError"', app_script)
+        self.assertIn("window.FuckClassroomShell?.navigate", app_script)
 
         # #19: idle pages no longer poll auth every 800 ms forever.
         self.assertNotIn("window.setInterval(pollAuthChallenge, 800)", app_script)
         self.assertIn("return 15000", app_script)
         self.assertIn('academic:auth-poll-wake', app_script)
         self.assertIn("scheduleAuthPoll(0)", app_script)
-        self.assertIn("/static/app.js?v=20260927-1", base)
+        self.assertIn("/static/app.js?v=20260927-2", base)
 
     def test_core_shell_and_task_pages_are_feature_agnostic(self) -> None:
         base = Path("templates/base.html").read_text(encoding="utf-8")

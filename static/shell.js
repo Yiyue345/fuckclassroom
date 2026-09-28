@@ -9,8 +9,92 @@
   let sectionController = null;
   let navigationController = null;
   let navigationSequence = 0;
+  let historyIndex = Number.isInteger(history.state?.fuckClassroomHistoryIndex)
+    ? history.state.fuckClassroomHistoryIndex
+    : 0;
+  let displayedUrl = window.location.href;
+  let restoringHistory = false;
   const nativeSetInterval = window.setInterval.bind(window);
   const pageIntervals = new Set();
+  let currentPageRuntime = null;
+
+  function abortError() {
+    try {
+      return new DOMException('页面已切换', 'AbortError');
+    } catch (_) {
+      const error = new Error('页面已切换');
+      error.name = 'AbortError';
+      return error;
+    }
+  }
+
+  function createPageRuntime() {
+    const controller = new AbortController();
+    const timers = new Set();
+    const disposers = new Set();
+
+    const runtime = {
+      signal: controller.signal,
+      setTimeout(callback, delay, ...args) {
+        if (controller.signal.aborted) return 0;
+        const timer = window.setTimeout(() => {
+          timers.delete(timer);
+          if (!controller.signal.aborted) callback(...args);
+        }, delay);
+        timers.add(timer);
+        return timer;
+      },
+      clearTimeout(timer) {
+        window.clearTimeout(timer);
+        timers.delete(timer);
+      },
+      sleep(delay) {
+        return new Promise((resolve, reject) => {
+          if (controller.signal.aborted) {
+            reject(abortError());
+            return;
+          }
+          const timer = runtime.setTimeout(() => {
+            controller.signal.removeEventListener('abort', onAbort);
+            resolve();
+          }, delay);
+          const onAbort = () => {
+            runtime.clearTimeout(timer);
+            reject(abortError());
+          };
+          controller.signal.addEventListener('abort', onAbort, { once: true });
+        });
+      },
+      onDispose(callback) {
+        if (controller.signal.aborted) {
+          callback();
+          return () => {};
+        }
+        disposers.add(callback);
+        return () => disposers.delete(callback);
+      },
+      dispose() {
+        if (controller.signal.aborted) return;
+        controller.abort();
+        timers.forEach((timer) => window.clearTimeout(timer));
+        timers.clear();
+        disposers.forEach((callback) => {
+          try {
+            callback();
+          } catch (error) {
+            console.warn('页面清理失败:', error);
+          }
+        });
+        disposers.clear();
+      },
+    };
+    return runtime;
+  }
+
+  currentPageRuntime = createPageRuntime();
+  window.FuckClassroomPage = Object.freeze({
+    current: () => currentPageRuntime,
+  });
 
   function setNavigation(open, restoreFocus = true) {
     open = open && narrow.matches;
@@ -198,6 +282,7 @@
 
   function cleanupPageRuntime() {
     document.dispatchEvent(new CustomEvent('academic:page-before-swap'));
+    currentPageRuntime?.dispose();
     clearPageIntervals();
     document.querySelectorAll('script[data-pjax-page-script="true"]').forEach((script) => script.remove());
   }
@@ -279,8 +364,20 @@
   }
 
   function saveCurrentHistoryScroll() {
-    const state = { ...(history.state || {}), fuckClassroomPjax: true, scrollY: window.scrollY };
-    history.replaceState(state, '', window.location.href);
+    const state = {
+      ...(history.state || {}),
+      fuckClassroomPjax: true,
+      fuckClassroomHistoryIndex: historyIndex,
+      scrollY: window.scrollY,
+    };
+    history.replaceState(state, '', displayedUrl);
+  }
+
+  function allowNavigation() {
+    if (!dirty) return true;
+    if (!window.confirm('有未保存的更改，确定离开当前页面？')) return false;
+    dirty = false;
+    return true;
   }
 
   function restorePagePosition(url, scrollY = 0) {
@@ -319,6 +416,8 @@
   }
 
   async function navigate(url, options = {}) {
+    if (!options.skipGuard && !options.fromPopState && !allowNavigation()) return false;
+
     const destination = new URL(url, window.location.href);
     const sequence = ++navigationSequence;
     navigationController?.abort();
@@ -369,9 +468,19 @@
       }
       removeStaleStyles();
 
+      currentPageRuntime = createPageRuntime();
+
       if (!options.fromPopState) {
-        history.pushState({ fuckClassroomPjax: true, scrollY: 0 }, '', destination.href);
+        historyIndex += 1;
+        history.pushState({
+          fuckClassroomPjax: true,
+          fuckClassroomHistoryIndex: historyIndex,
+          scrollY: 0,
+        }, '', destination.href);
+      } else if (Number.isInteger(options.targetHistoryIndex)) {
+        historyIndex = options.targetHistoryIndex;
       }
+      displayedUrl = destination.href;
 
       const pageRoot = document.querySelector('.main') || document;
       window.FuckClassroomUI?.initPage?.(pageRoot);
@@ -399,24 +508,50 @@
   document.addEventListener('click', (event) => {
     const link = event.target.closest?.('a[href]');
     if (!canNavigate(link, event)) return;
-    if (dirty && !window.confirm('有未保存的更改，确定离开当前页面？')) {
-      event.preventDefault();
-      return;
-    }
-    dirty = false;
     event.preventDefault();
     navigate(link.href);
   });
 
   window.addEventListener('popstate', (event) => {
+    if (restoringHistory) {
+      restoringHistory = false;
+      return;
+    }
+
+    const targetHistoryIndex = Number.isInteger(event.state?.fuckClassroomHistoryIndex)
+      ? event.state.fuckClassroomHistoryIndex
+      : null;
+
+    if (!allowNavigation()) {
+      if (targetHistoryIndex !== null && targetHistoryIndex !== historyIndex) {
+        restoringHistory = true;
+        history.go(historyIndex - targetHistoryIndex);
+      } else {
+        history.replaceState({
+          ...(history.state || {}),
+          fuckClassroomPjax: true,
+          fuckClassroomHistoryIndex: historyIndex,
+          scrollY: window.scrollY,
+        }, '', displayedUrl);
+      }
+      return;
+    }
+
     navigate(window.location.href, {
       fromPopState: true,
+      skipGuard: true,
+      targetHistoryIndex,
       scrollY: Number(event.state?.scrollY) || 0,
     });
   });
 
   history.replaceState(
-    { ...(history.state || {}), fuckClassroomPjax: true, scrollY: window.scrollY },
+    {
+      ...(history.state || {}),
+      fuckClassroomPjax: true,
+      fuckClassroomHistoryIndex: historyIndex,
+      scrollY: window.scrollY,
+    },
     '',
     window.location.href
   );

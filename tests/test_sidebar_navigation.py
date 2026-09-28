@@ -239,7 +239,7 @@ class SidebarNavigationTests(unittest.TestCase):
             registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
         )
         self.assertIn(
-            "/plugins/course_selection/static/selection_ui.js?v=20260927-1",
+            "/plugins/course_selection/static/selection_ui.js?v=20260927-2",
             registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
         )
 
@@ -253,7 +253,7 @@ class SidebarNavigationTests(unittest.TestCase):
             classroom_only.stylesheets,
         )
         self.assertNotIn(
-            "/plugins/course_selection/static/selection_ui.js?v=20260927-1",
+            "/plugins/course_selection/static/selection_ui.js?v=20260927-2",
             classroom_only.scripts,
         )
 
@@ -298,14 +298,44 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("academic:page-load", shell)
         self.assertIn("function beginIntervalCapture()", shell)
         self.assertIn("clearPageIntervals()", shell)
+        self.assertIn("function createPageRuntime()", shell)
+        self.assertIn("window.FuckClassroomPage = Object.freeze", shell)
+        self.assertIn("currentPageRuntime?.dispose()", shell)
+        self.assertIn("fuckClassroomHistoryIndex", shell)
+        self.assertIn("function allowNavigation()", shell)
+        self.assertIn("restoringHistory = true", shell)
+        self.assertIn("history.go(historyIndex - targetHistoryIndex)", shell)
         self.assertIn("window.FuckClassroomUI?.initPage?.(pageRoot)", shell)
         self.assertIn("function initPage(rootNode = document)", app)
         self.assertIn("data-inline-task", app)
         self.assertIn("view-transition-name: page-content", styles)
         self.assertIn("body.pjax-loading", styles)
         self.assertIn("/static/app.css?v=20260927-1", base)
-        self.assertIn("/static/app.js?v=20260927-1", base)
-        self.assertIn("/static/shell.js?v=20260927-2", base)
+        self.assertIn("/static/app.js?v=20260927-2", base)
+        self.assertIn("/static/shell.js?v=20260927-3", base)
+
+    def test_selection_async_flows_share_pjax_page_lifecycle(self) -> None:
+        selection_ui = Path(
+            "fuckclassroom/plugins/course_selection/static/selection_ui.js"
+        ).read_text(encoding="utf-8")
+        catalog = Path(
+            "fuckclassroom/plugins/course_selection/static/selection_catalog.js"
+        ).read_text(encoding="utf-8")
+        plugin = Path(
+            "fuckclassroom/plugins/course_selection/plugin.py"
+        ).read_text(encoding="utf-8")
+
+        for script in (selection_ui, catalog):
+            self.assertIn("window.FuckClassroomPage?.current?.()", script)
+            self.assertIn("signal: pageSignal", script)
+            self.assertIn("function disposed()", script)
+            self.assertIn('error?.name === "AbortError"', script)
+
+        self.assertIn("while (!disposed())", selection_ui)
+        self.assertIn("while (!disposed())", catalog)
+        self.assertIn("if (!disposed()) {\n        history.replaceState(", catalog)
+        self.assertIn("selection_ui.js?v=20260927-2", plugin)
+        self.assertIn("selection_catalog.js?v=20260927-1", plugin)
 
     def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:
         template = Path("templates/base.html").read_text(encoding="utf-8")

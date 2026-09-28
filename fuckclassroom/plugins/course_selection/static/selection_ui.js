@@ -1,32 +1,23 @@
 (() => {
   const ui = window.FuckClassroomUI;
   if (!ui) return;
-  const { sleep, readResponseError, showToast } = ui;
-  const pageController = new AbortController();
-  const pageSignal = pageController.signal;
-  const pageTimers = new Set();
-  let pageDisposed = false;
+  const { readResponseError, showToast } = ui;
+  const pageRuntime = window.FuckClassroomPage?.current?.();
+  const pageSignal = pageRuntime?.signal;
+  const pageTimeout = pageRuntime?.setTimeout
+    ? (callback, delay) => pageRuntime.setTimeout(callback, delay)
+    : (callback, delay) => window.setTimeout(callback, delay);
+  const pageSleep = pageRuntime?.sleep
+    ? (delay) => pageRuntime.sleep(delay)
+    : (delay) => new Promise((resolve) => window.setTimeout(resolve, delay));
 
-  function pageTimeout(callback, delay) {
-    const timer = window.setTimeout(() => {
-      pageTimers.delete(timer);
-      if (!pageDisposed) callback();
-    }, delay);
-    pageTimers.add(timer);
-    return timer;
+  function disposed() {
+    return Boolean(pageSignal?.aborted);
   }
 
-  function cleanupPage() {
-    pageDisposed = true;
-    pageTimers.forEach((timer) => window.clearTimeout(timer));
-    pageTimers.clear();
-    pageController.abort();
+  function pageFetch(input, init = {}) {
+    return window.fetch(input, { ...init, signal: pageSignal });
   }
-
-  document.addEventListener("academic:page-before-swap", cleanupPage, {
-    once: true,
-    signal: pageSignal,
-  });
   function applySelectionActionState(form, action) {
     const row = form.closest("tr[data-lesson-id]");
     const button = form.querySelector("[data-selection-submit]");
@@ -74,7 +65,7 @@
       submitButton.disabled = true;
 
       try {
-        const response = await fetch(form.action, {
+        const response = await pageFetch(form.action, {
           method: "POST",
           body: new URLSearchParams(new FormData(form)),
           headers: { Accept: "application/json" },
@@ -83,28 +74,30 @@
         const started = await response.json();
         if (!started.status_url) throw new Error(actionLabel + "任务没有返回状态地址");
 
-        while (true) {
-          const taskResponse = await fetch(started.status_url, {
+        while (!disposed()) {
+          const taskResponse = await pageFetch(started.status_url, {
             headers: { Accept: "application/json" },
             cache: "no-store",
           });
           if (!taskResponse.ok) throw new Error("读取" + actionLabel + "进度失败（" + taskResponse.status + "）");
           const task = await taskResponse.json();
+          if (disposed()) return;
           const percent = Math.max(0, Math.min(100, Number(task.progress) || 0));
           progress.style.width = percent + "%";
           message.textContent = task.error || task.message || ("正在" + actionLabel);
           if (task.status === "failed") throw new Error(task.error || (actionLabel + "失败"));
           if (task.status === "succeeded") break;
-          await sleep(250);
+          await pageSleep(250);
         }
 
         let result = {};
         try {
-          const resultResponse = await fetch("/api/selection/action-result", { cache: "no-store" });
+          const resultResponse = await pageFetch("/api/selection/action-result", { cache: "no-store" });
           if (resultResponse.ok) result = await resultResponse.json();
         } catch {
           result = {};
         }
+        if (disposed()) return;
         const resultMessage = result.message || (actionLabel + "成功");
         statusBox.classList.add("success");
         message.textContent = resultMessage;
@@ -113,6 +106,7 @@
         showToast(actionLabel + "成功", (form.dataset.courseName || "课程") + "：" + resultMessage);
         pageTimeout(() => statusBox.classList.add("hidden"), 4000);
       } catch (error) {
+        if (disposed() || error?.name === "AbortError") return;
         const errorMessage = error && error.message ? error.message : (actionLabel + "失败");
         statusBox.classList.add("error");
         message.textContent = errorMessage;
@@ -120,7 +114,7 @@
         submitButton.disabled = false;
         showToast(actionLabel + "未完成", errorMessage, true);
       } finally {
-        statusBox.dataset.taskRunning = "false";
+        if (!disposed()) statusBox.dataset.taskRunning = "false";
       }
     });
   });
@@ -136,16 +130,18 @@
       const original = label.textContent;
       label.textContent = "加入中";
       try {
-        const response = await fetch(form.action, {
+        const response = await pageFetch(form.action, {
           method: "POST",
           body: new URLSearchParams(new FormData(form)),
           headers: { Accept: "application/json" },
         });
         if (!response.ok) throw new Error(await readResponseError(response, "加入定时选课失败"));
         const payload = await response.json();
+        if (disposed()) return;
         label.textContent = "已定时";
         showToast("定时选课已保存", payload.message || (form.dataset.courseName + " 已加入队列"));
       } catch (error) {
+        if (disposed() || error?.name === "AbortError") return;
         button.disabled = false;
         label.textContent = original;
         showToast("未能加入定时选课", error && error.message ? error.message : "请求失败", true);
@@ -171,9 +167,10 @@
     const refreshAutoJobs = async () => {
       if (!document.hidden) {
         try {
-          const response = await fetch("/api/selection/auto/jobs", { cache: "no-store" });
+          const response = await pageFetch("/api/selection/auto/jobs", { cache: "no-store" });
           if (response.ok) {
             const payload = await response.json();
+            if (disposed()) return;
             (payload.jobs || []).forEach((job) => {
               const row = autoJobList.querySelector('[data-auto-job-id="' + CSS.escape(job.id) + '"]');
               if (!row) return;
@@ -200,11 +197,12 @@
               if (last) last.textContent = job.last_attempt_at || "尚未提交";
             });
           }
-        } catch {
+        } catch (error) {
+          if (disposed() || error?.name === "AbortError") return;
           // Keep the last known state; the next poll will retry.
         }
       }
-      pageTimeout(refreshAutoJobs, 3000);
+      if (!disposed()) pageTimeout(refreshAutoJobs, 3000);
     };
     pageTimeout(refreshAutoJobs, 3000);
   }
@@ -225,6 +223,7 @@
     };
 
     const renderCount = (lessonId, countInfo) => {
+      if (disposed()) return;
       const row = document.querySelector('tr[data-lesson-id="' + CSS.escape(String(lessonId)) + '"]');
       if (!row) return;
       const selectedCount = Number(countInfo && countInfo.selected_count);
@@ -268,6 +267,7 @@
     };
 
     async function refreshCounts() {
+      if (disposed()) return;
       if (refreshRunning || !countRefreshToggle.checked || document.hidden) {
         scheduleRefresh();
         return;
@@ -275,7 +275,7 @@
       refreshRunning = true;
       countRefreshStatus.textContent = "刷新中";
       try {
-        const response = await fetch("/api/selection/counts", {
+        const response = await pageFetch("/api/selection/counts", {
           headers: { Accept: "application/json" },
           cache: "no-store",
         });
@@ -288,11 +288,14 @@
           throw new Error(errorMessage);
         }
         const payload = await response.json();
+        if (disposed()) return;
         Object.entries(payload.courses || {}).forEach(([lessonId, countInfo]) => renderCount(lessonId, countInfo));
         countRefreshStatus.textContent = "更新于 " + new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       } catch (error) {
+        if (disposed() || error?.name === "AbortError") return;
         countRefreshStatus.textContent = error && error.message ? error.message : "人数刷新失败";
       } finally {
+        if (disposed()) return;
         refreshRunning = false;
         scheduleRefresh();
       }
