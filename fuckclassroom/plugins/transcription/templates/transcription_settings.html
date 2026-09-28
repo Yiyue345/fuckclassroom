@@ -50,8 +50,8 @@
             <div class="asr-model-row{% if settings.asr_model == item.model %} selected{% endif %}"
                  data-asr-model-row
                  data-model="{{ item.model }}"
-                 data-repo-id="{{ item.repo_id or item.model }}"
-                 data-aliases="{{ item.aliases|join(',') if item.aliases else item.model }}"
+                 data-repo-id="{{ item.get('repo_id') or item.model }}"
+                 data-aliases="{{ item.get('aliases', [])|join(',') if item.get('aliases') else item.model }}"
                  data-installed="{{ 'true' if item.installed else 'false' }}"
                  data-estimated-size="{{ estimate }}"
                  role="option"
