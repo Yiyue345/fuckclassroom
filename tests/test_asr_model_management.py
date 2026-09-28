@@ -318,6 +318,42 @@ class AsrModelManagementTests(unittest.TestCase):
                 {"turbo", "large-v3-turbo"},
             )
 
+    def test_model_statuses_keep_aliases_in_sync_for_shared_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot"
+            snapshot.mkdir()
+            for name in ("config.json", "model.bin", "tokenizer.json", "vocabulary.json"):
+                (snapshot / name).write_bytes(b"x")
+
+            fake_hub = ModuleType("huggingface_hub")
+            fake_hub.snapshot_download = lambda *args, **kwargs: str(snapshot)  # type: ignore[attr-defined]
+            service = LocalTranscriptionService(AppConfig(data_dir=root))
+            repo_id = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+
+            with (
+                patch.dict("sys.modules", {"huggingface_hub": fake_hub}),
+                patch(
+                    "fuckclassroom.plugins.transcription.environment.available_asr_models",
+                    return_value=("turbo", "large-v3-turbo"),
+                ),
+                patch.object(service, "_model_repo_id", return_value=repo_id),
+            ):
+                statuses = service.model_statuses()
+
+            self.assertEqual(
+                [status["model"] for status in statuses],
+                ["turbo", "large-v3-turbo"],
+            )
+            self.assertTrue(all(status["installed"] for status in statuses))
+            self.assertTrue(all(status["repo_id"] == repo_id for status in statuses))
+            self.assertTrue(
+                all(
+                    set(status["aliases"]) == {"turbo", "large-v3-turbo"}
+                    for status in statuses
+                )
+            )
+
     def test_process_proxy_exposes_model_management_calls(self) -> None:
         host = _FakeHost()
         proxy = TranscriptionProcessProxy(host)  # type: ignore[arg-type]
