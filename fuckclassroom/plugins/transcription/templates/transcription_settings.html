@@ -299,6 +299,7 @@
     if (!model || !['download', 'delete'].includes(action)) return;
     if (action === 'delete' && !window.confirm('确认删除本地语音模型 ' + model + '？')) return;
 
+    setOpen(false);
     actions().forEach(item => { item.disabled = true; });
     showTask(action === 'download' ? '正在准备下载 ' + model : '正在删除 ' + model, 4);
 
