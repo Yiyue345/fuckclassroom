@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 
 
 _PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
+_REMOVING_PLUGIN_DIR_RE = re.compile(
+    r"^\.[a-z][a-z0-9_-]{1,63}\.removing-[0-9a-f]{32}$"
+)
 _MAX_PLUGIN_ZIP_FILES = 4096
 _MAX_PLUGIN_ZIP_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 _MAX_PLUGIN_ZIP_SINGLE_FILE_BYTES = 128 * 1024 * 1024
@@ -218,8 +221,10 @@ class PluginManager:
         return {item.id: item for item in self.descriptors()}
 
     def desired_enabled(self) -> set[str]:
+        strict = False
         if self._runtime_override is not None:
             selected = set(self._runtime_override)
+            strict = True
         else:
             raw_env = os.environ.get("FUCKCLASSROOM_PLUGINS")
             if raw_env is not None:
@@ -228,13 +233,14 @@ class PluginManager:
                     for value in raw_env.replace(";", ",").split(",")
                     if value.strip()
                 }
+                strict = True
             else:
                 descriptors = self.descriptor_map()
                 raw_selected = self._load_selected()
                 selected = self._normalize_selected(raw_selected, descriptors)
                 if selected != raw_selected:
                     self._save_selected(selected)
-        return self._expand_dependencies(selected)
+        return self._expand_dependencies(selected, allow_missing=not strict)
 
     def configured_selected(self) -> set[str]:
         descriptors = self.descriptor_map()
@@ -251,7 +257,7 @@ class PluginManager:
             raise PluginManagerError(f"插件不存在：{plugin_id}")
         selected = self._normalize_selected(self._load_selected(), descriptors)
         selected.add(plugin_id)
-        desired = self._expand_dependencies(selected)
+        desired = self._expand_dependencies(selected, allow_missing=True)
         # Only validate the plugin requested by this operation and its actual
         # dependency chain. Unrelated configured plugins may be unavailable
         # because of their own missing dependencies and must not block this
@@ -288,7 +294,7 @@ class PluginManager:
             raise PluginManagerError(f"插件不存在：{plugin_id}")
         selected = self._normalize_selected(self._load_selected(), descriptors)
         selected.difference_update(self._dependent_closure(plugin_id, descriptors))
-        desired = self._expand_dependencies(selected)
+        desired = self._expand_dependencies(selected, allow_missing=True)
         self._save_selected(selected)
         return desired
 
@@ -493,7 +499,7 @@ class PluginManager:
             )
 
         selected = self._normalize_selected(self._load_selected(), descriptors)
-        if plugin_id in self._expand_dependencies(selected):
+        if plugin_id in self._expand_dependencies(selected, allow_missing=True):
             raise PluginManagerError("插件仍被配置为启用，请先禁用")
 
         destination = self.plugin_dir / plugin_id
@@ -951,18 +957,27 @@ class PluginManager:
         )
         temporary.replace(self.state_path)
 
-    def _expand_dependencies(self, selected: Iterable[str]) -> set[str]:
+    def _expand_dependencies(
+        self,
+        selected: Iterable[str],
+        *,
+        allow_missing: bool = False,
+    ) -> set[str]:
         descriptors = self.descriptor_map()
         enabled = set(selected)
         enabled.add("core_ui")
         unknown = enabled.difference(descriptors)
         if unknown:
-            raise PluginManagerError(f"未知插件：{', '.join(sorted(unknown))}")
+            if not allow_missing:
+                raise PluginManagerError(f"未知插件：{', '.join(sorted(unknown))}")
+            enabled.intersection_update(descriptors)
         pending = list(enabled)
         while pending:
             plugin_id = pending.pop()
             for dependency in descriptors[plugin_id].requires:
                 if dependency not in descriptors:
+                    if allow_missing:
+                        continue
                     raise PluginManagerError(
                         f"插件 {plugin_id} 缺少依赖：{dependency}"
                     )
@@ -1015,7 +1030,7 @@ class PluginManager:
         except OSError:
             return
         for child in children:
-            if not child.name.startswith(".") or ".removing-" not in child.name:
+            if not _REMOVING_PLUGIN_DIR_RE.fullmatch(child.name):
                 continue
             if not child.is_dir():
                 continue
@@ -1337,7 +1352,11 @@ def build_registry(
         plugin_id
         for plugin_id in desired
         if (
-            not manager.compatibility_status(descriptors[plugin_id])["compatible"]
+            any(
+                dependency not in descriptors
+                for dependency in descriptors[plugin_id].requires
+            )
+            or not manager.compatibility_status(descriptors[plugin_id])["compatible"]
             or any(
                 not item["installed"] and not item["optional"]
                 for item in manager.dependency_status(plugin_id)
