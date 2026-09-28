@@ -300,6 +300,84 @@ class PluginCompositionTests(unittest.TestCase):
 
 
 class PluginRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_registry_rejects_dependency_cycles(self) -> None:
+        with self.assertRaisesRegex(ValueError, "dependency cycle"):
+            PluginRegistry(
+                (
+                    PluginSpec(id="plugin_a", name="A", requires=("plugin_b",)),
+                    PluginSpec(id="plugin_b", name="B", requires=("plugin_a",)),
+                )
+            )
+
+    async def test_runtime_uses_dependency_topology_before_order_and_reverses_shutdown(self) -> None:
+        events: list[str] = []
+
+        def service(name: str):
+            def setup(context) -> None:
+                events.append(f"service:{name}")
+                context.services.add(name, object())
+            return setup
+
+        async def startup(name: str, dependency: str | None = None) -> None:
+            if dependency:
+                self.assertTrue(runtime.services.has(dependency))
+            events.append(f"start:{name}")
+
+        def shutdown(name: str) -> None:
+            events.append(f"stop:{name}")
+
+        dependency = PluginSpec(
+            id="dependency",
+            name="Dependency",
+            order=200,
+            service_factory=service("dependency"),
+            startup=lambda context: startup("dependency"),
+            shutdown=lambda context: shutdown("dependency"),
+        )
+        consumer = PluginSpec(
+            id="consumer",
+            name="Consumer",
+            order=10,
+            requires=("dependency",),
+            service_factory=service("consumer"),
+            startup=lambda context: startup("consumer", "dependency"),
+            shutdown=lambda context: shutdown("consumer"),
+        )
+        independent = PluginSpec(
+            id="independent",
+            name="Independent",
+            order=20,
+            service_factory=service("independent"),
+            startup=lambda context: startup("independent"),
+            shutdown=lambda context: shutdown("independent"),
+        )
+        registry = PluginRegistry((consumer, dependency, independent))
+        runtime = PluginRuntime(registry, object(), self)
+
+        self.assertEqual(
+            registry.plugin_ids,
+            ("independent", "dependency", "consumer"),
+        )
+
+        runtime.initialize_services()
+        await runtime.start()
+        await runtime.stop()
+
+        self.assertEqual(
+            events,
+            [
+                "service:independent",
+                "service:dependency",
+                "service:consumer",
+                "start:independent",
+                "start:dependency",
+                "start:consumer",
+                "stop:consumer",
+                "stop:dependency",
+                "stop:independent",
+            ],
+        )
+
     async def test_service_route_and_lifecycle_hooks_are_owned_by_runtime(self) -> None:
         events: list[str] = []
 

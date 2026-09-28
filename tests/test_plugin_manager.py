@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import shutil
 import tempfile
 import time
 import unittest
@@ -663,6 +664,141 @@ def build_plugin():
             self.assertNotIn("demo_plugin", descriptors)
             residues = list((root / "data" / "plugins").glob(".demo_plugin.removing-*"))
             self.assertEqual(len(residues), 1)
+
+    def test_configured_plugin_with_missing_requires_does_not_block_app_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "plugins" / "broken_plugin"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "broken_plugin",
+                        "name": "Broken Plugin",
+                        "requires": ["missing_base"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='broken_plugin', name='Broken Plugin', requires=('missing_base',))\n",
+                encoding="utf-8",
+            )
+            (root / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui", "broken_plugin"]}),
+                encoding="utf-8",
+            )
+
+            app = create_app(AppConfig(data_dir=root))
+            from fastapi.testclient import TestClient
+
+            with TestClient(app) as client:
+                response = client.get("/plugins")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn("broken_plugin", app.state.plugin_registry.plugin_ids)
+            rows = {
+                row["id"]: row
+                for row in app.state.plugin_manager.status_rows(
+                    app.state.plugin_registry.plugin_ids
+                )
+            }
+            self.assertTrue(rows["broken_plugin"]["desired_enabled"])
+            self.assertFalse(rows["broken_plugin"]["current_enabled"])
+            self.assertEqual(
+                rows["broken_plugin"]["missing_plugin_dependencies"],
+                ["missing_base"],
+            )
+
+    def test_stale_removing_directory_is_retried_and_nonmatching_hidden_dirs_are_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_dir = root / "plugins"
+            stale = plugin_dir / ".demo_plugin.removing-0123456789abcdef0123456789abcdef"
+            stale.mkdir(parents=True)
+            (stale / "leftover.bin").write_bytes(b"x")
+            unrelated = plugin_dir / ".notes.removing-manual"
+            unrelated.mkdir()
+            (unrelated / "keep.txt").write_text("keep", encoding="utf-8")
+
+            manager = PluginManager(AppConfig(data_dir=root))
+            descriptors = manager.descriptor_map()
+
+            self.assertIn("core_ui", descriptors)
+            self.assertFalse(stale.exists())
+            self.assertTrue(unrelated.exists())
+
+    def test_failed_stale_removing_cleanup_does_not_block_plugin_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_dir = root / "plugins"
+            stale = plugin_dir / ".demo_plugin.removing-fedcba9876543210fedcba9876543210"
+            stale.mkdir(parents=True)
+
+            manager = PluginManager(AppConfig(data_dir=root))
+            original_rmtree = shutil.rmtree
+
+            def fail_only_stale(path, *args, **kwargs):
+                if Path(path) == stale:
+                    raise PermissionError("locked")
+                return original_rmtree(path, *args, **kwargs)
+
+            with patch("fuckclassroom.plugins.manager.shutil.rmtree", side_effect=fail_only_stale):
+                descriptors = manager.descriptor_map()
+
+            self.assertIn("core_ui", descriptors)
+            self.assertTrue(stale.exists())
+
+    def test_install_rejects_plugin_that_would_create_dependency_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = root / "plugins" / "plugin_a"
+            installed.mkdir(parents=True)
+            (installed / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "plugin_a",
+                        "name": "Plugin A",
+                        "requires": ["plugin_b"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (installed / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin(): return PluginSpec(id='plugin_a', name='Plugin A', requires=('plugin_b',))\n",
+                encoding="utf-8",
+            )
+
+            source = root / "candidate"
+            source.mkdir()
+            (source / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "plugin_b",
+                        "name": "Plugin B",
+                        "requires": ["plugin_a"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (source / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin(): return PluginSpec(id='plugin_b', name='Plugin B', requires=('plugin_a',))\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root))
+
+            with self.assertRaisesRegex(PluginManagerError, "依赖存在循环"):
+                manager.install_from_path(str(source))
+
+            self.assertFalse((root / "plugins" / "plugin_b").exists())
+            self.assertTrue(installed.exists())
 
     def test_process_isolated_plugin_is_not_imported_in_parent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

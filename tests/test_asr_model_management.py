@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import ModuleType
@@ -10,6 +12,7 @@ from fuckclassroom.core.config import AppConfig
 from fuckclassroom.plugins.transcription.engine import (
     LocalTranscriptionService,
     _MODEL_CACHE,
+    _TRANSCRIPTION_CONDITION,
     _transcription_slot,
 )
 from fuckclassroom.plugins.transcription.environment import (
@@ -144,6 +147,223 @@ class AsrModelManagementTests(unittest.TestCase):
                     "当前有本地转写任务运行",
                 ):
                     service.delete_model("small")
+
+    def test_delete_model_blocks_new_transcription_until_maintenance_finishes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = AppConfig(data_dir=Path(directory))
+            service = LocalTranscriptionService(config)
+            repo_id = "Systran/faster-whisper-small"
+            repo_dir = config.asr_models_dir / "models--Systran--faster-whisper-small"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / "model.bin").write_bytes(b"model")
+
+            delete_in_progress = threading.Event()
+            allow_delete = threading.Event()
+            transcription_entered = threading.Event()
+            delete_errors: list[BaseException] = []
+            original_rmtree = shutil.rmtree
+
+            def blocking_rmtree(path, *args, **kwargs):
+                if Path(path) == repo_dir:
+                    delete_in_progress.set()
+                    if not allow_delete.wait(timeout=3):
+                        raise RuntimeError("test timed out waiting to finish deletion")
+                return original_rmtree(path, *args, **kwargs)
+
+            def delete_worker() -> None:
+                try:
+                    service.delete_model("small")
+                except BaseException as exc:  # noqa: BLE001 - surfaced in assertion below.
+                    delete_errors.append(exc)
+
+            def transcription_worker() -> None:
+                with _transcription_slot(1, None):
+                    transcription_entered.set()
+
+            with (
+                patch.object(service, "_validate_managed_model", return_value="small"),
+                patch.object(service, "_model_repo_id", return_value=repo_id),
+                patch.object(service, "_model_aliases_for_repo", return_value=("small",)),
+                patch(
+                    "fuckclassroom.plugins.transcription.engine.shutil.rmtree",
+                    side_effect=blocking_rmtree,
+                ),
+            ):
+                delete_thread = threading.Thread(target=delete_worker)
+                delete_thread.start()
+                self.assertTrue(delete_in_progress.wait(timeout=2))
+
+                transcription_thread = threading.Thread(target=transcription_worker)
+                transcription_thread.start()
+                self.assertFalse(transcription_entered.wait(timeout=0.1))
+
+                allow_delete.set()
+                delete_thread.join(timeout=2)
+                self.assertFalse(delete_thread.is_alive())
+                self.assertFalse(delete_errors)
+
+                self.assertTrue(transcription_entered.wait(timeout=2))
+                transcription_thread.join(timeout=2)
+                self.assertFalse(transcription_thread.is_alive())
+
+    def test_second_delete_rechecks_active_transcription_after_waiting_for_maintenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = AppConfig(data_dir=Path(directory))
+            service = LocalTranscriptionService(config)
+            repo_a = "example/model-a"
+            repo_b = "example/model-b"
+            repo_dirs = {
+                repo_a: config.asr_models_dir / "models--example--model-a",
+                repo_b: config.asr_models_dir / "models--example--model-b",
+            }
+            for repo_dir in repo_dirs.values():
+                repo_dir.mkdir(parents=True)
+                (repo_dir / "model.bin").write_bytes(b"model")
+
+            delete_a_blocked = threading.Event()
+            allow_delete_a = threading.Event()
+            delete_b_woke = threading.Event()
+            allow_delete_b_recheck = threading.Event()
+            delete_b_rmtree_entered = threading.Event()
+            transcription_entered = threading.Event()
+            allow_transcription_exit = threading.Event()
+            delete_a_errors: list[BaseException] = []
+            delete_b_errors: list[BaseException] = []
+            original_rmtree = shutil.rmtree
+            original_condition_wait = _TRANSCRIPTION_CONDITION.wait
+
+            def repo_for_model(model_name: str) -> str:
+                return repo_a if model_name == "model-a" else repo_b
+
+            def blocking_rmtree(path, *args, **kwargs):
+                target = Path(path)
+                if target == repo_dirs[repo_a]:
+                    delete_a_blocked.set()
+                    if not allow_delete_a.wait(timeout=3):
+                        raise RuntimeError("test timed out waiting to finish delete A")
+                elif target == repo_dirs[repo_b]:
+                    delete_b_rmtree_entered.set()
+                return original_rmtree(path, *args, **kwargs)
+
+            def coordinated_condition_wait(timeout=None):
+                result = original_condition_wait(timeout=timeout)
+                if threading.current_thread().name == "delete-b":
+                    # The Condition.wait contract returns with the condition lock
+                    # reacquired. Temporarily release it here so the already
+                    # waiting transcription can enter its slot before delete B
+                    # resumes after delete A's maintenance window.
+                    _TRANSCRIPTION_CONDITION.release()
+                    try:
+                        delete_b_woke.set()
+                        if not allow_delete_b_recheck.wait(timeout=3):
+                            raise RuntimeError(
+                                "test timed out waiting to resume delete B"
+                            )
+                    finally:
+                        _TRANSCRIPTION_CONDITION.acquire()
+                return result
+
+            def delete_worker(model_name: str, errors: list[BaseException]) -> None:
+                try:
+                    service.delete_model(model_name)
+                except BaseException as exc:  # noqa: BLE001 - asserted below.
+                    errors.append(exc)
+
+            def transcription_worker() -> None:
+                with _transcription_slot(1, None):
+                    transcription_entered.set()
+                    allow_transcription_exit.wait(timeout=3)
+
+            with (
+                patch.object(
+                    service,
+                    "_validate_managed_model",
+                    side_effect=lambda model_name: model_name,
+                ),
+                patch.object(
+                    service,
+                    "_model_repo_id",
+                    side_effect=repo_for_model,
+                ),
+                patch.object(
+                    service,
+                    "_model_aliases_for_repo",
+                    side_effect=lambda repo_id: (
+                        "model-a" if repo_id == repo_a else "model-b",
+                    ),
+                ),
+                patch(
+                    "fuckclassroom.plugins.transcription.engine.shutil.rmtree",
+                    side_effect=blocking_rmtree,
+                ),
+                patch.object(
+                    _TRANSCRIPTION_CONDITION,
+                    "wait",
+                    side_effect=coordinated_condition_wait,
+                ),
+            ):
+                delete_a = threading.Thread(
+                    target=delete_worker,
+                    args=("model-a", delete_a_errors),
+                    name="delete-a",
+                )
+                delete_a.start()
+                self.assertTrue(delete_a_blocked.wait(timeout=2))
+
+                delete_b = threading.Thread(
+                    target=delete_worker,
+                    args=("model-b", delete_b_errors),
+                    name="delete-b",
+                )
+                delete_b.start()
+                self.assertFalse(delete_b_rmtree_entered.wait(timeout=0.1))
+                self.assertTrue(delete_b.is_alive())
+
+                transcription = threading.Thread(
+                    target=transcription_worker,
+                    name="transcription",
+                )
+                transcription.start()
+                self.assertFalse(transcription_entered.wait(timeout=0.1))
+
+                allow_delete_a.set()
+                self.assertTrue(delete_b_woke.wait(timeout=2))
+                self.assertTrue(transcription_entered.wait(timeout=2))
+
+                allow_delete_b_recheck.set()
+                delete_b.join(timeout=2)
+                self.assertFalse(delete_b.is_alive())
+                self.assertFalse(delete_b_rmtree_entered.is_set())
+                self.assertEqual(len(delete_b_errors), 1)
+                self.assertIsInstance(delete_b_errors[0], LocalTranscriptionError)
+                self.assertIn("当前有本地转写任务运行", str(delete_b_errors[0]))
+
+                allow_transcription_exit.set()
+                transcription.join(timeout=2)
+                delete_a.join(timeout=2)
+
+            self.assertFalse(transcription.is_alive())
+            self.assertFalse(delete_a.is_alive())
+            self.assertFalse(delete_a_errors)
+
+    def test_delete_rejection_does_not_leave_model_maintenance_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            service = LocalTranscriptionService(AppConfig(data_dir=Path(directory)))
+            with (
+                patch.object(service, "_validate_managed_model", return_value="small"),
+                patch.object(service, "_model_repo_id", return_value="Systran/faster-whisper-small"),
+                _transcription_slot(1, None),
+            ):
+                with self.assertRaisesRegex(
+                    LocalTranscriptionError,
+                    "当前有本地转写任务运行",
+                ):
+                    service.delete_model("small")
+
+            entered = False
+            with _transcription_slot(1, None):
+                entered = True
+            self.assertTrue(entered)
 
     def test_runtime_resolver_falls_back_compute_type_after_auto_selects_cpu(self) -> None:
         capabilities = AsrRuntimeCapabilities(

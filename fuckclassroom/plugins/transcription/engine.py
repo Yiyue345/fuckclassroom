@@ -45,6 +45,7 @@ _MODEL_CACHE: dict[tuple[object, ...], object] = {}
 _MODEL_LOCK = threading.Lock()
 _TRANSCRIPTION_CONDITION = threading.Condition()
 _ACTIVE_TRANSCRIPTIONS = 0
+_MODEL_MAINTENANCE = False
 _OPENCC_CONVERTER = None
 _OPENCC_LOCK = threading.Lock()
 _PREPARATION_HEARTBEAT_SECONDS = 10.0
@@ -532,34 +533,31 @@ class LocalTranscriptionService:
         configured = self._validate_managed_model(model_name)
         repo_id = self._model_repo_id(configured)
 
-        with _TRANSCRIPTION_CONDITION:
-            if _ACTIVE_TRANSCRIPTIONS > 0:
-                raise LocalTranscriptionError("当前有本地转写任务运行，完成或取消后再删除模型")
-
         cache_name = "models--" + repo_id.replace("/", "--")
         repo_cache = self.config.asr_models_dir / cache_name
         lock_cache = self.config.asr_models_dir / ".locks" / cache_name
 
         aliases = self._model_aliases_for_repo(repo_id)
         cache_identity = f"repo:{repo_id}"
-        with _MODEL_LOCK:
-            for key in [
-                key
-                for key in _MODEL_CACHE
-                if key and (key[0] == cache_identity or key[0] in aliases)
-            ]:
-                _MODEL_CACHE.pop(key, None)
-            gc.collect()
-            existed = repo_cache.exists()
-            try:
-                if repo_cache.exists():
-                    shutil.rmtree(repo_cache)
-                if lock_cache.exists():
-                    shutil.rmtree(lock_cache)
-            except OSError as exc:
-                raise LocalTranscriptionError(
-                    f"删除语音模型 {configured} 失败：{exc}"
-                ) from exc
+        with _model_maintenance_window():
+            with _MODEL_LOCK:
+                for key in [
+                    key
+                    for key in _MODEL_CACHE
+                    if key and (key[0] == cache_identity or key[0] in aliases)
+                ]:
+                    _MODEL_CACHE.pop(key, None)
+                gc.collect()
+                existed = repo_cache.exists()
+                try:
+                    if repo_cache.exists():
+                        shutil.rmtree(repo_cache)
+                    if lock_cache.exists():
+                        shutil.rmtree(lock_cache)
+                except OSError as exc:
+                    raise LocalTranscriptionError(
+                        f"删除语音模型 {configured} 失败：{exc}"
+                    ) from exc
 
         return {
             "model": configured,
@@ -1106,13 +1104,20 @@ def _transcription_slot(limit: int, progress: ProgressCallback | None = None):
     global _ACTIVE_TRANSCRIPTIONS
     limit = max(1, int(limit))
     with _TRANSCRIPTION_CONDITION:
-        while _ACTIVE_TRANSCRIPTIONS >= limit:
+        while _MODEL_MAINTENANCE or _ACTIVE_TRANSCRIPTIONS >= limit:
             _raise_if_cancelled(progress)
-            _report(
-                progress,
-                10,
-                f"正在等待本地转写槽位：{_ACTIVE_TRANSCRIPTIONS}/{limit} 个任务运行中",
-            )
+            if _MODEL_MAINTENANCE:
+                _report(
+                    progress,
+                    10,
+                    "正在等待语音模型维护完成",
+                )
+            else:
+                _report(
+                    progress,
+                    10,
+                    f"正在等待本地转写槽位：{_ACTIVE_TRANSCRIPTIONS}/{limit} 个任务运行中",
+                )
             _TRANSCRIPTION_CONDITION.wait(timeout=1.0)
         _ACTIVE_TRANSCRIPTIONS += 1
         active = _ACTIVE_TRANSCRIPTIONS
@@ -1122,6 +1127,23 @@ def _transcription_slot(limit: int, progress: ProgressCallback | None = None):
     finally:
         with _TRANSCRIPTION_CONDITION:
             _ACTIVE_TRANSCRIPTIONS = max(0, _ACTIVE_TRANSCRIPTIONS - 1)
+            _TRANSCRIPTION_CONDITION.notify_all()
+
+
+@contextmanager
+def _model_maintenance_window():
+    global _MODEL_MAINTENANCE
+    with _TRANSCRIPTION_CONDITION:
+        while _MODEL_MAINTENANCE:
+            _TRANSCRIPTION_CONDITION.wait(timeout=1.0)
+        if _ACTIVE_TRANSCRIPTIONS > 0:
+            raise LocalTranscriptionError("当前有本地转写任务运行，完成或取消后再删除模型")
+        _MODEL_MAINTENANCE = True
+    try:
+        yield
+    finally:
+        with _TRANSCRIPTION_CONDITION:
+            _MODEL_MAINTENANCE = False
             _TRANSCRIPTION_CONDITION.notify_all()
 
 

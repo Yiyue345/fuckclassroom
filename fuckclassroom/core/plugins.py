@@ -176,6 +176,7 @@ class StaticMount:
 class PluginRegistry:
     def __init__(self, plugins: Iterable[PluginSpec] = ()) -> None:
         self._plugins: dict[str, PluginSpec] = {}
+        self._ordered_plugins: tuple[PluginSpec, ...] | None = None
         for plugin in plugins:
             self.register(plugin)
         self.validate_dependencies()
@@ -189,14 +190,62 @@ class PluginRegistry:
                 f"runtime supports API {PLUGIN_API_VERSION}"
             )
         self._plugins[plugin.id] = plugin
+        self._ordered_plugins = None
 
     def validate_dependencies(self) -> None:
-        for plugin in self.plugins:
+        for plugin in self._plugins.values():
             missing = [item for item in plugin.requires if item not in self._plugins]
             if missing:
                 raise ValueError(
                     f"plugin {plugin.id} requires disabled plugins: {', '.join(missing)}"
                 )
+        self._ordered_plugins = self._dependency_order()
+
+    def _dependency_order(self) -> tuple[PluginSpec, ...]:
+        indegree = {
+            plugin_id: len(plugin.requires)
+            for plugin_id, plugin in self._plugins.items()
+        }
+        dependents: dict[str, list[str]] = {
+            plugin_id: [] for plugin_id in self._plugins
+        }
+        for plugin in self._plugins.values():
+            for dependency in plugin.requires:
+                dependents[dependency].append(plugin.id)
+
+        ordered: list[PluginSpec] = []
+        processed: set[str] = set()
+        ready = [
+            plugin_id
+            for plugin_id, degree in indegree.items()
+            if degree == 0
+        ]
+        while ready:
+            layer = sorted(
+                ready,
+                key=lambda plugin_id: (
+                    self._plugins[plugin_id].order,
+                    plugin_id,
+                ),
+            )
+            ready = []
+            for plugin_id in layer:
+                if plugin_id in processed:
+                    continue
+                processed.add(plugin_id)
+                ordered.append(self._plugins[plugin_id])
+            for plugin_id in layer:
+                for dependent in dependents[plugin_id]:
+                    indegree[dependent] -= 1
+                    if indegree[dependent] == 0:
+                        ready.append(dependent)
+
+        if len(ordered) != len(self._plugins):
+            cycle_nodes = sorted(set(self._plugins).difference(processed))
+            raise ValueError(
+                "plugin dependency cycle detected: " + " -> ".join(cycle_nodes)
+            )
+        return tuple(ordered)
 
     def is_enabled(self, plugin_id: str) -> bool:
         return plugin_id in self._plugins
@@ -209,7 +258,9 @@ class PluginRegistry:
 
     @property
     def plugins(self) -> tuple[PluginSpec, ...]:
-        return tuple(sorted(self._plugins.values(), key=lambda item: (item.order, item.id)))
+        if self._ordered_plugins is None:
+            self.validate_dependencies()
+        return self._ordered_plugins or ()
 
     @property
     def plugin_ids(self) -> tuple[str, ...]:
