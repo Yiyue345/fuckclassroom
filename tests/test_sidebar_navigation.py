@@ -129,6 +129,9 @@ class SidebarNavigationTests(unittest.TestCase):
         styles = Path(
             "fuckclassroom/plugins/core_ui/static/core_ui.css"
         ).read_text(encoding="utf-8")
+        registry_template = Path(
+            "fuckclassroom/plugins/core_ui/templates/core/plugin_registry.html"
+        ).read_text(encoding="utf-8")
         base = Path("templates/base.html").read_text(encoding="utf-8")
 
         self.assertIn('class="plugin-toolbar surface"', template)
@@ -175,13 +178,21 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("const removeButtons = Array.from(document.querySelectorAll('[data-plugin-remove]'))", template)
         self.assertIn("function removePluginFromPage(id)", template)
         self.assertIn("function syncRemoveButtons(id, desiredEnabled, currentEnabled, options = {})", template)
-        self.assertIn("const disabled = !mutable || desiredEnabled || currentEnabled || busy", template)
+        self.assertIn("const disabled = !mutable || Boolean(dependents) || desiredEnabled || currentEnabled || busy", template)
         self.assertIn("syncRemoveButtons(id, desiredEnabled, currentEnabled, { busy })", template)
+        self.assertIn('data-plugin-dependents="{{ plugin.dependents|join(\', \') }}"', template)
+        self.assertIn("Boolean(dependents)", template)
+        self.assertIn("仍被以下插件依赖", template)
+        self.assertIn("plugin-remove-blocker", template)
         self.assertIn("rows.splice(rowIndex, 1)", template)
         self.assertIn("details.splice(detailIndex, 1)", template)
         self.assertIn("method: 'DELETE'", template)
         self.assertIn("'/api/plugins/' + encodeURIComponent(id)", template)
-        self.assertIn("await refreshShellChrome()", template)
+        self.assertIn("let payload;", template)
+        self.assertIn("removePluginFromPage(id);", template)
+        self.assertIn("finishOperation(true);", template)
+        self.assertIn("const refreshed = await refreshShellChrome();", template)
+        self.assertIn("插件已删除，但界面刷新失败", template)
         self.assertNotIn('action="/plugins/{{ plugin.id }}/remove"', template)
 
         self.assertIn('id="plugin-zip-button"', template)
@@ -199,6 +210,10 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("plugin-dependency-box", template)
         self.assertIn("plugin-manage-row", template)
 
+        self.assertIn("含 Ed25519 签名", registry_template)
+        self.assertIn("安装时仍会执行 SHA-256 与 Ed25519 验证", registry_template)
+        self.assertNotIn(">已签名</span>", registry_template)
+
         self.assertIn(
             "grid-template-columns: minmax(0, 1.24fr) minmax(440px, .76fr)",
             styles,
@@ -213,6 +228,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("border-radius: 28px", styles)
         self.assertIn(".plugin-detail-meta-grid {", styles)
         self.assertIn(".plugin-dependency-box {", styles)
+        self.assertIn(".plugin-remove-blocker {", styles)
         self.assertIn("@container (max-width: 760px)", styles)
         self.assertIn("@media (max-width: 1280px)", styles)
 
@@ -275,7 +291,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260928-3",
+            "/plugins/core_ui/static/core_ui.css?v=20260928-4",
             registry.stylesheets,
         )
         self.assertIn(
