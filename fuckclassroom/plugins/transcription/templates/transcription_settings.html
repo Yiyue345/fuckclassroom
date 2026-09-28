@@ -4,10 +4,10 @@
 {% set cuda_available = runtime.get("cuda_available", false) %}
 {% set auto_device = runtime.get("auto_device", "cpu") %}
 {% set compute_types = runtime.get("compute_types", {"cpu": ["int8", "float32", "default"], "cuda": []}) %}
-{% set selected_device = settings.asr_device if settings.asr_device != "cuda" or cuda_available else "cpu" %}
+{% set selected_device = settings.asr_device %}
 {% set selected_resolved_device = auto_device if selected_device == "auto" else selected_device %}
 {% set selected_supported_types = compute_types.get(selected_resolved_device, []) %}
-{% set selected_compute_type = settings.asr_compute_type if settings.asr_compute_type in selected_supported_types else ("int8" if "int8" in selected_supported_types else "default") %}
+{% set selected_compute_type = settings.asr_compute_type %}
 {% call ui.section("transcription", "本地语音转写", "调整 faster-whisper 的模型、并发与输出方式。") %}
     <div class="field">
       <label for="asr_model">语音识别模型</label>
@@ -26,14 +26,18 @@
         <label for="asr_device">推理设备</label>
         <select class="select" id="asr_device" name="asr_device" aria-describedby="asr_device-hint">
           <option value="cpu"{% if selected_device == "cpu" %} selected{% endif %}>cpu</option>
-          <option value="cuda"{% if selected_device == "cuda" %} selected{% endif %}{% if not cuda_available %} disabled{% endif %}>cuda{% if not cuda_available %}（环境不可用）{% endif %}</option>
+          <option value="cuda"{% if selected_device == "cuda" %} selected{% endif %}{% if not cuda_available and selected_device != "cuda" %} disabled{% endif %}>cuda{% if not cuda_available and selected_device == "cuda" %}（当前保存，环境不可用）{% elif not cuda_available %}（环境不可用）{% endif %}</option>
           <option value="auto"{% if selected_device == "auto" %} selected{% endif %}>auto（当前 → {{ auto_device }}）</option>
         </select>
         <span class="field-hint" id="asr_device-hint">
           {% if cuda_available %}
             已检测到 {{ runtime.get("cuda_device_count", 0) }} 个 CUDA 设备；CTranslate2 {{ runtime.get("ctranslate2_version", "") }} 可使用 GPU。
           {% else %}
-            CUDA 已禁用：{{ runtime.get("cuda_reason", "未检测到完整 CUDA 运行环境") }}。auto 将使用 CPU。
+            {% if selected_device == "cuda" %}
+              当前保存的设备仍为 <strong>cuda</strong>，但本次环境不可用：{{ runtime.get("cuda_reason", "未检测到完整 CUDA 运行环境") }}。保存其他设置不会改写该偏好；转写时由运行时自动回退。
+            {% else %}
+              CUDA 已禁用：{{ runtime.get("cuda_reason", "未检测到完整 CUDA 运行环境") }}。auto 将使用 CPU。
+            {% endif %}
           {% endif %}
         </span>
       </div>
@@ -41,10 +45,10 @@
         <label for="asr_compute_type">计算精度</label>
         <select class="select" id="asr_compute_type" name="asr_compute_type" aria-describedby="asr_compute_type-hint">
           {% for option in ["int8", "int8_float16", "float16", "float32", "default"] %}
-            <option value="{{ option }}"{% if selected_compute_type == option %} selected{% endif %}{% if option not in selected_supported_types %} disabled{% endif %}>{{ option }}{% if option not in selected_supported_types %}（当前设备不支持）{% endif %}</option>
+            <option value="{{ option }}"{% if selected_compute_type == option %} selected{% endif %}{% if option not in selected_supported_types and selected_compute_type != option %} disabled{% endif %}>{{ option }}{% if option not in selected_supported_types and selected_compute_type == option %}（当前保存，环境不可用）{% elif option not in selected_supported_types %}（当前设备不支持）{% endif %}</option>
           {% endfor %}
         </select>
-        <span class="field-hint" id="asr_compute_type-hint">仅显示当前设备实际支持的 CTranslate2 计算精度。</span>
+        <span class="field-hint" id="asr_compute_type-hint">{% if selected_compute_type not in selected_supported_types %}当前保存值 <strong>{{ selected_compute_type }}</strong> 在本次检测环境中不可用；保存其他设置时仍会保留该值。{% else %}按当前设备显示 CTranslate2 支持的计算精度。{% endif %}</span>
       </div>
     </div>
     <div class="field-row">
@@ -67,6 +71,7 @@
 
   const autoDevice = {{ auto_device | tojson }};
   const support = {{ compute_types | tojson }};
+  const cudaAvailable = {{ cuda_available | tojson }};
 
   const refreshComputeTypes = () => {
     const resolved = device.value === 'auto' ? autoDevice : device.value;
@@ -87,7 +92,12 @@
     }
   };
 
-  device.addEventListener('change', refreshComputeTypes);
-  refreshComputeTypes();
+  device.addEventListener('change', () => {
+    if (!cudaAvailable) {
+      const cudaOption = Array.from(device.options).find(option => option.value === 'cuda');
+      if (cudaOption) cudaOption.disabled = device.value !== 'cuda';
+    }
+    refreshComputeTypes();
+  });
 })();
 </script>

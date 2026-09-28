@@ -155,6 +155,11 @@
       event.preventDefault();
       if (groupForms.some((item) => item.dataset.taskRunning === "true")) return;
       let taskSucceeded = false;
+      const pageRuntime = window.FuckClassroomPage?.current?.();
+      const pageSignal = pageRuntime?.signal;
+      const pageSleep = pageRuntime?.sleep
+        ? (milliseconds) => pageRuntime.sleep(milliseconds)
+        : sleep;
 
       groupForms.forEach((item) => {
         item.dataset.taskRunning = "true";
@@ -174,18 +179,21 @@
           method: "POST",
           body: new URLSearchParams(new FormData(sourceForm)),
           headers: { Accept: "application/json" },
+          signal: pageSignal,
         });
         if (!response.ok) throw new Error(await readResponseError(response, fallbackText));
         const started = await response.json();
         if (!started.status_url) throw new Error(form.dataset.taskMissing || "任务没有返回状态地址");
 
-        while (true) {
+        while (!pageSignal || !pageSignal.aborted) {
           const taskResponse = await fetch(started.status_url, {
             headers: { Accept: "application/json" },
             cache: "no-store",
+            signal: pageSignal,
           });
           if (!taskResponse.ok) throw new Error("读取任务进度失败（" + taskResponse.status + "）");
           const task = await taskResponse.json();
+          if (pageSignal?.aborted) return;
           document.dispatchEvent(new CustomEvent("academic:task-progress", { detail: { task, statusBox } }));
           const percent = Math.max(0, Math.min(100, Number(task.progress) || 0));
           progress.style.width = percent + "%";
@@ -202,17 +210,25 @@
             statusBox.classList.add("success");
             message.textContent = form.dataset.taskSuccess || "任务已完成";
             progress.style.width = "100%";
-            await sleep(450);
-            window.location.assign(task.result_url || started.result_url || window.location.href);
+            await pageSleep(450);
+            if (pageSignal?.aborted) return;
+            const resultUrl = task.result_url || started.result_url || window.location.href;
+            if (window.FuckClassroomShell?.navigate) {
+              await window.FuckClassroomShell.navigate(resultUrl);
+            } else {
+              window.location.assign(resultUrl);
+            }
             return;
           }
-          await sleep(700);
+          await pageSleep(700);
         }
       } catch (error) {
+        if (pageSignal?.aborted || error?.name === "AbortError") return;
         statusBox.classList.add("error");
         message.textContent = error && error.message ? error.message : fallbackText;
         progress.style.width = "100%";
       } finally {
+        if (pageSignal?.aborted) return;
         if (loginSystem && !taskSucceeded) restoreSessionState(loginSystem);
         groupForms.forEach((item) => {
           item.dataset.taskRunning = "false";
