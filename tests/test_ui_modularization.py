@@ -177,7 +177,7 @@ class UiModularizationTests(unittest.TestCase):
         # #21: transient HTTP failures retry; missing/expired tasks stop with feedback.
         self.assertIn("response.status === 404 || response.status === 410", task_script)
         self.assertIn("正在重试", task_script)
-        self.assertIn("window.setTimeout(refreshTask, 1500)", task_script)
+        self.assertIn("schedule(refreshTask, 1500)", task_script)
         self.assertIn("task_status.js?v=20260927-1", task_template)
 
         # #46: task detail polling is scoped to the current PJAX page.
