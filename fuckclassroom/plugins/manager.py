@@ -5,6 +5,7 @@ import importlib
 import importlib.util
 import importlib.metadata
 import json
+import logging
 import os
 import re
 import shutil
@@ -28,6 +29,9 @@ from .. import __version__ as APP_VERSION
 from ..core.config import PROJECT_ROOT, AppConfig
 from ..core.plugins import PLUGIN_API_VERSION, PluginSpec
 from .rpc import PLUGIN_RPC_API_VERSION
+
+
+logger = logging.getLogger(__name__)
 
 
 _PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
@@ -460,21 +464,60 @@ class PluginManager:
                 tuple(str(item) for item in raw_permissions),
             )
 
-    def remove(self, plugin_id: str, *, current_enabled: Iterable[str] = ()) -> None:
+    def remove(
+        self,
+        plugin_id: str,
+        *,
+        current_enabled: Iterable[str] = (),
+    ) -> str:
         self._ensure_mutable()
-        descriptor = self.descriptor_map().get(plugin_id)
+        descriptors = self.descriptor_map()
+        descriptor = descriptors.get(plugin_id)
         if descriptor is None:
             raise PluginManagerError(f"插件不存在：{plugin_id}")
         if descriptor.builtin:
             raise PluginManagerError("内置插件不能删除")
         if plugin_id in set(current_enabled):
-            raise PluginManagerError("插件当前仍在运行，请先禁用并重启应用后再删除")
-        selected = self._normalize_selected(self._load_selected(), self.descriptor_map())
+            raise PluginManagerError("插件当前仍在运行，请先禁用并等待 Runtime 卸载后再删除")
+
+        installed_dependents = sorted(
+            item.id
+            for item in descriptors.values()
+            if item.id != plugin_id and plugin_id in item.requires
+        )
+        if installed_dependents:
+            raise PluginManagerError(
+                f"插件 {plugin_id} 仍被已安装插件依赖："
+                + "、".join(installed_dependents)
+                + "；请先移除依赖者"
+            )
+
+        selected = self._normalize_selected(self._load_selected(), descriptors)
         if plugin_id in self._expand_dependencies(selected):
             raise PluginManagerError("插件仍被配置为启用，请先禁用")
+
         destination = self.plugin_dir / plugin_id
-        if destination.exists():
-            shutil.rmtree(destination)
+        if not destination.exists():
+            return ""
+
+        removing = self.plugin_dir / f".{plugin_id}.removing-{uuid.uuid4().hex}"
+        try:
+            destination.replace(removing)
+        except OSError as exc:
+            raise PluginManagerError(
+                f"无法移除插件 {plugin_id}：插件目录可能仍被占用或无写入权限；{exc}"
+            ) from exc
+
+        try:
+            shutil.rmtree(removing)
+        except OSError as exc:
+            warning = (
+                f"插件 {plugin_id} 已从插件列表移除，但残留目录暂时无法清理："
+                f"{removing.name}；{exc}"
+            )
+            logger.warning(warning)
+            return warning
+        return ""
 
     def load_spec(self, descriptor: PluginDescriptor) -> PluginSpec:
         compatibility = self.compatibility_status(descriptor)
@@ -812,6 +855,9 @@ class PluginManager:
             dependents = sorted(
                 other.id for other in descriptor_map.values() if item.id in other.requires
             )
+            missing_plugin_dependencies = sorted(
+                dependency for dependency in item.requires if dependency not in descriptor_map
+            )
             dependencies = self.dependency_status(item.id)
             compatibility = self.compatibility_status(item)
             missing_required = [
@@ -830,6 +876,8 @@ class PluginManager:
                     "version": item.version,
                     "requires": item.requires,
                     "dependents": dependents,
+                    "missing_plugin_dependencies": missing_plugin_dependencies,
+                    "plugin_dependency_issue": bool(missing_plugin_dependencies),
                     "builtin": item.builtin,
                     "source_label": item.source_label,
                     "execution": item.execution,
@@ -844,7 +892,7 @@ class PluginManager:
                     "dependencies": dependencies,
                     "missing_required_dependencies": missing_required,
                     "missing_optional_dependencies": missing_optional,
-                    "dependency_issue": bool(missing_required),
+                    "dependency_issue": bool(missing_required or missing_plugin_dependencies),
                     "compatible": compatibility["compatible"],
                     "compatibility_state": compatibility["state"],
                     "compatibility_label": compatibility["label"],
@@ -951,6 +999,7 @@ class PluginManager:
     def _external_descriptors(self) -> list[PluginDescriptor]:
         if not self.plugin_dir.exists():
             return []
+        self._cleanup_removing_plugin_dirs()
         items: list[PluginDescriptor] = []
         for child in sorted(self.plugin_dir.iterdir()):
             if child.name.startswith("."):
@@ -959,6 +1008,21 @@ class PluginManager:
                 continue
             items.append(self._read_external_manifest(child))
         return items
+
+    def _cleanup_removing_plugin_dirs(self) -> None:
+        try:
+            children = tuple(self.plugin_dir.iterdir())
+        except OSError:
+            return
+        for child in children:
+            if not child.name.startswith(".") or ".removing-" not in child.name:
+                continue
+            if not child.is_dir():
+                continue
+            try:
+                shutil.rmtree(child)
+            except OSError as exc:
+                logger.warning("清理插件残留目录失败 %s：%s", child, exc)
 
     def _read_external_manifest(self, root: Path) -> PluginDescriptor:
         manifest_path = root / "plugin.json"

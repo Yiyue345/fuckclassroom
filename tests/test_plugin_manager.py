@@ -563,6 +563,107 @@ def build_plugin():
             self.assertFalse(plugin_root.exists())
 
 
+    def test_status_rows_report_missing_plugin_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "dependent"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "dependent",
+                        "name": "Dependent",
+                        "requires": ["missing_base"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='dependent', name='Dependent', requires=('missing_base',))\n",
+                encoding="utf-8",
+            )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+
+            rows = {row["id"]: row for row in manager.status_rows({"core_ui"})}
+
+            self.assertEqual(rows["dependent"]["missing_plugin_dependencies"], ["missing_base"])
+            self.assertTrue(rows["dependent"]["plugin_dependency_issue"])
+            self.assertTrue(rows["dependent"]["dependency_issue"])
+
+    def test_remove_blocks_disabled_plugin_that_is_still_required(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for plugin_id, requires in (("base_plugin", []), ("dependent", ["base_plugin"])):
+                plugin_root = root / "data" / "plugins" / plugin_id
+                plugin_root.mkdir(parents=True)
+                (plugin_root / "plugin.json").write_text(
+                    json.dumps(
+                        {
+                            "id": plugin_id,
+                            "name": plugin_id,
+                            "requires": requires,
+                            "entry": "plugin.py",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                requires_tuple = repr(tuple(requires))
+                (plugin_root / "plugin.py").write_text(
+                    "from fuckclassroom.core.plugins import PluginSpec\n"
+                    f"def build_plugin(): return PluginSpec(id={plugin_id!r}, name={plugin_id!r}, requires={requires_tuple})\n",
+                    encoding="utf-8",
+                )
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+
+            with self.assertRaisesRegex(PluginManagerError, "dependent"):
+                manager.remove("base_plugin")
+
+            self.assertTrue((root / "data" / "plugins" / "base_plugin").exists())
+
+    def test_remove_rename_failure_keeps_original_plugin_intact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "demo_plugin"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps({"id": "demo_plugin", "name": "Demo", "requires": [], "entry": "plugin.py"}),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text("# demo\n", encoding="utf-8")
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+
+            with patch.object(Path, "replace", side_effect=PermissionError("locked")):
+                with self.assertRaisesRegex(PluginManagerError, "仍被占用|无写入权限"):
+                    manager.remove("demo_plugin")
+
+            self.assertTrue(plugin_root.exists())
+            self.assertIn("demo_plugin", manager.descriptor_map())
+
+    def test_remove_cleanup_failure_hides_plugin_and_returns_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_root = root / "data" / "plugins" / "demo_plugin"
+            plugin_root.mkdir(parents=True)
+            (plugin_root / "plugin.json").write_text(
+                json.dumps({"id": "demo_plugin", "name": "Demo", "requires": [], "entry": "plugin.py"}),
+                encoding="utf-8",
+            )
+            (plugin_root / "plugin.py").write_text("# demo\n", encoding="utf-8")
+            manager = PluginManager(AppConfig(data_dir=root / "data"))
+
+            with patch("fuckclassroom.plugins.manager.shutil.rmtree", side_effect=PermissionError("locked")):
+                warning = manager.remove("demo_plugin")
+                descriptors = manager.descriptor_map()
+
+            self.assertIn("残留目录暂时无法清理", warning)
+            self.assertFalse(plugin_root.exists())
+            self.assertNotIn("demo_plugin", descriptors)
+            residues = list((root / "data" / "plugins").glob(".demo_plugin.removing-*"))
+            self.assertEqual(len(residues), 1)
+
     def test_process_isolated_plugin_is_not_imported_in_parent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

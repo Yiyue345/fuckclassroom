@@ -434,7 +434,7 @@ def build_router(context: PluginContext) -> APIRouter:
                 status_code=404,
             )
         try:
-            plugin_manager.remove(
+            cleanup_warning = plugin_manager.remove(
                 plugin_id,
                 current_enabled=plugin_registry.plugin_ids,
             )
@@ -451,13 +451,14 @@ def build_router(context: PluginContext) -> APIRouter:
                 "name": descriptor.name,
                 "version": descriptor.version,
                 "message": f"插件 {descriptor.name} 已移除",
+                "cleanup_warning": cleanup_warning,
             }
         )
 
     @router.post("/plugins/{plugin_id}/remove")
     def remove_plugin(plugin_id: str) -> RedirectResponse:
         try:
-            plugin_manager.remove(
+            cleanup_warning = plugin_manager.remove(
                 plugin_id,
                 current_enabled=plugin_registry.plugin_ids,
             )
@@ -466,8 +467,11 @@ def build_router(context: PluginContext) -> APIRouter:
                 f"/plugins?error={quote(str(exc))}",
                 status_code=303,
             )
+        notice = "插件文件已删除"
+        if cleanup_warning:
+            notice += f"；{cleanup_warning}"
         return RedirectResponse(
-            f"/plugins?notice={quote('插件文件已删除')}",
+            f"/plugins?notice={quote(notice)}",
             status_code=303,
         )
 
