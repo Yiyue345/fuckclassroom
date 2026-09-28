@@ -134,6 +134,8 @@ class UIContractTests(unittest.TestCase):
                 "asr_model_statuses": [
                     {
                         "model": "small",
+                        "repo_id": "Systran/faster-whisper-small",
+                        "aliases": ["small"],
                         "installed": True,
                         "size_bytes": 1024,
                         "size_label": "1.0 KB",
@@ -141,6 +143,8 @@ class UIContractTests(unittest.TestCase):
                     },
                     {
                         "model": "medium",
+                        "repo_id": "Systran/faster-whisper-medium",
+                        "aliases": ["medium"],
                         "installed": False,
                         "size_bytes": 0,
                         "size_label": "",
@@ -156,6 +160,12 @@ class UIContractTests(unittest.TestCase):
         self.assertIn('data-asr-model-row', html)
         self.assertIn('data-asr-model-action="delete"', html)
         self.assertIn('data-asr-model-action="download"', html)
+        self.assertIn('data-repo-id="Systran/faster-whisper-small"', html)
+        self.assertIn('data-aliases="small"', html)
+        self.assertIn("const renderRepoState = (sourceRow, installed) =>", html)
+        self.assertIn("row.dataset.repoId === repoId", html)
+        self.assertIn("aliases.has(row.dataset.model || '')", html)
+        self.assertIn("renderRepoState(row, action === 'download')", html)
         self.assertIn("已安装 · 1.0 KB", normalized_html)
         self.assertIn("未安装 · 约 1.4 GB", normalized_html)
         self.assertIn("asr-model-task-status", html)
@@ -168,6 +178,53 @@ class UIContractTests(unittest.TestCase):
             ["transcription"],
         )
         self.assertIsNotNone(transcription.route_factory)
+
+    def test_transcription_model_aliases_share_frontend_repo_state(self):
+        registry = build_plugin_registry(ALL)
+        env = environment(registry)
+        settings = AppSettings().to_public_dict()
+        settings.update(asr_model="turbo")
+        repo_id = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+        html = env.get_template("transcription_settings.html").render(
+            settings=settings,
+            panel_context={
+                "asr_runtime": {},
+                "asr_models": ["turbo", "large-v3-turbo"],
+                "asr_model_size_labels": {
+                    "turbo": "约 1.6 GB",
+                    "large-v3-turbo": "约 1.6 GB",
+                },
+                "asr_model_statuses": [
+                    {
+                        "model": "turbo",
+                        "repo_id": repo_id,
+                        "aliases": ["turbo", "large-v3-turbo"],
+                        "installed": False,
+                        "size_bytes": 0,
+                        "size_label": "",
+                        "path": "",
+                    },
+                    {
+                        "model": "large-v3-turbo",
+                        "repo_id": repo_id,
+                        "aliases": ["turbo", "large-v3-turbo"],
+                        "installed": False,
+                        "size_bytes": 0,
+                        "size_label": "",
+                        "path": "",
+                    },
+                ],
+                "asr_model_status_error": "",
+            },
+        )
+
+        self.assertEqual(html.count(f'data-repo-id="{repo_id}"'), 2)
+        self.assertEqual(html.count('data-aliases="turbo,large-v3-turbo"'), 2)
+        self.assertIn("const renderRepoState = (sourceRow, installed) =>", html)
+        self.assertIn("rows().forEach(row =>", html)
+        self.assertIn("row.dataset.repoId === repoId", html)
+        self.assertIn("aliases.has(row.dataset.model || '')", html)
+        self.assertIn("renderRepoState(row, action === 'download')", html)
 
     def test_transcription_settings_disable_unavailable_cuda_and_compute_types(self):
         env = environment(build_plugin_registry(ALL))
