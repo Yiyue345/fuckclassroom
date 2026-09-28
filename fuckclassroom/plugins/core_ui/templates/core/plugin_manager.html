@@ -346,7 +346,7 @@
                 <span>移除插件</span>
               </button>
               {% if plugin.dependents %}
-                <p class="plugin-remove-blocker">无法移除：仍被 {{ plugin.dependents|join(", ") }} 依赖。</p>
+                <p class="plugin-remove-blocker" data-plugin-remove-blocker="{{ plugin.id }}">无法移除：仍被 {{ plugin.dependents|join(", ") }} 依赖。</p>
               {% endif %}
             {% endif %}
           </div>
@@ -458,6 +458,33 @@
     }
 
     pendingToggleOperations.delete(id);
+
+    rows.forEach((row) => {
+      const dependents = String(row.dataset.pluginDependents || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .filter((value) => value !== id);
+      row.dataset.pluginDependents = dependents.join(', ');
+
+      const blocker = document.querySelector(
+        '[data-plugin-remove-blocker="' + CSS.escape(row.dataset.pluginId) + '"]'
+      );
+      if (blocker) {
+        if (dependents.length) {
+          blocker.textContent = '无法移除：仍被 ' + dependents.join(', ') + ' 依赖。';
+        } else {
+          blocker.remove();
+        }
+      }
+
+      syncRemoveButtons(
+        row.dataset.pluginId,
+        row.dataset.pluginDesiredEnabled === 'true',
+        row.dataset.pluginCurrentEnabled === 'true'
+      );
+    });
+
     if (selectedId === id) selectedId = '';
     applyFilters();
   }
