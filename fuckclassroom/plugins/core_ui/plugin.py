@@ -36,7 +36,7 @@ def build_plugin() -> PluginSpec:
         route_factory=build_routes,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
-        stylesheets=("/plugins/core_ui/static/core_ui.css?v=20260928-1",),
+        stylesheets=("/plugins/core_ui/static/core_ui.css?v=20260928-2",),
         navigation_groups=(
             NavigationGroup(
                 key="common",

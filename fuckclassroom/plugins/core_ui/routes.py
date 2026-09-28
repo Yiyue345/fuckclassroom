@@ -425,6 +425,35 @@ def build_router(context: PluginContext) -> APIRouter:
         task = task_manager.start(f"安装插件依赖 · {descriptor.name}", worker)
         return task_started_response(request, task, "/plugins")
 
+    @router.delete("/api/plugins/{plugin_id}")
+    def remove_plugin_api(plugin_id: str) -> JSONResponse:
+        descriptor = plugin_manager.descriptor_map().get(plugin_id)
+        if descriptor is None:
+            return JSONResponse(
+                {"detail": f"插件不存在：{plugin_id}"},
+                status_code=404,
+            )
+        try:
+            plugin_manager.remove(
+                plugin_id,
+                current_enabled=plugin_registry.plugin_ids,
+            )
+        except PluginManagerError as exc:
+            return JSONResponse(
+                {"detail": str(exc)},
+                status_code=409,
+            )
+        return JSONResponse(
+            {
+                "ok": True,
+                "action": "remove",
+                "plugin_id": descriptor.id,
+                "name": descriptor.name,
+                "version": descriptor.version,
+                "message": f"插件 {descriptor.name} 已移除",
+            }
+        )
+
     @router.post("/plugins/{plugin_id}/remove")
     def remove_plugin(plugin_id: str) -> RedirectResponse:
         try:
