@@ -170,6 +170,17 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn('<path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>', template)
         self.assertIn("plugin-trash-icon", template)
 
+        # External plugin removal uses the JSON DELETE API and updates the page in-place.
+        self.assertIn('data-plugin-remove="{{ plugin.id }}"', template)
+        self.assertIn("const removeButtons = Array.from(document.querySelectorAll('[data-plugin-remove]'))", template)
+        self.assertIn("function removePluginFromPage(id)", template)
+        self.assertIn("rows.splice(rowIndex, 1)", template)
+        self.assertIn("details.splice(detailIndex, 1)", template)
+        self.assertIn("method: 'DELETE'", template)
+        self.assertIn("'/api/plugins/' + encodeURIComponent(id)", template)
+        self.assertIn("await refreshShellChrome()", template)
+        self.assertNotIn('action="/plugins/{{ plugin.id }}/remove"', template)
+
         self.assertIn('id="plugin-zip-button"', template)
         self.assertIn('onchange="this.form.requestSubmit()"', template)
         self.assertEqual(
