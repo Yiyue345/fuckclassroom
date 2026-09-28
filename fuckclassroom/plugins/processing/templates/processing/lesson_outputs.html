@@ -25,7 +25,8 @@
   </div>
 
   <div class="output-actions">
-    <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/extract" data-inline-task data-task-status="#lesson-task-status" data-task-group="lesson-processing" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#scan-text"></use></svg>重新提取</button></form>
+    {% set output_url = "/courses/" ~ course_id ~ "/lessons/" ~ lesson_id ~ "/outputs" %}
+    <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/extract" data-inline-task data-task-status="#lesson-task-status" data-task-group="lesson-processing" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成" data-transcription-attempt data-transcription-output-url="{{ output_url }}"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#scan-text"></use></svg>重新提取</button></form>
     {% for contribution in plugin_registry.slot_templates("processing.output.actions") %}{% include contribution %}{% endfor %}
     <a class="btn" href="/downloads"><svg class="icon"><use href="/static/icons.svg#folder"></use></svg>查看本地转写文件</a>
   </div>
@@ -44,6 +45,8 @@
     <section class="surface output-section"><header><h2>课件 OCR</h2><span class="status green"><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg>OCR</span></header><div class="output-content"><pre>{{ outputs.get("ppt_ocr.md") }}</pre></div></section>
   {% endif %}
   {% if outputs.get("transcript.md") %}
-    <section class="surface output-section" data-output-transcript><header><h2>语音转写</h2><span class="status gray"><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>Transcript</span></header><div class="output-content"><pre>{{ outputs.get("transcript.md") }}</pre></div></section>
+    {% set transcript_text = outputs.get("transcript.md") %}
+    {% set transcript_complete = "暂无可用的可信转写" not in transcript_text %}
+    <section class="surface output-section" data-output-transcript{% if transcript_complete %} data-output-transcript-complete{% endif %}><header><h2>语音转写</h2><span class="status gray"><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>Transcript</span></header><div class="output-content"><pre>{{ transcript_text }}</pre></div></section>
   {% endif %}
 {% endblock %}

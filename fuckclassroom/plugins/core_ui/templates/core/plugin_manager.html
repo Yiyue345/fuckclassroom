@@ -297,32 +297,6 @@
 {% block scripts %}
 <script>
 (() => {
-  const pageRuntime = window.FuckClassroomPage?.current?.();
-  const pageSignal = pageRuntime?.signal;
-
-  function pageIsActive() {
-    return !pageSignal?.aborted;
-  }
-
-  function isPageAbort(error) {
-    return Boolean(pageSignal?.aborted || error?.name === 'AbortError');
-  }
-
-  function pageFetch(url, options = {}) {
-    return fetch(url, { ...options, signal: pageSignal });
-  }
-
-  function schedule(callback, delay) {
-    return pageRuntime?.setTimeout
-      ? pageRuntime.setTimeout(callback, delay)
-      : window.setTimeout(callback, delay);
-  }
-
-  function clearScheduled(timer) {
-    if (pageRuntime?.clearTimeout) pageRuntime.clearTimeout(timer);
-    else window.clearTimeout(timer);
-  }
-
   const rows = Array.from(document.querySelectorAll('[data-plugin-row]'));
   const details = Array.from(document.querySelectorAll('[data-plugin-detail]'));
   const toggleForms = Array.from(document.querySelectorAll('.plugin-toggle-form[data-plugin-id]'));
@@ -334,6 +308,22 @@
   let activeFilter = 'all';
   let selectedId = rows.find((row) => row.classList.contains('is-selected'))?.dataset.pluginId || rows[0]?.dataset.pluginId || '';
   const pendingToggleOperations = new Map();
+  const pageRuntime = window.FuckClassroomPage?.current?.();
+  const pageSignal = pageRuntime?.signal;
+  const pageTimeout = pageRuntime?.setTimeout
+    ? (callback, delay) => pageRuntime.setTimeout(callback, delay)
+    : (callback, delay) => window.setTimeout(callback, delay);
+  const pageClearTimeout = pageRuntime?.clearTimeout
+    ? (timer) => pageRuntime.clearTimeout(timer)
+    : (timer) => window.clearTimeout(timer);
+
+  function disposed() {
+    return Boolean(pageSignal?.aborted);
+  }
+
+  function pageFetch(input, init = {}) {
+    return window.fetch(input, { ...init, signal: pageSignal });
+  }
 
   function rowFor(id) {
     return rows.find((row) => row.dataset.pluginId === id) || null;
@@ -510,16 +500,17 @@
   searchInput?.addEventListener('input', applyFilters);
 
   async function refreshShellChrome() {
+    if (disposed()) return;
     const response = await pageFetch('/plugins', {
       headers: { Accept: 'text/html' },
       cache: 'no-store',
     });
-    if (!response.ok || !pageIsActive()) return;
+    if (!response.ok || disposed()) return;
     const html = await response.text();
-    if (!pageIsActive()) return;
+    if (disposed()) return;
     const documentCopy = new DOMParser().parseFromString(html, 'text/html');
-    if (!pageIsActive()) return;
     for (const selector of ['.sidebar-nav', '.session-list', '.top-actions .session-pair']) {
+      if (disposed()) return;
       const current = document.querySelector(selector);
       const next = documentCopy.querySelector(selector);
       if (current && next) current.replaceChildren(...Array.from(next.childNodes).map((node) => node.cloneNode(true)));
@@ -527,13 +518,14 @@
   }
 
   async function waitForRuntime() {
+    if (disposed()) return null;
     const response = await pageFetch('/api/plugins/runtime-status', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
     if (!response.ok) throw new Error('读取插件运行状态失败（' + response.status + '）');
     const status = await response.json();
-    if (!pageIsActive()) return status;
+    if (disposed()) return null;
     syncCards(status);
     return status;
   }
@@ -573,7 +565,7 @@
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || '插件状态修改失败');
-        if (!pageIsActive()) return;
+        if (disposed()) return;
         configurationSaved = true;
 
         const desired = new Set(payload.desired_enabled || []);
@@ -582,16 +574,16 @@
         });
 
         const status = await waitForRuntime();
-        if (!pageIsActive()) return;
+        if (!status || disposed()) return;
         pendingToggleOperations.delete(id);
         syncCards(status);
         if (!status.last_error && !status.restart_required) {
           await refreshShellChrome();
+          if (disposed()) return;
         }
-        if (!pageIsActive()) return;
         finishOperation(!status.last_error);
       } catch (error) {
-        if (isPageAbort(error)) return;
+        if (disposed() || error?.name === 'AbortError') return;
         const message = error instanceof Error ? error.message : String(error);
         pendingToggleOperations.delete(id);
         finishOperation(false);
@@ -601,14 +593,13 @@
         } else {
           try {
             const status = await waitForRuntime();
-            if (!pageIsActive()) return;
+            if (!status || disposed()) return;
             syncCards({ ...status, last_error: status.last_error || message });
           } catch (runtimeError) {
-            if (isPageAbort(runtimeError)) return;
+            if (disposed() || runtimeError?.name === 'AbortError') return;
             setPluginState(id, requestedEnabled, !requestedEnabled, { error: message });
           }
         }
-        if (!pageIsActive()) return;
         applyFilters();
       }
     });
@@ -627,7 +618,7 @@
 
   function showOperationStatus(state) {
     if (!operationStatus || !operationLoading || !operationDone) return;
-    clearScheduled(operationStatusTimer);
+    pageClearTimeout(operationStatusTimer);
     operationStatus.classList.remove('hidden');
     const done = state === 'done';
     operationLoading.classList.toggle('hidden', done);
@@ -635,15 +626,15 @@
     operationStatus.classList.toggle('is-done', done);
     operationStatus.setAttribute('aria-label', done ? '操作完成' : '正在处理插件操作');
     if (done) {
-      operationStatusTimer = schedule(() => {
-        if (pageIsActive()) operationStatus.classList.add('hidden');
+      operationStatusTimer = pageTimeout(() => {
+        operationStatus.classList.add('hidden');
       }, 1600);
     }
   }
 
   function hideOperationStatus() {
     if (!operationStatus) return;
-    clearScheduled(operationStatusTimer);
+    pageClearTimeout(operationStatusTimer);
     operationStatus.classList.add('hidden');
   }
 
@@ -697,15 +688,15 @@
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || '插件安装失败');
-      if (!pageIsActive()) return;
-      const target = '/plugins?notice=' + encodeURIComponent(payload.message || '插件已添加');
+      if (disposed()) return;
+      const destination = '/plugins?notice=' + encodeURIComponent(payload.message || '插件已添加');
       if (window.FuckClassroomShell?.navigate) {
-        await window.FuckClassroomShell.navigate(target);
-      } else if (pageIsActive()) {
-        window.location.assign(target);
+        await window.FuckClassroomShell.navigate(destination);
+      } else {
+        window.location.assign(destination);
       }
     } catch (error) {
-      if (isPageAbort(error)) return;
+      if (disposed() || error?.name === 'AbortError') return;
       uploadStatus.textContent = error instanceof Error ? error.message : String(error);
       uploadStatus.classList.add('is-error');
       setUploadBusy(false);

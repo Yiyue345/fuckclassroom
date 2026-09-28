@@ -54,7 +54,7 @@ def build_plugin() -> PluginSpec:
         id="course_selection",
         ui_assets=(
             UIAsset("selection_ui.js?v=20260927-2", pages=("selection_info", "selection_selected", "selection_auto", "selection_catalog")),
-            UIAsset("selection_catalog.js?v=20260927-1", pages=("selection_catalog",)),
+            UIAsset("selection_catalog.js?v=20260928-1", pages=("selection_catalog",)),
         ),
         name="本科选课",
         order=20,

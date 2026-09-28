@@ -236,6 +236,12 @@ class UIContractTests(unittest.TestCase):
             course_id="course-1",
             lesson_id="lesson-1",
         )
+        placeholder_output_html = env.get_template("processing/lesson_outputs.html").render(
+            request=request(registry),
+            outputs={"transcript.md": "# 语音转写\n\n（本课次暂无可用的可信转写）"},
+            course_id="course-1",
+            lesson_id="lesson-1",
+        )
         script = Path(
             "fuckclassroom/plugins/processing/static/task_detail_progress.js"
         ).read_text(encoding="utf-8")
@@ -251,14 +257,23 @@ class UIContractTests(unittest.TestCase):
         self.assertIn("data-transcription-complete", course_html)
         self.assertIn("已转写", course_html)
         self.assertIn("data-output-transcript", output_html)
+        self.assertIn("data-output-transcript-complete", output_html)
+        self.assertIn("data-output-transcript", placeholder_output_html)
+        self.assertNotIn("data-output-transcript-complete", placeholder_output_html)
+        self.assertIn("data-transcription-attempt", output_html)
         self.assertIn("checkTranscriptionComplete", script)
         self.assertIn("markTranscriptionComplete", script)
+        self.assertIn("markTranscriptionIncomplete", script)
+        self.assertIn("fuckclassroom:transcribed:v2:", script)
+        self.assertIn("resultDocument.querySelector('[data-output-transcript-complete]')", script)
+        self.assertIn("task?.status === 'failed' || task?.status === 'cancelled'", script)
+        self.assertIn("checkTranscriptionComplete(outputUrl, { ignoreCache: true })", script)
         self.assertIn("workerCount = Math.min(4", script)
         self.assertIn("node.classList.add('hidden')", script)
         self.assertIn("node.classList.remove('hidden')", script)
         self.assertIn("academic:page-before-swap", script)
         self.assertIn(".transcription-complete {", styles)
-        self.assertIn("task_detail_progress.js?v=20260927-2", plugin)
+        self.assertIn("task_detail_progress.js?v=20260928-1", plugin)
         self.assertIn("task_detail_progress.css?v=20260927-1", plugin)
 
 
