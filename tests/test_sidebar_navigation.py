@@ -159,8 +159,13 @@ class SidebarNavigationTests(unittest.TestCase):
             "grid-template-columns: minmax(0, 1.39fr) minmax(360px, 1fr)",
             styles,
         )
-        self.assertIn(".plugin-list-panel { height: 714px;", styles)
+        self.assertIn(".plugin-list-panel { container-type: inline-size; height: 714px; overflow-x: hidden;", styles)
         self.assertIn(".plugin-row.is-selected {", styles)
+        self.assertIn("box-sizing: border-box; grid-template-columns: 38px minmax(0, 1fr) minmax(164px, 176px)", styles)
+        self.assertIn(".plugin-row-actions > * { min-width: 0; }", styles)
+        self.assertIn("max-width: 100%; box-sizing: border-box;", styles)
+        self.assertIn("@container (max-width: 620px)", styles)
+        self.assertIn("grid-template-columns: max-content 40px minmax(0, 1fr) 18px", styles)
         self.assertIn(".plugin-detail-panel { position: sticky;", styles)
         self.assertIn(".plugin-add-button {", styles)
         self.assertIn("plugin-operation-status", template)
@@ -221,7 +226,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260927-1",
+            "/plugins/core_ui/static/core_ui.css?v=20260928-1",
             registry.stylesheets,
         )
         self.assertIn(
