@@ -36,7 +36,7 @@ def build_account_context(services, request):
 def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="attendance",
-        ui_assets=(UIAsset("qr_assistant.js?v=20260927-1", pages=("course_detail",)),),
+        ui_assets=(UIAsset("qr_assistant.js?v=20260928-1", pages=("course_detail",)),),
         name="二维码签到",
         order=60,
         requires=("classroom",),
