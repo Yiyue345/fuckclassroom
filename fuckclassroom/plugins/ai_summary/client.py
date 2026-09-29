@@ -7,7 +7,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from ...core.config import AppConfig
+from fuckclassroom.core.config import AppConfig
 from .errors import AIClientError
 
 
