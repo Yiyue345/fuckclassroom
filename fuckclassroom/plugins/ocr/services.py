@@ -17,9 +17,9 @@ from .engine import (
     tesseract_ocr,
     write_cache_text,
 )
-from ...core.plugins import PluginContext
-from ..process_runtime import ProcessPluginError, ProcessPluginHost
-from ..rpc import PLUGIN_RPC_API_VERSION
+from fuckclassroom.core.plugins import PluginContext
+from fuckclassroom.plugins.process_runtime import ProcessPluginError, ProcessPluginHost
+from fuckclassroom.plugins.rpc import PLUGIN_RPC_API_VERSION
 
 
 class OcrService:
