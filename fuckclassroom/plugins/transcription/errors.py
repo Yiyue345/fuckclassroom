@@ -1,4 +1,7 @@
-class LocalTranscriptionError(RuntimeError):
+from fuckclassroom.core.plugins import PluginServiceError
+
+
+class LocalTranscriptionError(PluginServiceError):
     pass
 
 
