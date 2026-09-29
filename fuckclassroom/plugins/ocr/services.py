@@ -10,22 +10,23 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
 from .compat import install_rapidocr_compat
+from .errors import OcrError
 from .engine import (
     increment_ocr_stat,
     rapidocr_ocr,
     tesseract_ocr,
     write_cache_text,
 )
-from ..processing.extraction import ExtractionError
 from ...core.plugins import PluginContext
-from ..process_runtime import ProcessPluginHost
+from ..process_runtime import ProcessPluginError, ProcessPluginHost
 from ..rpc import PLUGIN_RPC_API_VERSION
 
 
 class OcrService:
-    def __init__(self, config) -> None:
+    def __init__(self, config, *, ai_ocr=None, ai_available=None) -> None:
         self.config = config
-        self.ai = None
+        self._ai_ocr = ai_ocr
+        self._ai_available = ai_available
 
     def ocr_image(
         self,
@@ -60,7 +61,7 @@ class OcrService:
                 return text
             except ImportError:
                 if engine == "rapidocr":
-                    raise ExtractionError(
+                    raise OcrError(
                         "缺少 rapidocr-onnxruntime，请先安装项目依赖"
                     ) from None
 
@@ -69,15 +70,22 @@ class OcrService:
             return tesseract_ocr(image_bytes, image_name)
 
         if engine in ("auto", "ai"):
-            if self.ai is None:
-                from ..ai_summary.client import AIClient
+            ai_available = bool(
+                self.config.ai_api_key
+                and self._ai_ocr is not None
+                and (
+                    self._ai_available is None
+                    or bool(self._ai_available())
+                )
+            )
+            if ai_available:
+                media_type = mimetypes.guess_type(image_name)[0] or "image/png"
+                increment_ocr_stat(stats, stats_lock, "inferences")
+                return str(self._ai_ocr(image_bytes, media_type))
+            if engine == "ai":
+                raise OcrError("AI OCR 需要启用 AI 总结插件并配置 AI API Key")
 
-                self.ai = AIClient(self.config)
-            media_type = mimetypes.guess_type(image_name)[0] or "image/png"
-            increment_ocr_stat(stats, stats_lock, "inferences")
-            return self.ai.ocr_image(image_bytes, media_type)
-
-        raise ExtractionError("未找到可用 OCR 引擎。")
+        raise OcrError("未找到可用 OCR 引擎。")
 
     def can_ocr(self, warnings: list[str]) -> bool:
         engine = self.config.ocr_engine
@@ -93,7 +101,13 @@ class OcrService:
         if engine in ("auto", "tesseract") and shutil.which("tesseract"):
             return True
         if engine in ("auto", "ai") and self.config.ai_api_key:
-            return True
+            if self._ai_ocr is not None and (
+                self._ai_available is None or bool(self._ai_available())
+            ):
+                return True
+            if engine == "ai":
+                warnings.append("已跳过 OCR：AI 总结插件未启用。")
+                return False
         warnings.append("已跳过 OCR：未找到可用 OCR 引擎。")
         return False
 
@@ -131,16 +145,19 @@ class OcrProcessProxy:
         stats: dict[str, int] | None = None,
         stats_lock: threading.Lock | None = None,
     ) -> str:
-        payload = self.host.call_sync(
-            "ocr.image",
-            {
-                "image_b64": base64.b64encode(image_bytes).decode("ascii"),
-                "image_name": image_name,
-            },
-            timeout=300,
-        )
+        try:
+            payload = self.host.call_sync(
+                "ocr.image",
+                {
+                    "image_b64": base64.b64encode(image_bytes).decode("ascii"),
+                    "image_name": image_name,
+                },
+                timeout=300,
+            )
+        except ProcessPluginError as exc:
+            raise OcrError(str(exc)) from exc
         if not isinstance(payload, dict):
-            raise ExtractionError("OCR 子进程返回格式错误")
+            raise OcrError("OCR 子进程返回格式错误")
         deltas = payload.get("stats")
         if isinstance(deltas, dict) and stats is not None:
             if stats_lock is None:
@@ -153,9 +170,12 @@ class OcrProcessProxy:
         return str(payload.get("text") or "")
 
     def can_ocr(self, warnings: list[str]) -> bool:
-        payload = self.host.call_sync("ocr.can_ocr", {}, timeout=30)
+        try:
+            payload = self.host.call_sync("ocr.can_ocr", {}, timeout=30)
+        except ProcessPluginError as exc:
+            raise OcrError(str(exc)) from exc
         if not isinstance(payload, dict):
-            raise ExtractionError("OCR 子进程返回格式错误")
+            raise OcrError("OCR 子进程返回格式错误")
         child_warnings = payload.get("warnings")
         if isinstance(child_warnings, list):
             warnings.extend(str(item) for item in child_warnings)
@@ -170,7 +190,7 @@ def setup_services(context: PluginContext) -> None:
         data_dir=Path(context.config.data_dir),
         rpc_registry=context.services.get("plugin_rpc"),
         rpc_api_version=PLUGIN_RPC_API_VERSION,
-        rpc_permissions=(),
+        rpc_permissions=("core.plugins.has", "ai_summary.ocr.image"),
     )
     context.services.add("ocr_process_host", host)
     context.services.add("ocr_service", OcrProcessProxy(host))
@@ -185,6 +205,7 @@ async def shutdown(context: PluginContext) -> None:
 
 
 __all__ = [
+    "OcrError",
     "OcrProcessProxy",
     "OcrService",
     "setup_services",
