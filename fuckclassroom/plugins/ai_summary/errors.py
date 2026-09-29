@@ -1,4 +1,7 @@
-class AIClientError(RuntimeError):
+from fuckclassroom.core.plugins import PluginServiceError
+
+
+class AIClientError(PluginServiceError):
     pass
 
 
