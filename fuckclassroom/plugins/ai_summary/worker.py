@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+
 from fuckclassroom.core.config import AppConfig
-from fuckclassroom.plugins.ai_summary.client import AIClient
+
+from .client import AIClient
 
 
 _client: AIClient | None = None
@@ -15,6 +18,12 @@ def _get_client(context) -> AIClient:
 
 
 def handle_call(method, params, context, progress):
-    if method != "ai_summary.summarize":
-        raise ValueError(f"未知 AI Summary Worker 方法：{method}")
-    return _get_client(context).summarize_course_text(str(params.get("text") or ""))
+    client = _get_client(context)
+    if method == "ai_summary.summarize":
+        return client.summarize_course_text(str(params.get("text") or ""))
+    if method == "ai_summary.ocr":
+        return client.ocr_image(
+            base64.b64decode(str(params.get("image_b64") or ""), validate=False),
+            str(params.get("media_type") or "image/png"),
+        )
+    raise ValueError(f"未知 AI Summary Worker 方法：{method}")
