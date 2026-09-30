@@ -27,6 +27,37 @@
 .selection-course-table { overflow-x: auto; border-top: 1px solid var(--border); }
 .selection-course-table th:first-child, .selection-course-table td:first-child { padding-left: 54px; }
 .selection-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.selection-lessons-table { min-width: 880px; table-layout: fixed; }
+.selection-lessons-table th:nth-child(1) { width: 30%; }
+.selection-lessons-table th:nth-child(2) { width: 32%; }
+.selection-lessons-table th:nth-child(3) { width: 14%; }
+.selection-lessons-table th:nth-child(4) { width: 9%; }
+.selection-lessons-table th:nth-child(5) { width: 15%; }
+.selection-lessons-table td, .catalog-table td { overflow-wrap: anywhere; }
+.selection-lessons-table .capacity, .catalog-table .capacity { min-width: 0; }
+.selection-row-actions, .catalog-row-actions { flex-wrap: wrap; }
+.selection-row-actions .btn, .catalog-row-actions .btn { white-space: nowrap; }
+.selection-lesson-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  cursor: help;
+}
+.selection-schedule { display: grid; min-width: 0; gap: 6px; font-size: var(--font-xs); line-height: 1.6; }
+.selection-schedule-card {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.selection-schedule-time { color: var(--text); font-weight: 600; }
+.selection-schedule-room { margin-top: 3px; color: var(--text-muted); }
 .auto-selection-stats { grid-template-columns: repeat(3, 1fr); margin-bottom: 18px; }
 .auto-selection-table { min-width: 980px; }
 .auto-selection-table th:nth-child(1) { width: 28%; }
@@ -116,15 +147,6 @@
 .table-title.compact { font-size: var(--font-sm); }
 .catalog-cell-main { color: var(--text); font-size: var(--font-sm); font-weight: 620; }
 .catalog-match { display: inline-flex; margin-top: 7px; }
-.catalog-table .schedule {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--text-soft);
-  font-size: var(--font-xs);
-  line-height: 1.55;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
 .catalog-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .catalog-pagination { min-height: 66px; color: var(--text-soft); font-size: var(--font-sm); }
 .catalog-next-icon { transform: rotate(180deg); }

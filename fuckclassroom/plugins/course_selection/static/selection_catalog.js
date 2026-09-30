@@ -186,8 +186,10 @@
     }
 
     const lessonCell = document.createElement("td");
+    const lessonName = element("div", "table-title compact selection-lesson-name", course.lesson_name || "教学班名称未公布");
+    lessonName.title = lessonName.textContent;
     lessonCell.append(
-      element("div", "table-title compact", course.lesson_name || "教学班名称未公布"),
+      lessonName,
       element("div", "table-subtitle", [course.teachers || "教师未公布", course.lesson_code].filter(Boolean).join(" · "))
     );
 
@@ -198,8 +200,10 @@
     );
 
     const scheduleCell = document.createElement("td");
+    const schedule = element("div");
+    window.FuckClassroomSelectionDisplay.renderSchedule(schedule, course.time);
     scheduleCell.append(
-      element("div", "schedule", course.time || "时间地点未公布"),
+      schedule,
       element("div", "table-subtitle", course.campus || "")
     );
 
