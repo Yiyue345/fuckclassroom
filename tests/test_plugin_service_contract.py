@@ -14,21 +14,9 @@ class PluginServiceContractTests(unittest.TestCase):
         self.assertTrue(issubclass(AIClientError, PluginServiceError))
 
     def test_processing_can_construct_without_importing_sibling_plugins(self) -> None:
-        service = LessonExtractionService.__new__(LessonExtractionService)
-        # Constructor behavior is exercised with a patched classroom below so this
-        # test does not need network access or optional plugin dependencies.
-        from fuckclassroom.plugins.processing import extraction
+        service = LessonExtractionService(service_lookup=None)
 
-        class FakeClassroom:
-            pass
-
-        original = extraction.ClassroomClient
-        extraction.ClassroomClient = lambda config: FakeClassroom()  # type: ignore[assignment]
-        try:
-            service.__init__(service_lookup=None)
-        finally:
-            extraction.ClassroomClient = original  # type: ignore[assignment]
-
+        self.assertIsNone(service.classroom)
         self.assertIsNone(service.transcription)
         self.assertIsNone(service.ai)
         self.assertIsNone(service._legacy_ocr)
