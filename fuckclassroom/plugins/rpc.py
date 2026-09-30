@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import inspect
 import json
 import re
@@ -217,6 +219,7 @@ class PluginRpcBuiltins:
         registry.register("core.tasks.cancelled", self.tasks_cancelled)
         registry.register("core.tasks.status", self.tasks_status)
         registry.register("core.tasks.cancel_requested", self.tasks_cancel_requested)
+        registry.register("ai_summary.ocr.image", self.ai_summary_ocr_image)
         registry.register_cleanup(self.plugin_stopped)
 
         if self.services.has("auth_service"):
@@ -243,6 +246,20 @@ class PluginRpcBuiltins:
         if key not in settings:
             raise PluginRpcInvalidParams(f"未知设置项：{key}")
         return settings[key]
+
+    def ai_summary_ocr_image(
+        self, _context: PluginRpcCallContext, params: Mapping[str, object]
+    ) -> object:
+        service = self.services.maybe("ai_summary_service")
+        if service is None:
+            raise PluginRpcMethodNotFound("AI 总结插件未启用")
+        encoded = str(params.get("image_b64") or "")
+        media_type = str(params.get("media_type") or "image/png")
+        try:
+            image_bytes = base64.b64decode(encoded, validate=False)
+        except (ValueError, binascii.Error) as exc:
+            raise PluginRpcInvalidParams("image_b64 不是有效 Base64") from exc
+        return service.ocr_image(image_bytes, media_type)
 
     def plugins_enabled(
         self, _context: PluginRpcCallContext, _params: Mapping[str, object]
