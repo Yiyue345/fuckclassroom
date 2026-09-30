@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 from pathlib import Path
 
 from .errors import AIClientError
@@ -52,18 +51,6 @@ def setup_services(context: PluginContext) -> None:
     proxy = AiSummaryProcessProxy(host)
     context.services.add("ai_summary_process_host", host)
     context.services.add("ai_summary_service", proxy)
-
-    rpc_registry = context.services.get("plugin_rpc")
-
-    def rpc_ocr_image(_rpc_context, params):
-        encoded = str(params.get("image_b64") or "")
-        media_type = str(params.get("media_type") or "image/png")
-        return proxy.ocr_image(
-            base64.b64decode(encoded, validate=False),
-            media_type,
-        )
-
-    rpc_registry.register("ai_summary.ocr.image", rpc_ocr_image)
 
 
 async def startup(context: PluginContext) -> None:
