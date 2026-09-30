@@ -3,8 +3,9 @@ from __future__ import annotations
 import base64
 
 from fuckclassroom.core.config import AppConfig
-from fuckclassroom.plugins.ocr.compat import install_rapidocr_compat
-from fuckclassroom.plugins.ocr.services import OcrService
+
+from .compat import install_rapidocr_compat
+from .services import OcrService
 
 
 _service: OcrService | None = None
@@ -14,7 +15,30 @@ def _get_service(context) -> OcrService:
     global _service
     if _service is None:
         install_rapidocr_compat()
-        _service = OcrService(AppConfig(data_dir=context.data_dir))
+
+        def ai_available() -> bool:
+            return bool(
+                context.rpc.call(
+                    "core.plugins.has",
+                    {"plugin_id": "ai_summary"},
+                )
+            )
+
+        def ai_ocr(image_bytes: bytes, media_type: str) -> str:
+            payload = context.rpc.call(
+                "ai_summary.ocr.image",
+                {
+                    "image_b64": base64.b64encode(image_bytes).decode("ascii"),
+                    "media_type": media_type,
+                },
+            )
+            return str(payload or "")
+
+        _service = OcrService(
+            AppConfig(data_dir=context.data_dir),
+            ai_ocr=ai_ocr,
+            ai_available=ai_available,
+        )
     return _service
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 from .errors import AIClientError
@@ -23,6 +24,20 @@ class AiSummaryProcessProxy:
             raise AIClientError(str(exc)) from exc
         return str(result or "")
 
+    def ocr_image(self, image_bytes: bytes, media_type: str) -> str:
+        try:
+            result = self.host.call_sync(
+                "ai_summary.ocr",
+                {
+                    "image_b64": base64.b64encode(image_bytes).decode("ascii"),
+                    "media_type": media_type,
+                },
+                timeout=10 * 60,
+            )
+        except ProcessPluginError as exc:
+            raise AIClientError(str(exc)) from exc
+        return str(result or "")
+
 
 def setup_services(context: PluginContext) -> None:
     host = ProcessPluginHost(
@@ -34,8 +49,21 @@ def setup_services(context: PluginContext) -> None:
         rpc_api_version=PLUGIN_RPC_API_VERSION,
         rpc_permissions=(),
     )
+    proxy = AiSummaryProcessProxy(host)
     context.services.add("ai_summary_process_host", host)
-    context.services.add("ai_summary_service", AiSummaryProcessProxy(host))
+    context.services.add("ai_summary_service", proxy)
+
+    rpc_registry = context.services.get("plugin_rpc")
+
+    def rpc_ocr_image(_rpc_context, params):
+        encoded = str(params.get("image_b64") or "")
+        media_type = str(params.get("media_type") or "image/png")
+        return proxy.ocr_image(
+            base64.b64decode(encoded, validate=False),
+            media_type,
+        )
+
+    rpc_registry.register("ai_summary.ocr.image", rpc_ocr_image)
 
 
 async def startup(context: PluginContext) -> None:

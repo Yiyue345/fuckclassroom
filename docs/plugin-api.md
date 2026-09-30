@@ -82,6 +82,7 @@ from fuckclassroom.core.plugins import (
     NavigationItem,
     PluginContext,
     PluginRegistry,
+    PluginServiceError,
     PluginSpec,
     ServiceContainer,
     SettingsPanel,
@@ -101,6 +102,19 @@ from fuckclassroom.core.plugins import (
 - 任何以下划线开头的模块级函数、属性或字段
 
 如果未来必须破坏本文列出的稳定契约，`PLUGIN_API_VERSION` 会递增。
+
+跨插件 Service 调用失败时，提供方应抛出 `PluginServiceError` 的子类，调用方只依赖这个公共基类：
+
+```python
+from fuckclassroom.core.plugins import PluginServiceError
+
+try:
+    context.services.get("transcription_service").transcribe_url(...)
+except PluginServiceError as exc:
+    ...
+```
+
+插件不能为了捕获异常而直接 import 另一个插件的 `errors.py`。这条约束用于保证插件拆分到独立仓库后仍可单独发布和升级。
 
 ---
 

@@ -53,8 +53,9 @@ def build_plugin() -> PluginSpec:
     return PluginSpec(
         id="course_selection",
         ui_assets=(
+            UIAsset("selection_display.js?v=20260930-2", pages=("selection_info", "selection_selected", "selection_catalog")),
             UIAsset("selection_ui.js?v=20260927-2", pages=("selection_info", "selection_selected", "selection_auto", "selection_catalog")),
-            UIAsset("selection_catalog.js?v=20260928-1", pages=("selection_catalog",)),
+            UIAsset("selection_catalog.js?v=20260930-1", pages=("selection_catalog",)),
         ),
         name="本科选课",
         order=20,
@@ -66,7 +67,7 @@ def build_plugin() -> PluginSpec:
         clear_session=clear_session,
         template_dir=PLUGIN_DIR / "templates",
         static_dir=PLUGIN_DIR / "static",
-        stylesheets=("/plugins/course_selection/static/selection.css?v=20260922-1",),
+        stylesheets=("/plugins/course_selection/static/selection.css?v=20260930-1",),
         navigation_groups=(
             NavigationGroup(
                 key="selection",

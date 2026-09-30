@@ -104,14 +104,14 @@
           <span class="selection-course-count">{{ course_group|length }} 个教学班</span>
         </summary>
         <div class="selection-course-table">
-          <table style="min-width: 880px">
+          <table class="selection-lessons-table">
             <thead><tr><th>教学班 / 教师</th><th>上课安排</th><th>容量</th><th>状态</th><th></th></tr></thead>
             <tbody>
               {% for course in course_group %}
                 {% set is_full = course.max_count is not none and course.selected_count is not none and course.max_count > 0 and course.selected_count >= course.max_count %}
                 <tr data-filter-row data-lesson-id="{{ course.lesson_id }}" data-max-count="{{ course.max_count if course.max_count is not none else '' }}" data-selected="{{ 'true' if course.is_selected else 'false' }}">
-                  <td><div class="table-title" style="font-size:12px">{{ course.lesson_name or "未公布" }}</div><div class="table-subtitle">{{ course.teachers or "教师未公布" }}{% if course.lesson_code %} · {{ course.lesson_code }}{% endif %}</div></td>
-                  <td><div class="schedule">{{ course.time or "时间未公布" }}</div>{% if course.campus %}<div class="table-subtitle">{{ course.campus }}</div>{% endif %}</td>
+                  <td><div class="table-title compact selection-lesson-name" title="{{ course.lesson_name or '未公布' }}">{{ course.lesson_name or "未公布" }}</div><div class="table-subtitle">{{ course.teachers or "教师未公布" }}{% if course.lesson_code %} · {{ course.lesson_code }}{% endif %}</div></td>
+                  <td><div data-selection-schedule>{{ course.time or "时间未公布" }}</div></td>
                   <td data-capacity-cell>
                     {% if course.selected_count is not none and course.max_count is not none and course.max_count > 0 %}
                       <div class="capacity"><div class="progress"><span style="width: {{ [100, (course.selected_count * 100 / course.max_count)]|min }}%;{% if is_full %}background:var(--red){% elif course.selected_count * 100 / course.max_count > 85 %}background:var(--amber){% else %}background:var(--green){% endif %}"></span></div><span class="capacity-label">{{ course.selected_count }}/{{ course.max_count }}</span></div>

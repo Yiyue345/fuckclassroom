@@ -10,6 +10,10 @@ from typing import Any, Callable, Iterable
 PLUGIN_API_VERSION = 1
 
 
+class PluginServiceError(RuntimeError):
+    """Stable cross-plugin service failure exposed by Plugin API v1."""
+
+
 @dataclass(frozen=True, slots=True)
 class NavigationItem:
     key: str
@@ -495,6 +499,7 @@ __all__ = [
     "PluginContext",
     "PluginRegistry",
     "PluginRuntime",
+    "PluginServiceError",
     "PluginSpec",
     "ServiceContainer",
     "SettingsPanel",

@@ -317,7 +317,7 @@ class SidebarNavigationTests(unittest.TestCase):
             registry.stylesheets,
         )
         self.assertIn(
-            "/plugins/course_selection/static/selection.css?v=20260922-1",
+            "/plugins/course_selection/static/selection.css?v=20260930-1",
             registry.stylesheets,
         )
         self.assertIn(
@@ -335,7 +335,7 @@ class SidebarNavigationTests(unittest.TestCase):
             classroom_only.stylesheets,
         )
         self.assertNotIn(
-            "/plugins/course_selection/static/selection.css?v=20260922-1",
+            "/plugins/course_selection/static/selection.css?v=20260930-1",
             classroom_only.stylesheets,
         )
         self.assertNotIn(
@@ -425,7 +425,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("window.FuckClassroomShell?.replaceUrl", catalog)
         self.assertIn("window.FuckClassroomShell.replaceUrl(visibleUrl", catalog)
         self.assertIn("selection_ui.js?v=20260927-2", plugin)
-        self.assertIn("selection_catalog.js?v=20260928-1", plugin)
+        self.assertIn("selection_catalog.js?v=20260930-1", plugin)
 
     def test_course_media_async_flows_share_pjax_page_lifecycle(self) -> None:
         media = Path(

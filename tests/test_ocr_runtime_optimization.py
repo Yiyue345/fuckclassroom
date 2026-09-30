@@ -50,6 +50,55 @@ class OcrRuntimeOptimizationTests(unittest.TestCase):
         self.assertEqual(init["det_limit_type"], "max")
         self.assertFalse(observed["call"]["use_cls"])
 
+    def test_ai_ocr_uses_injected_cross_plugin_callback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            (data_dir / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "ocr_engine": "ai",
+                        "ai_api_key": "test-key",
+                        "ocr_model": "vision-test",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            calls: list[tuple[bytes, str]] = []
+            service = OcrService(
+                AppConfig(data_dir=data_dir),
+                ai_ocr=lambda image, media_type: (
+                    calls.append((image, media_type)) or "AI 识别文字"
+                ),
+                ai_available=lambda: True,
+            )
+
+            result = service.ocr_image(b"image", "slide.png")
+
+            self.assertEqual(result, "AI 识别文字")
+            self.assertEqual(calls, [(b"image", "image/png")])
+
+    def test_ai_ocr_is_unavailable_without_ai_summary_plugin(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            (data_dir / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "ocr_engine": "ai",
+                        "ai_api_key": "test-key",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = OcrService(
+                AppConfig(data_dir=data_dir),
+                ai_ocr=lambda _image, _media_type: "should-not-run",
+                ai_available=lambda: False,
+            )
+            warnings: list[str] = []
+
+            self.assertFalse(service.can_ocr(warnings))
+            self.assertIn("AI 总结插件未启用", warnings[0])
+
     def test_rapidocr_result_is_persistently_cached_by_image_and_output_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
