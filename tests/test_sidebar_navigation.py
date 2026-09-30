@@ -321,7 +321,7 @@ class SidebarNavigationTests(unittest.TestCase):
             registry.stylesheets,
         )
         self.assertIn(
-            "/plugins/classroom/static/downloads.js?v=20260921-1",
+            "/plugins/classroom/static/downloads.js?v=20260928-1",
             registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
         )
         self.assertIn(
@@ -446,6 +446,48 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertNotIn("const pageController = new AbortController()", media)
         self.assertNotIn("await fetch(", media)
         self.assertIn("course_media.js?v=20260928-1", plugin)
+
+    def test_auxiliary_async_pages_share_pjax_page_lifecycle(self) -> None:
+        downloads = Path(
+            "fuckclassroom/plugins/classroom/static/downloads.js"
+        ).read_text(encoding="utf-8")
+        classroom_plugin = Path(
+            "fuckclassroom/plugins/classroom/plugin.py"
+        ).read_text(encoding="utf-8")
+        lab = Path(
+            "fuckclassroom/plugins/lab_selection/static/lab_selection.js"
+        ).read_text(encoding="utf-8")
+        lab_plugin = Path(
+            "fuckclassroom/plugins/lab_selection/plugin.py"
+        ).read_text(encoding="utf-8")
+        qr = Path(
+            "fuckclassroom/plugins/attendance/static/qr_assistant.js"
+        ).read_text(encoding="utf-8")
+        attendance_plugin = Path(
+            "fuckclassroom/plugins/attendance/plugin.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("window.FuckClassroomPage?.current?.()", downloads)
+        self.assertIn("const pageFetch = (input, init = {}) => window.fetch(input, { ...init, signal: pageSignal })", downloads)
+        self.assertIn('error?.name === "AbortError"', downloads)
+        self.assertIn("if (disposed()) return;", downloads)
+        self.assertNotIn("await fetch(", downloads)
+        self.assertIn("downloads.js?v=20260928-1", classroom_plugin)
+
+        self.assertIn("window.FuckClassroomPage?.current?.()", lab)
+        self.assertIn("signal: pageSignal", lab)
+        self.assertIn('error?.name === "AbortError"', lab)
+        self.assertIn("function scheduleWaitlistRefresh()", lab)
+        self.assertNotIn("window.setInterval(", lab)
+        self.assertIn("lab_selection.js?v=20260928-1", lab_plugin)
+
+        self.assertIn("window.FuckClassroomPage?.current?.()", qr)
+        self.assertIn("const pageFetch = (input, init = {}) => window.fetch(input, { ...init, signal: pageSignal })", qr)
+        self.assertIn('error?.name === "AbortError"', qr)
+        self.assertIn("pageRuntime?.onDispose?.(cleanupPage)", qr)
+        self.assertIn("if (disposed() || currentLiveEndpoint(item.slideId) !== item.endpoint) return;", qr)
+        self.assertNotIn("await fetch(", qr)
+        self.assertIn("qr_assistant.js?v=20260928-1", attendance_plugin)
 
     def test_session_footer_title_and_theme_button_share_the_same_track(self) -> None:
         template = Path("templates/base.html").read_text(encoding="utf-8")
