@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from ..core.plugins import PluginServiceError
+
 
 WEBVPN_URL = "https://v.guet.edu.cn/"
 JW_WEBVPN_BASE_URL = (
@@ -28,7 +30,7 @@ SENSITIVE_KEY_PARTS = ("token", "ticket", "session", "cookie", "auth", "password
 CAPTURE_RESOURCE_TYPES = {"xhr", "fetch"}
 
 
-class CourseSelectionApiError(RuntimeError):
+class CourseSelectionApiError(PluginServiceError):
     pass
 
 
