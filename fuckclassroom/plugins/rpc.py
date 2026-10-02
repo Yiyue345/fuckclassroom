@@ -36,6 +36,19 @@ class PluginRpcInvalidParams(PluginRpcError):
     code = "invalid_params"
 
 
+def _decode_image_b64(value: object) -> bytes:
+    encoded = str(value or "").strip()
+    if not encoded:
+        raise PluginRpcInvalidParams("image_b64 不能为空")
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise PluginRpcInvalidParams("image_b64 不是有效 Base64") from exc
+    if not image_bytes:
+        raise PluginRpcInvalidParams("image_b64 解码后为空")
+    return image_bytes
+
+
 @dataclass(frozen=True, slots=True)
 class PluginRpcCallContext:
     plugin_id: str
@@ -253,12 +266,8 @@ class PluginRpcBuiltins:
         service = self.services.maybe("ai_summary_service")
         if service is None:
             raise PluginRpcMethodNotFound("AI 总结插件未启用")
-        encoded = str(params.get("image_b64") or "")
+        image_bytes = _decode_image_b64(params.get("image_b64"))
         media_type = str(params.get("media_type") or "image/png")
-        try:
-            image_bytes = base64.b64decode(encoded, validate=False)
-        except (ValueError, binascii.Error) as exc:
-            raise PluginRpcInvalidParams("image_b64 不是有效 Base64") from exc
         return service.ocr_image(image_bytes, media_type)
 
     def plugins_enabled(

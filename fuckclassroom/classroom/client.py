@@ -18,6 +18,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 from ..core.atomic import atomic_write_text
 from ..core.cache import JsonCache
 from ..core.config import AppConfig
+from ..core.plugins import PluginServiceError
 
 
 BASE_URL = "https://classroom.guet.edu.cn"
@@ -37,7 +38,7 @@ _CHANGKE_SESSION_LOCK = threading.Lock()
 _QR_DEVICE_LOCK = threading.Lock()
 
 
-class ClassroomClientError(RuntimeError):
+class ClassroomClientError(PluginServiceError):
     pass
 
 
