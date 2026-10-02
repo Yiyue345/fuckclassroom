@@ -2,58 +2,32 @@
 
 第三方插件作者需要查看可调用接口、Hook、ServiceContainer、后台任务和完整示例时，请阅读 [`docs/plugin-api.md`](plugin-api.md)。
 
-`pluginization` 分支把应用拆成一个始终启用的核心壳层，以及按需启用的功能插件。
+应用由一个始终启用的核心壳层与按需安装、启用的独立功能插件组成。
 
-## 当前内置插件
+## 当前插件所有权
 
-| 插件 ID | 功能 | 主要 Service | Lifecycle |
-| --- | --- | --- | --- |
-| `core_ui` | 通用 UI、设置、任务、共享认证基础设施 | settings/cache/task/credential/verification | 始终启用 |
-| `classroom` | 课程、直播、回放、PPT 与下载基础能力 | classroom/auth/download | 启动时同步学期并验证录播会话 |
-| `processing` | 课次文字处理编排与输出页面 | extraction | 无 |
-| `transcription` | faster-whisper 本地语音转写 | transcription | 无 |
-| `ocr` | PPT 图片 OCR | ocr | 无 |
-| `ai_summary` | AI 课程总结 | ai_summary | 无 |
-| `attendance` | 畅课/课堂派二维码签到 | ketangpai/QR scanner | 启动时验证课堂派会话 |
-| `course_selection` | 本科选课、全校开课、定时选课、Hy2 | course_selection/auto_selection/hy2 | 启动时验证会话并启动自动选课；退出时停止后台服务 |
-| `lab_selection` | 实验课程、整组与时间段选课、候补 | lab_selection/lab_waitlist/academic_session | 共享教务会话；启动候补，退出时停止 |
+主仓只内置 `core_ui`，它提供通用 UI、设置、任务和共享认证基础设施。官方业务功能与第三方插件一样，从 `data/plugins/<plugin_id>/` 加载，不再占用 builtin canonical ID。
 
-实验课插件的接口来源、验证范围与会话约定见 [`docs/lab-selection.md`](lab-selection.md)。
+当前官方独立插件包括：
+
+| 插件 ID | 功能 | 主要 Service |
+| --- | --- | --- |
+| `classroom` | 课程、直播、回放、PPT 与下载基础能力 | classroom/auth/download |
+| `processing` | 课次文字处理编排与输出页面 | extraction |
+| `transcription` | faster-whisper 本地语音转写 | transcription |
+| `ocr` | PPT 图片 OCR | ocr |
+| `ai_summary` | AI 课程总结 | ai_summary |
+| `attendance` | 畅课/课堂派二维码签到 | ketangpai/QR scanner |
+| `course_selection` | 本科选课、全校开课、定时选课、Hy2 | academic_session/course_selection/auto_selection/hy2 |
+| `lab_selection` | 实验课程、整组与时间段选课、候补 | lab_selection/lab_waitlist；依赖 course_selection |
+
+官方插件通过 Registry 安装后使用原 canonical ID。主仓不再用同名 builtin 占位，因此 Registry 安装不会出现“与内置插件冲突”。
 
 ## 启用插件
 
-默认不设置环境变量时启用全部内置插件。
+默认首次启动只有 `core_ui`。在插件管理页安装并启用业务插件后，依赖会自动补齐；例如 `transcription` 依赖 `processing`，后者再依赖 `classroom`。显式启动参数只允许选择已经安装的插件，未安装的 ID 会按未知插件处理。
 
-PowerShell 只启用课程录播：
-
-```powershell
-$env:FUCKCLASSROOM_PLUGINS="classroom"
-python main.py
-```
-
-只启用本科选课：
-
-```powershell
-$env:FUCKCLASSROOM_PLUGINS="course_selection"
-python main.py
-```
-
-同时启用：
-
-```powershell
-$env:FUCKCLASSROOM_PLUGINS="classroom,course_selection"
-python main.py
-```
-
-设置为空字符串时只启动 `core_ui`。`core_ui` 无论如何都会启用，因为它提供共享设置、任务和认证基础设施。
-
-插件依赖会自动补齐。例如只指定 `transcription` 时，会自动启用 `processing` 和 `classroom`；只指定 `attendance` 时会自动启用 `classroom`，但不会加载文字提取、Whisper、OCR 或 AI 总结。
-
-测试或嵌入运行时也可以直接调用：
-
-```python
-app = create_app(enabled_plugins={"classroom"})
-```
+实验课插件的接口来源、验证范围与会话约定见 [`docs/lab-selection.md`](lab-selection.md)。
 
 ## 插件目录约定
 
