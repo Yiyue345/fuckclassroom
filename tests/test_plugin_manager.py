@@ -172,7 +172,7 @@ class PluginManagerTests(unittest.TestCase):
                         "api_version": PLUGIN_API_VERSION,
                         "app_requires": ">=0.1,<0.3",
                         "description": "test plugin",
-                        "requires": ["classroom"],
+                        "requires": [],
                         "entry": "plugin.py",
                     }
                 ),
@@ -188,7 +188,7 @@ def build_plugin():
         id="demo_plugin",
         name="Demo Plugin",
         order=70,
-        requires=("classroom",),
+        requires=(),
     )
 """.lstrip(),
                 encoding="utf-8",
@@ -206,7 +206,49 @@ def build_plugin():
             registry = build_plugin_registry(config=config, manager=manager)
 
             self.assertIn("demo_plugin", registry.plugin_ids)
-            self.assertIn("classroom", registry.plugin_ids)
+            self.assertEqual(set(registry.plugin_ids), {"core_ui", "demo_plugin"})
+
+    def test_external_business_plugin_can_use_former_builtin_canonical_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "classroom"
+            source.mkdir()
+            (source / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "classroom",
+                        "name": "课程录播",
+                        "version": "0.1.0",
+                        "api_version": PLUGIN_API_VERSION,
+                        "app_requires": ">=0.1,<0.3",
+                        "requires": ["core_ui"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (source / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='classroom', name='课程录播', "
+                "requires=('core_ui',))\n",
+                encoding="utf-8",
+            )
+
+            config = AppConfig(data_dir=root / "data")
+            manager = PluginManager(config)
+            installed = manager.install_from_path(str(source))
+
+            self.assertEqual(installed.id, "classroom")
+            self.assertFalse(installed.builtin)
+            self.assertNotIn(
+                "classroom",
+                {item.id for item in manager.builtin_descriptors},
+            )
+
+            manager.enable("classroom")
+            registry = build_plugin_registry(config=config, manager=manager)
+            self.assertEqual(set(registry.plugin_ids), {"core_ui", "classroom"})
 
     def test_externalized_lab_selection_can_use_canonical_id(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -396,24 +438,15 @@ def build_plugin():
             with self.assertRaisesRegex(PluginManagerError, "api_version"):
                 manager.load_spec(descriptor)
 
-    def test_builtin_dependency_status_is_exposed(self) -> None:
+    def test_only_core_ui_is_reserved_as_builtin(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manager = PluginManager(AppConfig(data_dir=Path(directory)))
 
-            transcription = manager.dependency_status("transcription")
-            labels = {str(item["label"]) for item in transcription}
-
             self.assertEqual(
-                labels,
-                {"faster-whisper", "Hugging Face Hub", "OpenCC"},
+                [item.id for item in manager.builtin_descriptors],
+                ["core_ui"],
             )
-            self.assertTrue(all(bool(item["installed"]) for item in transcription))
-
-            attendance = manager.dependency_status("attendance")
-            wxscan = next(
-                item for item in attendance if item["label"] == "wxscan 原生扩展"
-            )
-            self.assertTrue(wxscan["optional"])
+            self.assertEqual(manager.dependency_status("core_ui"), [])
 
     def test_external_plugin_with_missing_python_dependency_cannot_be_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
