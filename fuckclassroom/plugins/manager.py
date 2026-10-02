@@ -26,7 +26,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from .. import __version__ as APP_VERSION
-from ..core.config import AppConfig
+from ..core.config import PROJECT_ROOT, AppConfig
 from ..core.plugins import PLUGIN_API_VERSION, PluginSpec
 from .rpc import PLUGIN_RPC_API_VERSION
 
