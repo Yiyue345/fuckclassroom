@@ -41,14 +41,18 @@ $env:FUCKCLASSROOM_PORT="8766"
 
 ## 插件模式
 
-当前版本已经支持按需启用功能插件。默认启动全部内置功能；也可以通过 `FUCKCLASSROOM_PLUGINS` 只加载需要的 Route、Service 和 Lifecycle：
+主程序现在只内置始终启用的 `core_ui`。课程录播、课次处理、转写、OCR、AI 总结、签到和本科选课均以独立插件安装，官方插件也使用与第三方插件相同的 Registry / ZIP 安装链路。
+
+首次启动后访问 `/plugins`，可从 Registry 安装所需插件；插件依赖会自动补齐，例如启用 `transcription` 会自动启用已安装的 `processing` 与 `classroom`。插件管理页同时负责启停、运行依赖检查、依赖安装/修复和更新。页面会分别检查 Plugin API、RPC API 与 FuckClassroom 版本约束；只有 API 不兼容会阻止插件执行，主程序版本范围不满足时仅显示警告。
+
+`FUCKCLASSROOM_PLUGINS` 和 `create_app(enabled_plugins=...)` 仍可用于显式选择**已经安装**的插件。例如安装 `classroom` 后可以：
 
 ```powershell
 $env:FUCKCLASSROOM_PLUGINS="classroom"
 .\.venv\Scripts\python.exe main.py
 ```
 
-可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。应用启动后可访问 `/plugins` 管理页面启停插件、查看运行依赖、安装/修复依赖，并可从本机目录、ZIP 包或 Registry 在线目录添加外部插件；页面会分别检查 Plugin API、RPC API 与 FuckClassroom 版本约束。只有 API 不兼容会阻止插件执行，主程序版本范围不满足时仅显示警告。网页配置保存在 `data/plugin_state.json`。正常从 `main.py` 启动时，插件启停会通过 Runtime generation 热重载自动应用；新 Runtime 构建失败时会保留旧 Runtime 并显示错误。只有当前启动方式没有提供热重载能力时，变更才需要重启后生效。详细架构见 `docs/plugins.md`，第三方插件开发接口见 `docs/plugin-api.md`。
+网页配置保存在 `data/plugin_state.json`。正常从 `main.py` 启动时，插件启停会通过 Runtime generation 热重载自动应用；新 Runtime 构建失败时会保留旧 Runtime 并显示错误。详细架构见 `docs/plugins.md`，第三方插件开发接口见 `docs/plugin-api.md`。
 
 ## 首次配置与登录
 
