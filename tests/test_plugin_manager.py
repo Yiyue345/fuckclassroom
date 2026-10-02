@@ -980,6 +980,11 @@ def build_plugin():
     def test_plugin_toggle_supports_json_without_page_redirect(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = AppConfig(data_dir=Path(directory))
+            _write_external_plugin(config.data_dir, "ocr")
+            (config.data_dir / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui", "ocr"]}),
+                encoding="utf-8",
+            )
             reload_calls: list[bool] = []
 
             async def request_reload() -> bool:
@@ -1409,9 +1414,10 @@ def build_plugin():
             self.assertTrue(any(command == ["optional-post"] for command, _ in commands))
             self.assertFalse(any("must-not-run" in command for command, _ in commands))
 
-    def test_builtin_required_dependency_blocks_enable_and_runtime(self) -> None:
+    def test_external_required_dependency_blocks_enable_and_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
+            _write_external_plugin(data_dir, "classroom")
             manager = PluginManager(AppConfig(data_dir=data_dir))
             manager.state_path.write_text(
                 json.dumps({"selected": ["core_ui"]}),
@@ -1453,6 +1459,7 @@ def build_plugin():
     def test_stale_plugin_state_is_pruned_before_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
+            _write_external_plugin(data_dir, "ai_summary")
             manager = PluginManager(AppConfig(data_dir=data_dir))
             manager.state_path.write_text(
                 json.dumps({"selected": ["core_ui", "removed_plugin"]}),
@@ -1473,6 +1480,7 @@ def build_plugin():
     def test_disable_validation_failure_does_not_partially_write_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
+            _write_external_plugin(data_dir, "classroom")
             manager = PluginManager(AppConfig(data_dir=data_dir))
             manager.state_path.write_text(
                 json.dumps({"selected": ["core_ui", "classroom"]}, indent=2),
