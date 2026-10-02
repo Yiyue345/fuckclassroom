@@ -116,7 +116,7 @@ class SidebarNavigationTests(unittest.TestCase):
         for panel in registry.account_panels:
             environment.get_template(panel.template)
 
-        classroom_only = build_plugin_registry({"classroom"})
+        classroom_only = build_legacy_business_registry({"classroom"})
         self.assertEqual(
             [panel.key for panel in classroom_only.account_panels],
             ["classroom"],
@@ -329,7 +329,7 @@ class SidebarNavigationTests(unittest.TestCase):
             registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
         )
 
-        classroom_only = build_plugin_registry({"classroom"})
+        classroom_only = build_legacy_business_registry({"classroom"})
         self.assertIn(
             "/plugins/classroom/static/classroom.css?v=20260922-1",
             classroom_only.stylesheets,
