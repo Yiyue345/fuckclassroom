@@ -18,7 +18,7 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-普通使用不需要安装 Rust 工具链。签到插件会优先使用可选的 wxscan 原生扩展，未安装或编译失败时可回退 OpenCV；Hy2 正常也使用预编译 runner。只有需要编译 wxscan，或 Windows Smart App Control 拦截 Hy2 预编译组件且希望启用本地构建兜底时，才需要额外安装 rustup/Cargo。
+普通使用不需要安装 Rust 工具链。签到插件所需的 wxscan 原生扩展由独立 Attendance 仓库构建并随插件 Release 提供，无法加载时可回退 OpenCV；Hy2 预编译 runner 由独立 Course Selection 插件管理。只有 Windows Smart App Control 拦截 Hy2 runner、且希望启用本地构建兜底时，才需要额外安装 rustup/Cargo。
 
 ## 启动
 
@@ -83,7 +83,7 @@ $env:FUCKCLASSROOM_PLUGINS="classroom"
 
 直播课件出现新页面时，程序会自动识别其中的畅课或课堂派二维码。畅课二维码包含有效的 `rollcallId` 和动态数据时，程序会复用统一桂电账号的 CAS 会话完成签到；CAS 会话失效时会用已加密保存的统一账号自动恢复。课堂派使用独立登录令牌，登录后会提交二维码中的 `ticketid`、`expire` 和 `sign`。两种平台都会在课程页明确提示签到成功、二维码过期、点名结束、账号未登录或会话失效。程序不会使用共享账号、伪造位置或绕过平台校验。
 
-默认安装使用 OpenCV 识别二维码，无需额外配置。安装了 `rust_module/wxscan_py` 原生扩展时会优先使用 wxscan，所需模型会在首次识别时自动下载；模型或扩展不可用时会自动回退到 OpenCV。
+Attendance 插件随正式版及 beta ZIP 提供针对 Windows、Linux 和 macOS 的 wxscan 扩展，在支持的平台上会先校验 SHA-256 再加载；所需模型仍在首次识别时按需下载。原生扩展不可用时自动回退 OpenCV，无需在主仓编译 wxscan。
 
 ## 文字提取
 
