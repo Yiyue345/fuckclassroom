@@ -23,6 +23,10 @@ class PluginCompositionTests(unittest.TestCase):
         self.assertNotIn("plugins.classroom.routes", source)
         self.assertNotIn("plugins.course_selection.routes", source)
 
+        launcher = Path("main.py").read_text(encoding="utf-8")
+        self.assertNotIn("course_selection.hy2_prebuilt", launcher)
+        self.assertNotIn("install_prebuilt_runner", launcher)
+
         for plugin_id in (
             "core_ui",
             "classroom",
