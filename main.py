@@ -11,7 +11,6 @@ import uvicorn
 
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.core.logging_setup import build_uvicorn_log_config, configure_startup_logging
-from fuckclassroom.course_selection.hy2_prebuilt import Hy2PrebuiltError, install_prebuilt_runner
 from fuckclassroom.web import create_reloadable_app
 
 
@@ -38,13 +37,6 @@ if __name__ == "__main__":
     _ensure_startup_logging()
 
 
-if _config.hy2_enabled:
-    try:
-        install_prebuilt_runner(_config.hy2_source_dir, _config.hy2_runner_path)
-    except Hy2PrebuiltError as exc:
-        # Keep startup resilient: the existing Hy2 manager will fall back to the
-        # pinned local Cargo build when a packaged runner is unavailable/invalid.
-        logger.warning("Hy2 预编译组件不可用，将回退本地构建：%s", exc)
 
 app = create_reloadable_app(_config)
 
