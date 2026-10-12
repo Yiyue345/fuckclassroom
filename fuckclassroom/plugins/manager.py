@@ -98,71 +98,17 @@ class PluginDescriptor:
         return "外部 · 独立进程" if self.execution == "process" else "外部"
 
 
-_PLAYWRIGHT = DependencySpec(
-    "playwright>=1.45",
-    "playwright",
-    "Playwright + Chromium",
-    post_install=(("{python}", "-m", "playwright", "install", "chromium"),),
-    probe="playwright_chromium",
-)
-
 _BUILTINS: tuple[PluginDescriptor, ...] = (
     PluginDescriptor(
-        "core_ui", "通用", "应用基础 UI、设置、任务与认证入口。", "builtin", 0, (), True,
+        "core_ui",
+        "通用",
+        "应用基础 UI、设置、任务与认证入口。",
+        "builtin",
+        0,
+        (),
+        True,
         "fuckclassroom.plugins.core_ui",
         python_requirements=(),
-    ),
-    PluginDescriptor(
-        "classroom", "课程录播", "课程、直播、回放、PPT 与下载基础能力。", "builtin", 10, (), True,
-        "fuckclassroom.plugins.classroom",
-        python_requirements=(_PLAYWRIGHT,),
-    ),
-    PluginDescriptor(
-        "processing", "课次处理", "课次文字处理编排与结果页面。", "builtin", 20, ("classroom",), True,
-        "fuckclassroom.plugins.processing",
-        python_requirements=(DependencySpec("Pillow>=10.0", "PIL", "Pillow"),),
-    ),
-    PluginDescriptor(
-        "transcription", "本地语音转写", "使用 faster-whisper 从课程录像生成本地转写。", "builtin", 30, ("processing",), True,
-        "fuckclassroom.plugins.transcription",
-        python_requirements=(
-            DependencySpec("faster-whisper>=1.1", "faster_whisper", "faster-whisper"),
-            DependencySpec("huggingface-hub>=0.32", "huggingface_hub", "Hugging Face Hub"),
-            DependencySpec("opencc-python-reimplemented>=0.1.7", "opencc", "OpenCC"),
-        ),
-    ),
-    PluginDescriptor(
-        "ocr", "PPT OCR", "使用 RapidOCR、Tesseract 或视觉模型识别课件图片文字。", "builtin", 40, ("processing",), True,
-        "fuckclassroom.plugins.ocr",
-        python_requirements=(
-            DependencySpec("rapidocr-onnxruntime>=1.2", "rapidocr_onnxruntime", "RapidOCR"),
-        ),
-    ),
-    PluginDescriptor(
-        "ai_summary", "AI 总结", "将转写与 PPT 文本整理为结构化课程总结。", "builtin", 50, ("processing",), True,
-        "fuckclassroom.plugins.ai_summary",
-        python_requirements=(),
-    ),
-    PluginDescriptor(
-        "attendance", "二维码签到", "识别畅课/课堂派二维码并处理签到。", "builtin", 60, ("classroom",), True,
-        "fuckclassroom.plugins.attendance",
-        python_requirements=(
-            DependencySpec("cryptography>=43.0", "cryptography", "cryptography"),
-            DependencySpec("numpy>=1.24", "numpy", "NumPy"),
-            DependencySpec("opencv-python>=4.8", "cv2", "OpenCV"),
-            DependencySpec(
-                "",
-                "fuckclassroom_wxscan",
-                "wxscan 原生扩展",
-                optional=True,
-                install_target=str(PROJECT_ROOT / "rust_module" / "wxscan_py"),
-            ),
-        ),
-    ),
-    PluginDescriptor(
-        "course_selection", "本科选课", "本科选课、全校开课、定时选课与 Hy2。", "builtin", 20, (), True,
-        "fuckclassroom.plugins.course_selection",
-        python_requirements=(_PLAYWRIGHT,),
     ),
 )
 

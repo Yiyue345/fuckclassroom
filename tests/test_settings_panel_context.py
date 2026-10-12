@@ -10,6 +10,7 @@ from starlette.requests import Request
 
 from fuckclassroom.config import AppConfig
 from fuckclassroom.web import create_app
+from tests.legacy_plugin_registry import install_legacy_external_plugins
 
 
 def _request(app) -> Request:
@@ -58,8 +59,10 @@ class SettingsPanelContextTests(unittest.TestCase):
             "fuckclassroom.classroom.semester_sync.SemesterSyncService.sync",
             return_value=snapshot,
         ):
+            data_dir = Path(directory)
+            install_legacy_external_plugins(data_dir, {"classroom"})
             app = create_app(
-                AppConfig(data_dir=Path(directory)),
+                AppConfig(data_dir=data_dir),
                 enabled_plugins={"classroom"},
             )
             route = next(item for item in app.routes if getattr(item, "path", "") == "/settings")

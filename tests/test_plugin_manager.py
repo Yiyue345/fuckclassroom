@@ -25,121 +25,130 @@ from fuckclassroom.plugins.rpc import PLUGIN_RPC_API_VERSION
 from fuckclassroom.web import create_app
 
 
+def _write_external_plugin(
+    data_dir: Path,
+    plugin_id: str,
+    *,
+    requires: tuple[str, ...] = (),
+    api_version: int = PLUGIN_API_VERSION,
+) -> Path:
+    root = data_dir / "plugins" / plugin_id
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "plugin.json").write_text(
+        json.dumps(
+            {
+                "id": plugin_id,
+                "name": plugin_id,
+                "version": "0.1.0",
+                "api_version": api_version,
+                "app_requires": ">=0.1,<0.3",
+                "requires": list(requires),
+                "entry": "plugin.py",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "plugin.py").write_text(
+        "from fuckclassroom.core.plugins import PluginSpec\n"
+        "def build_plugin():\n"
+        f"    return PluginSpec(id={plugin_id!r}, name={plugin_id!r}, "
+        f"api_version={api_version}, requires={requires!r})\n",
+        encoding="utf-8",
+    )
+    return root
+
+
 class PluginManagerTests(unittest.TestCase):
-    def test_default_state_keeps_all_builtin_plugins_enabled(self) -> None:
+    def test_default_state_enables_only_core_ui(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manager = PluginManager(AppConfig(data_dir=Path(directory)))
 
+            self.assertEqual(manager.desired_enabled(), {"core_ui"})
             self.assertEqual(
-                manager.desired_enabled(),
-                {
-                    "core_ui",
-                    "classroom",
-                    "processing",
-                    "transcription",
-                    "ocr",
-                    "ai_summary",
-                    "attendance",
-                    "course_selection",
-                },
+                {item.id for item in manager.builtin_descriptors},
+                {"core_ui"},
             )
             self.assertEqual(manager.selection_source, "default")
             self.assertFalse(manager.state_path.exists())
 
-    def test_disabling_dependency_also_disables_dependents(self) -> None:
+    def test_disabling_external_dependency_also_disables_dependents(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            manager = PluginManager(AppConfig(data_dir=Path(directory)))
-
-            desired = manager.disable("classroom")
-
-            self.assertEqual(desired, {"core_ui", "course_selection"})
-            payload = json.loads(manager.state_path.read_text(encoding="utf-8"))
-            self.assertEqual(
-                set(payload["selected"]),
-                {"core_ui", "course_selection"},
+            data_dir = Path(directory)
+            _write_external_plugin(data_dir, "base_plugin")
+            _write_external_plugin(
+                data_dir,
+                "dependent_plugin",
+                requires=("base_plugin",),
             )
+            manager = PluginManager(AppConfig(data_dir=data_dir))
+            manager.enable("dependent_plugin")
 
-    def test_enabling_plugin_automatically_enables_dependencies(self) -> None:
+            desired = manager.disable("base_plugin")
+
+            self.assertEqual(desired, {"core_ui"})
+            payload = json.loads(manager.state_path.read_text(encoding="utf-8"))
+            self.assertEqual(set(payload["selected"]), {"core_ui"})
+
+    def test_enabling_external_plugin_automatically_enables_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            manager = PluginManager(AppConfig(data_dir=Path(directory)))
-            manager.disable("classroom")
+            data_dir = Path(directory)
+            _write_external_plugin(data_dir, "classroom", requires=("core_ui",))
+            _write_external_plugin(data_dir, "processing", requires=("classroom",))
+            _write_external_plugin(data_dir, "transcription", requires=("processing",))
+            manager = PluginManager(AppConfig(data_dir=data_dir))
 
             desired = manager.enable("transcription")
 
-            self.assertTrue(
-                {"core_ui", "classroom", "processing", "transcription"}.issubset(desired)
+            self.assertEqual(
+                desired,
+                {"core_ui", "classroom", "processing", "transcription"},
             )
-            self.assertNotIn("ocr", desired)
-            self.assertNotIn("ai_summary", desired)
-            self.assertNotIn("attendance", desired)
 
     def test_enabling_independent_plugin_ignores_unrelated_missing_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            data_dir = root / "data"
-            plugin_root = data_dir / "plugins" / "independent"
-            plugin_root.mkdir(parents=True)
-            (plugin_root / "plugin.json").write_text(
-                json.dumps(
-                    {
-                        "id": "independent",
-                        "name": "Independent",
-                        "api_version": PLUGIN_API_VERSION,
-                        "requires": [],
-                        "entry": "plugin.py",
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (plugin_root / "plugin.py").write_text(
-                "from fuckclassroom.core.plugins import PluginSpec\n"
-                "def build_plugin():\n"
-                "    return PluginSpec(id='independent', name='Independent')\n",
-                encoding="utf-8",
-            )
+            data_dir = Path(directory)
+            _write_external_plugin(data_dir, "blocked_plugin")
+            _write_external_plugin(data_dir, "independent")
             (data_dir / "plugin_state.json").write_text(
-                json.dumps({"selected": ["core_ui", "classroom"]}),
+                json.dumps({"selected": ["core_ui", "blocked_plugin"]}),
                 encoding="utf-8",
             )
             manager = PluginManager(AppConfig(data_dir=data_dir))
-            missing_playwright = [
-                {
-                    "label": "Playwright + Chromium",
-                    "installed": False,
-                    "optional": False,
-                }
-            ]
-
             original_dependency_status = manager.dependency_status
 
             def dependency_status(plugin_id: str):
-                if plugin_id == "classroom":
-                    return missing_playwright
+                if plugin_id == "blocked_plugin":
+                    return [
+                        {
+                            "label": "Missing runtime",
+                            "installed": False,
+                            "optional": False,
+                        }
+                    ]
                 return original_dependency_status(plugin_id)
 
             with patch.object(manager, "dependency_status", side_effect=dependency_status):
                 desired = manager.enable("independent")
 
             self.assertIn("independent", desired)
-            self.assertIn("classroom", desired)
+            self.assertIn("blocked_plugin", desired)
             payload = json.loads(manager.state_path.read_text(encoding="utf-8"))
             self.assertIn("independent", payload["selected"])
 
-    def test_saved_state_controls_next_application_start(self) -> None:
+    def test_saved_external_state_controls_next_application_start(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            config = AppConfig(data_dir=Path(directory))
-            manager = PluginManager(config)
-            manager.disable("classroom")
+            data_dir = Path(directory)
+            _write_external_plugin(data_dir, "demo_plugin")
+            (data_dir / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui", "demo_plugin"]}),
+                encoding="utf-8",
+            )
 
-            app = create_app(config)
-            paths = {getattr(route, "path", "") for route in app.routes}
+            app = create_app(AppConfig(data_dir=data_dir))
 
-            self.assertNotIn("/classroom", paths)
-            self.assertNotIn("/courses", paths)
-            self.assertIn("/selection/info", paths)
             self.assertEqual(
                 set(app.state.plugin_registry.plugin_ids),
-                {"core_ui", "course_selection"},
+                {"core_ui", "demo_plugin"},
             )
 
     def test_core_ui_cannot_be_disabled(self) -> None:
@@ -163,7 +172,7 @@ class PluginManagerTests(unittest.TestCase):
                         "api_version": PLUGIN_API_VERSION,
                         "app_requires": ">=0.1,<0.3",
                         "description": "test plugin",
-                        "requires": ["classroom"],
+                        "requires": [],
                         "entry": "plugin.py",
                     }
                 ),
@@ -179,7 +188,7 @@ def build_plugin():
         id="demo_plugin",
         name="Demo Plugin",
         order=70,
-        requires=("classroom",),
+        requires=(),
     )
 """.lstrip(),
                 encoding="utf-8",
@@ -197,7 +206,49 @@ def build_plugin():
             registry = build_plugin_registry(config=config, manager=manager)
 
             self.assertIn("demo_plugin", registry.plugin_ids)
-            self.assertIn("classroom", registry.plugin_ids)
+            self.assertEqual(set(registry.plugin_ids), {"core_ui", "demo_plugin"})
+
+    def test_external_business_plugin_can_use_former_builtin_canonical_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "classroom"
+            source.mkdir()
+            (source / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "id": "classroom",
+                        "name": "课程录播",
+                        "version": "0.1.0",
+                        "api_version": PLUGIN_API_VERSION,
+                        "app_requires": ">=0.1,<0.3",
+                        "requires": ["core_ui"],
+                        "entry": "plugin.py",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (source / "plugin.py").write_text(
+                "from fuckclassroom.core.plugins import PluginSpec\n"
+                "def build_plugin():\n"
+                "    return PluginSpec(id='classroom', name='课程录播', "
+                "requires=('core_ui',))\n",
+                encoding="utf-8",
+            )
+
+            config = AppConfig(data_dir=root / "data")
+            manager = PluginManager(config)
+            installed = manager.install_from_path(str(source))
+
+            self.assertEqual(installed.id, "classroom")
+            self.assertFalse(installed.builtin)
+            self.assertNotIn(
+                "classroom",
+                {item.id for item in manager.builtin_descriptors},
+            )
+
+            manager.enable("classroom")
+            registry = build_plugin_registry(config=config, manager=manager)
+            self.assertEqual(set(registry.plugin_ids), {"core_ui", "classroom"})
 
     def test_externalized_lab_selection_can_use_canonical_id(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -256,8 +307,8 @@ def build_plugin():
 
             self.assertEqual(manager.api_version, PLUGIN_API_VERSION)
             self.assertEqual(manager.app_version, APP_VERSION)
-            self.assertTrue(rows["classroom"]["compatible"])
-            self.assertEqual(rows["classroom"]["api_version"], PLUGIN_API_VERSION)
+            self.assertTrue(rows["core_ui"]["compatible"])
+            self.assertEqual(rows["core_ui"]["api_version"], PLUGIN_API_VERSION)
 
     def test_incompatible_plugin_api_cannot_be_enabled_and_is_skipped_on_boot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -387,24 +438,15 @@ def build_plugin():
             with self.assertRaisesRegex(PluginManagerError, "api_version"):
                 manager.load_spec(descriptor)
 
-    def test_builtin_dependency_status_is_exposed(self) -> None:
+    def test_only_core_ui_is_reserved_as_builtin(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manager = PluginManager(AppConfig(data_dir=Path(directory)))
 
-            transcription = manager.dependency_status("transcription")
-            labels = {str(item["label"]) for item in transcription}
-
             self.assertEqual(
-                labels,
-                {"faster-whisper", "Hugging Face Hub", "OpenCC"},
+                [item.id for item in manager.builtin_descriptors],
+                ["core_ui"],
             )
-            self.assertTrue(all(bool(item["installed"]) for item in transcription))
-
-            attendance = manager.dependency_status("attendance")
-            wxscan = next(
-                item for item in attendance if item["label"] == "wxscan 原生扩展"
-            )
-            self.assertTrue(wxscan["optional"])
+            self.assertEqual(manager.dependency_status("core_ui"), [])
 
     def test_external_plugin_with_missing_python_dependency_cannot_be_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -938,6 +980,11 @@ def build_plugin():
     def test_plugin_toggle_supports_json_without_page_redirect(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = AppConfig(data_dir=Path(directory))
+            _write_external_plugin(config.data_dir, "ocr")
+            (config.data_dir / "plugin_state.json").write_text(
+                json.dumps({"selected": ["core_ui", "ocr"]}),
+                encoding="utf-8",
+            )
             reload_calls: list[bool] = []
 
             async def request_reload() -> bool:
@@ -1367,9 +1414,10 @@ def build_plugin():
             self.assertTrue(any(command == ["optional-post"] for command, _ in commands))
             self.assertFalse(any("must-not-run" in command for command, _ in commands))
 
-    def test_builtin_required_dependency_blocks_enable_and_runtime(self) -> None:
+    def test_external_required_dependency_blocks_enable_and_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
+            _write_external_plugin(data_dir, "classroom")
             manager = PluginManager(AppConfig(data_dir=data_dir))
             manager.state_path.write_text(
                 json.dumps({"selected": ["core_ui"]}),
@@ -1411,6 +1459,7 @@ def build_plugin():
     def test_stale_plugin_state_is_pruned_before_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
+            _write_external_plugin(data_dir, "ai_summary")
             manager = PluginManager(AppConfig(data_dir=data_dir))
             manager.state_path.write_text(
                 json.dumps({"selected": ["core_ui", "removed_plugin"]}),
@@ -1431,6 +1480,7 @@ def build_plugin():
     def test_disable_validation_failure_does_not_partially_write_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
+            _write_external_plugin(data_dir, "classroom")
             manager = PluginManager(AppConfig(data_dir=data_dir))
             manager.state_path.write_text(
                 json.dumps({"selected": ["core_ui", "classroom"]}, indent=2),

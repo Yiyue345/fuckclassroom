@@ -13,6 +13,7 @@ from fuckclassroom.classroom.semester_sync import SemesterSnapshot, SemesterSync
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.web import create_app
 from fuckclassroom.plugins.classroom.services import ClassroomClientProcessProxy
+from tests.legacy_plugin_registry import install_legacy_external_plugins
 
 
 def _term(term_id: str, *, current: bool = False) -> Term:
@@ -110,7 +111,12 @@ class SemesterSyncTests(unittest.TestCase):
             "list_courses",
             return_value=[],
         ) as list_courses:
-            app = create_app(AppConfig(data_dir=Path(directory)))
+            data_dir = Path(directory)
+            install_legacy_external_plugins(data_dir, {"classroom"})
+            app = create_app(
+                AppConfig(data_dir=data_dir),
+                enabled_plugins={"classroom"},
+            )
             with TestClient(app) as client:
                 response = client.get("/courses")
 

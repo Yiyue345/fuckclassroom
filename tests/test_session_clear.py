@@ -8,6 +8,7 @@ from pathlib import Path
 from fuckclassroom.config import AppConfig
 from fuckclassroom.course_selection import CourseSelectionAssistant
 from fuckclassroom.web import create_app
+from tests.legacy_plugin_registry import install_legacy_external_plugins
 
 
 class SessionClearTests(unittest.TestCase):
@@ -52,7 +53,14 @@ class SessionClearTests(unittest.TestCase):
             for path in (*classroom_files, *selection_files, credential_path):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("preserved" if path == credential_path else "{}", encoding="utf-8")
-            app = create_app(config)
+            install_legacy_external_plugins(
+                config.data_dir,
+                {"classroom", "course_selection"},
+            )
+            app = create_app(
+                config,
+                enabled_plugins={"classroom", "course_selection"},
+            )
             route = next(
                 item
                 for item in app.routes

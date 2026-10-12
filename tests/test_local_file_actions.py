@@ -12,6 +12,7 @@ from starlette.requests import Request
 from fuckclassroom.classroom.downloads import DownloadLibrary
 from fuckclassroom.config import AppConfig
 from fuckclassroom.web import create_app
+from tests.legacy_plugin_registry import install_legacy_external_plugins
 
 
 def _post_request(app, path: str, body: str) -> Request:
@@ -81,7 +82,12 @@ class LocalFileActionTests(unittest.TestCase):
 
     def test_local_file_route_dispatches_without_returning_file_content(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
-            app = create_app(AppConfig(data_dir=Path(directory)))
+            data_dir = Path(directory)
+            install_legacy_external_plugins(data_dir, {"classroom"})
+            app = create_app(
+                AppConfig(data_dir=data_dir),
+                enabled_plugins={"classroom"},
+            )
             route = next(
                 item for item in app.routes if getattr(item, "path", "") == "/downloads/local/{action}"
             )
@@ -118,7 +124,12 @@ class LocalFileActionTests(unittest.TestCase):
 
     def test_batch_delete_route_accepts_multiple_relative_paths(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
-            app = create_app(AppConfig(data_dir=Path(directory)))
+            data_dir = Path(directory)
+            install_legacy_external_plugins(data_dir, {"classroom"})
+            app = create_app(
+                AppConfig(data_dir=data_dir),
+                enabled_plugins={"classroom"},
+            )
             route = next(
                 item for item in app.routes if getattr(item, "path", "") == "/downloads/delete-many"
             )

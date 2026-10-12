@@ -12,6 +12,7 @@ from fuckclassroom.classroom.semester_sync import SemesterSnapshot, SemesterSync
 from fuckclassroom.config import AppConfig
 from fuckclassroom.course_selection import CourseSelectionAssistant, WebVpnSessionStatus
 from fuckclassroom.web import create_app
+from tests.legacy_plugin_registry import install_legacy_external_plugins
 from fuckclassroom.plugins.course_selection.services import (
     AutoSelectionProcessProxy,
     CourseSelectionProcessFacade,
@@ -45,7 +46,15 @@ class StartupSessionRecoveryTests(unittest.TestCase):
                 patch.object(AutoSelectionProcessProxy, "start"),
                 patch.object(AutoSelectionProcessProxy, "stop"),
             ):
-                app = create_app(AppConfig(data_dir=Path(directory)))
+                data_dir = Path(directory)
+                install_legacy_external_plugins(
+                    data_dir,
+                    {"classroom", "course_selection"},
+                )
+                app = create_app(
+                    AppConfig(data_dir=data_dir),
+                    enabled_plugins={"classroom", "course_selection"},
+                )
 
                 async def run_lifespan() -> None:
                     async with app.router.lifespan_context(app):
