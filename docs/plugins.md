@@ -208,7 +208,7 @@ requirements/
 python -m pip install -r requirements/all.txt
 ```
 
-插件管理页会读取每个插件的依赖声明并显示已安装版本、缺失的必需依赖和缺失的可选增强。点击“安装/修复依赖”会创建后台任务，使用当前 Python 解释器执行 pip 安装；Playwright 安装完成后还会自动执行 `python -m playwright install chromium`。签到插件的 wxscan PyO3 扩展属于可选增强，编译失败只会记录 warning，仍可使用 OpenCV fallback。
+插件管理页会读取每个插件的依赖声明并显示已安装版本、缺失的必需依赖和缺失的可选增强。点击“安装/修复依赖”会创建后台任务，使用当前 Python 解释器执行 pip 安装；Playwright 安装完成后还会自动执行 `python -m playwright install chromium`。签到插件的 wxscan PyO3 扩展由 Attendance 独立仓构建并随 Registry ZIP 发布；插件使用前会校验自带二进制的 SHA-256，平台不支持或扩展不可用时回退 OpenCV，宿主不再编译该扩展。
 
 内置插件当前依赖关系：
 
