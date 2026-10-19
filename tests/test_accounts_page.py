@@ -8,12 +8,21 @@ from starlette.requests import Request
 
 from fuckclassroom.config import AppConfig
 from fuckclassroom.web import create_app
+from tests.legacy_plugin_registry import install_legacy_external_plugins
 
 
 class AccountsPageTests(unittest.TestCase):
     def test_accounts_page_contains_both_session_panels_and_sidebar_states(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
-            app = create_app(AppConfig(data_dir=Path(directory)))
+            data_dir = Path(directory)
+            install_legacy_external_plugins(
+                data_dir,
+                {"classroom", "course_selection", "attendance"},
+            )
+            app = create_app(
+                AppConfig(data_dir=data_dir),
+                enabled_plugins={"classroom", "course_selection", "attendance"},
+            )
             route = next(item for item in app.routes if getattr(item, "path", "") == "/accounts")
             request = Request(
                 {
@@ -48,8 +57,10 @@ class AccountsPageTests(unittest.TestCase):
 
     def test_accounts_page_only_renders_enabled_plugin_panels(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            data_dir = Path(directory)
+            install_legacy_external_plugins(data_dir, {"classroom"})
             app = create_app(
-                AppConfig(data_dir=Path(directory)),
+                AppConfig(data_dir=data_dir),
                 enabled_plugins={"classroom"},
             )
             route = next(item for item in app.routes if getattr(item, "path", "") == "/accounts")
@@ -77,7 +88,12 @@ class AccountsPageTests(unittest.TestCase):
 
     def test_legacy_selection_session_page_redirects_to_accounts(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
-            app = create_app(AppConfig(data_dir=Path(directory)))
+            data_dir = Path(directory)
+            install_legacy_external_plugins(data_dir, {"course_selection"})
+            app = create_app(
+                AppConfig(data_dir=data_dir),
+                enabled_plugins={"course_selection"},
+            )
             route = next(item for item in app.routes if getattr(item, "path", "") == "/selection")
 
             response = route.endpoint()

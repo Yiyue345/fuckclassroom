@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import ast
-import os
 import tempfile
 import unittest
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
-from fastapi.testclient import TestClient
 
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.core.plugins import PluginRegistry, PluginRuntime, PluginSpec
@@ -24,6 +22,10 @@ class PluginCompositionTests(unittest.TestCase):
         self.assertNotIn("@app.post(", source)
         self.assertNotIn("plugins.classroom.routes", source)
         self.assertNotIn("plugins.course_selection.routes", source)
+
+        launcher = Path("main.py").read_text(encoding="utf-8")
+        self.assertNotIn("course_selection.hy2_prebuilt", launcher)
+        self.assertNotIn("install_prebuilt_runner", launcher)
 
         for plugin_id in (
             "core_ui",
@@ -112,153 +114,37 @@ class PluginCompositionTests(unittest.TestCase):
         }
         self.assertNotIn("ai_summary.client", ocr_imports)
 
-    def test_registry_can_enable_feature_plugins_independently(self) -> None:
-        classroom = build_plugin_registry({"classroom"})
-        selection = build_plugin_registry({"course_selection"})
-
-        self.assertEqual(classroom.plugin_ids, ("core_ui", "classroom"))
-        self.assertEqual(selection.plugin_ids, ("core_ui", "course_selection"))
-
-        transcription = build_plugin_registry({"transcription"})
-        self.assertEqual(
-            transcription.plugin_ids,
-            ("core_ui", "classroom", "processing", "transcription"),
-        )
-
-    def test_classroom_only_app_has_no_selection_routes_or_services(self) -> None:
-        app = create_app(enabled_plugins={"classroom"})
-        paths = {getattr(route, "path", "") for route in app.routes}
-        services = app.state.plugin_runtime.services
-
-        self.assertIn("/classroom", paths)
-        self.assertIn("/courses", paths)
-        self.assertNotIn("/selection/info", paths)
-        self.assertTrue(services.has("classroom_client"))
-        self.assertTrue(services.has("auth_service"))
-        self.assertFalse(services.has("course_selection"))
-        self.assertFalse(services.has("auto_selection"))
-        self.assertFalse(services.has("extraction_service"))
-        self.assertFalse(services.has("transcription_service"))
-        self.assertFalse(services.has("ocr_service"))
-        self.assertFalse(services.has("ai_summary_service"))
-        self.assertFalse(services.has("ketangpai_client"))
-
-    def test_transcription_plugin_loads_only_its_processing_capability(self) -> None:
-        app = create_app(enabled_plugins={"transcription"})
-        paths = {getattr(route, "path", "") for route in app.routes}
-        services = app.state.plugin_runtime.services
-
-        self.assertIn("/classroom", paths)
-        self.assertIn("/courses/{course_id}/lessons/{lesson_id}/extract", paths)
-        self.assertNotIn("/courses/{course_id}/lessons/{lesson_id}/summarize", paths)
-        self.assertTrue(services.has("extraction_service"))
-        self.assertTrue(services.has("transcription_service"))
-        self.assertFalse(services.has("ocr_service"))
-        self.assertFalse(services.has("ai_summary_service"))
-        self.assertFalse(services.has("ketangpai_client"))
-
-    def test_heavy_builtin_services_run_in_isolated_worker_processes(self) -> None:
+    def test_business_plugins_are_not_registered_as_builtins(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            app = create_app(
-                AppConfig(data_dir=Path(directory)),
-                enabled_plugins={"ocr", "transcription", "ai_summary"},
+            from fuckclassroom.plugins.manager import PluginManager
+
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            self.assertEqual(
+                [item.id for item in manager.builtin_descriptors],
+                ["core_ui"],
             )
-            services = app.state.plugin_runtime.services
-            hosts = [
-                services.get("classroom_process_host"),
-                services.get("ocr_process_host"),
-                services.get("transcription_process_host"),
-                services.get("ai_summary_process_host"),
-            ]
+            self.assertEqual(
+                set(manager.descriptor_map()),
+                {"core_ui"},
+            )
 
-            with TestClient(app):
-                for host in hosts:
-                    self.assertTrue(host.running)
-                    self.assertGreater(host.pid, 0)
-                    self.assertNotEqual(host.pid, os.getpid())
+    def test_explicit_uninstalled_business_plugin_is_rejected(self) -> None:
+        from fuckclassroom.plugins.manager import PluginManagerError
 
-                self.assertEqual(
-                    type(services.get("classroom_client")).__name__,
-                    "ClassroomClientProcessProxy",
-                )
-                self.assertEqual(
-                    type(services.get("ocr_service")).__name__,
-                    "OcrProcessProxy",
-                )
-                self.assertEqual(
-                    type(services.get("transcription_service")).__name__,
-                    "TranscriptionProcessProxy",
-                )
-                self.assertEqual(
-                    type(services.get("ai_summary_service")).__name__,
-                    "AiSummaryProcessProxy",
-                )
+        with self.assertRaisesRegex(PluginManagerError, "未知插件"):
+            build_plugin_registry({"classroom"})
 
-            for host in hosts:
-                self.assertFalse(host.running)
-
-    def test_stateful_selection_keeps_session_state_main_and_runs_business_loop_in_worker(self) -> None:
+    def test_default_app_starts_with_core_ui_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            app = create_app(
-                AppConfig(data_dir=Path(directory)),
-                enabled_plugins={"course_selection"},
-            )
-            services = app.state.plugin_runtime.services
-            host = services.get("course_selection_process_host")
+            app = create_app(AppConfig(data_dir=Path(directory)))
+            paths = {getattr(route, "path", "") for route in app.routes}
 
-            self.assertEqual(
-                type(services.get("course_selection")).__name__,
-                "CourseSelectionProcessFacade",
-            )
-            self.assertEqual(
-                type(services.get("course_selection_local")).__name__,
-                "CourseSelectionAssistant",
-            )
-            self.assertEqual(
-                type(services.get("auto_selection")).__name__,
-                "AutoSelectionProcessProxy",
-            )
-
-            with TestClient(app):
-                self.assertTrue(host.running)
-                self.assertGreater(host.pid, 0)
-                self.assertNotEqual(host.pid, os.getpid())
-                self.assertEqual(services.get("auto_selection").list_jobs(), [])
-
-            self.assertFalse(host.running)
-
-    def test_attendance_plugin_owns_qr_and_ketangpai_routes(self) -> None:
-        app = create_app(enabled_plugins={"attendance"})
-        paths = {getattr(route, "path", "") for route in app.routes}
-        services = app.state.plugin_runtime.services
-
-        self.assertIn("/accounts/ketangpai/login", paths)
-        self.assertIn(
-            "/api/courses/{course_id}/lessons/{lesson_id}/live/ppt/{slide_id}/qr",
-            paths,
-        )
-        self.assertTrue(services.has("ketangpai_client"))
-        self.assertTrue(services.has("qr_scanner"))
-        self.assertTrue(services.has("attendance_scanner_process_host"))
-        self.assertEqual(
-            type(services.get("qr_scanner")).__name__,
-            "AttendanceScannerProcessProxy",
-        )
-        self.assertFalse(services.has("extraction_service"))
-
-    def test_selection_only_app_has_no_classroom_routes_or_services(self) -> None:
-        app = create_app(enabled_plugins={"course_selection"})
-        paths = {getattr(route, "path", "") for route in app.routes}
-        services = app.state.plugin_runtime.services
-
-        self.assertIn("/selection/info", paths)
-        self.assertIn("/api/selection/catalog", paths)
-        self.assertNotIn("/classroom", paths)
-        self.assertNotIn("/courses", paths)
-        self.assertTrue(services.has("course_selection"))
-        self.assertTrue(services.has("auto_selection"))
-        self.assertFalse(services.has("classroom_client"))
-        self.assertFalse(services.has("extraction_service"))
+            self.assertEqual(app.state.plugin_registry.plugin_ids, ("core_ui",))
+            self.assertIn("/health", paths)
+            self.assertIn("/settings", paths)
+            self.assertIn("/plugins", paths)
+            self.assertNotIn("/classroom", paths)
+            self.assertNotIn("/selection/info", paths)
 
     def test_core_only_app_keeps_health_and_settings(self) -> None:
         app = create_app(enabled_plugins=set())

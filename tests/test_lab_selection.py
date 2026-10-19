@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.course_selection.models import WebVpnSessionStatus
 from fuckclassroom.web import create_app
+from tests.legacy_plugin_registry import install_legacy_external_plugins
 
 
 class LabSelectionTests(unittest.TestCase):
@@ -17,6 +18,8 @@ class LabSelectionTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         data_dir = Path(temp.name)
+        if "lab_selection" in plugins or "course_selection" in plugins:
+            install_legacy_external_plugins(data_dir, {"course_selection"})
         plugin_root = data_dir / "plugins" / "lab_selection"
         shutil.copytree(Path("fuckclassroom/plugins/lab_selection"), plugin_root)
 
@@ -24,7 +27,7 @@ class LabSelectionTests(unittest.TestCase):
             "from ...core.plugins": "from fuckclassroom.core.plugins",
             "from ...course_selection.models": "from fuckclassroom.course_selection.models",
             "from ...web.responses": "from fuckclassroom.web.responses",
-            "from ...auth.academic": "from fuckclassroom.auth.academic",
+            "from ...auth.academic import get_academic_session": "",
             "from ...core.atomic": "from fuckclassroom.core.atomic",
         }
         for python_file in plugin_root.glob("*.py"):
@@ -34,8 +37,12 @@ class LabSelectionTests(unittest.TestCase):
             if python_file.name == "plugin.py":
                 source = source.replace(
                     'id="lab_selection", name="实验课选课", order=21,',
-                    'id="lab_selection", name="实验课选课", order=21, api_version=1, requires=("core_ui",),',
+                    'id="lab_selection", name="实验课选课", order=21, api_version=1, requires=("core_ui", "course_selection"),',
                 )
+            source = source.replace(
+                "LabSelectionService(get_academic_session(context))",
+                'LabSelectionService(context.services.get("academic_session"))',
+            )
             python_file.write_text(source, encoding="utf-8")
         (plugin_root / "plugin.json").write_text(
             json.dumps(
@@ -46,8 +53,8 @@ class LabSelectionTests(unittest.TestCase):
                     "api_version": 1,
                     "app_requires": ">=0.1,<0.3",
                     "description": "实验课选课外部插件测试包",
-                    "requires": ["core_ui"],
-                    "python_requires": ["playwright>=1.45"],
+                    "requires": ["core_ui", "course_selection"],
+                    "python_requires": [],
                     "entry": "plugin.py",
                 },
                 ensure_ascii=False,
@@ -56,19 +63,23 @@ class LabSelectionTests(unittest.TestCase):
         )
         return create_app(AppConfig(data_dir=data_dir), enabled_plugins=plugins)
 
-    def test_can_enable_without_regular_selection(self):
+    def test_enabling_lab_selection_loads_course_selection_dependency(self):
         app = self.make_app({"lab_selection"})
         services = app.state.plugin_runtime.services
-        self.assertFalse(services.has("course_selection"))
-        self.assertFalse(services.has("auto_selection"))
-        self.assertFalse(services.has("course_selection_process_host"))
+        self.assertTrue(services.has("course_selection"))
+        self.assertTrue(services.has("auto_selection"))
+        self.assertTrue(services.has("course_selection_process_host"))
         session = services.get("academic_session")
-        with patch.object(session, "get_session_status", return_value=WebVpnSessionStatus(False, "尚未登录")):
+        with patch.object(
+            session,
+            "get_session_status",
+            return_value=WebVpnSessionStatus(False, "尚未登录"),
+        ):
             with TestClient(app) as client:
                 response = client.get("/lab-selection")
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("查询课程", response.text)
-                self.assertEqual(client.get("/selection/info").status_code, 404)
+                self.assertEqual(client.get("/selection/info").status_code, 200)
 
     def test_both_plugins_share_the_same_session_and_proxy(self):
         app = self.make_app({"course_selection", "lab_selection"})

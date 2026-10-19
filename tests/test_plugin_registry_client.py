@@ -13,7 +13,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.core.plugins import PLUGIN_API_VERSION
 from fuckclassroom.plugins.manager import PluginManager, PluginManagerError
-from fuckclassroom.plugins.registry_client import PluginRegistryClient
+from fuckclassroom.plugins.registry_client import (
+    DEFAULT_PLUGIN_REGISTRY_URL,
+    PluginRegistryClient,
+)
 from fuckclassroom.plugins.rpc import PLUGIN_RPC_API_VERSION
 
 
@@ -131,6 +134,20 @@ def registry_responses() -> dict[str, dict[str, object]]:
 
 
 class PluginRegistryClientTests(unittest.TestCase):
+    def test_default_registry_url_points_to_custom_domain(self) -> None:
+        self.assertEqual(
+            DEFAULT_PLUGIN_REGISTRY_URL,
+            "https://classroom.yiyuemeow.com/api/v1/registry.json",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            client = PluginRegistryClient(manager)
+            self.assertEqual(client.registry_url, DEFAULT_PLUGIN_REGISTRY_URL)
+            self.assertEqual(
+                client.api_base,
+                "https://classroom.yiyuemeow.com/api/v1/",
+            )
+
     def test_catalog_selects_highest_api_compatible_version(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manager = PluginManager(AppConfig(data_dir=Path(directory)))

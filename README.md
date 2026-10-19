@@ -18,7 +18,7 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-普通使用不需要安装 Rust 工具链。签到插件会优先使用可选的 wxscan 原生扩展，未安装或编译失败时可回退 OpenCV；Hy2 正常也使用预编译 runner。只有需要编译 wxscan，或 Windows Smart App Control 拦截 Hy2 预编译组件且希望启用本地构建兜底时，才需要额外安装 rustup/Cargo。
+普通使用不需要安装 Rust 工具链。签到插件所需的 wxscan 原生扩展由独立 Attendance 仓库构建并随插件 Release 提供，无法加载时可回退 OpenCV；Hy2 预编译 runner 由独立 Course Selection 插件管理。只有 Windows Smart App Control 拦截 Hy2 runner、且希望启用本地构建兜底时，才需要额外安装 rustup/Cargo。
 
 ## 启动
 
@@ -41,14 +41,18 @@ $env:FUCKCLASSROOM_PORT="8766"
 
 ## 插件模式
 
-当前版本已经支持按需启用功能插件。默认启动全部内置功能；也可以通过 `FUCKCLASSROOM_PLUGINS` 只加载需要的 Route、Service 和 Lifecycle：
+主程序现在只内置始终启用的 `core_ui`。课程录播、课次处理、转写、OCR、AI 总结、签到和本科选课均以独立插件安装，官方插件也使用与第三方插件相同的 Registry / ZIP 安装链路。
+
+首次启动后访问 `/plugins`，可从 Registry 安装所需插件；插件依赖会自动补齐，例如启用 `transcription` 会自动启用已安装的 `processing` 与 `classroom`。插件管理页同时负责启停、运行依赖检查、依赖安装/修复和更新。页面会分别检查 Plugin API、RPC API 与 FuckClassroom 版本约束；只有 API 不兼容会阻止插件执行，主程序版本范围不满足时仅显示警告。
+
+`FUCKCLASSROOM_PLUGINS` 和 `create_app(enabled_plugins=...)` 仍可用于显式选择**已经安装**的插件。例如安装 `classroom` 后可以：
 
 ```powershell
 $env:FUCKCLASSROOM_PLUGINS="classroom"
 .\.venv\Scripts\python.exe main.py
 ```
 
-可用内置插件 ID 为 `classroom`、`processing`、`transcription`、`ocr`、`ai_summary`、`attendance` 和 `course_selection`，`core_ui` 始终启用。依赖会自动补齐，例如启用 `transcription` 会自动带上 `processing` 与 `classroom`。应用启动后可访问 `/plugins` 管理页面启停插件、查看运行依赖、安装/修复依赖，并可从本机目录、ZIP 包或 Registry 在线目录添加外部插件；页面会分别检查 Plugin API、RPC API 与 FuckClassroom 版本约束。只有 API 不兼容会阻止插件执行，主程序版本范围不满足时仅显示警告。网页配置保存在 `data/plugin_state.json`。正常从 `main.py` 启动时，插件启停会通过 Runtime generation 热重载自动应用；新 Runtime 构建失败时会保留旧 Runtime 并显示错误。只有当前启动方式没有提供热重载能力时，变更才需要重启后生效。详细架构见 `docs/plugins.md`，第三方插件开发接口见 `docs/plugin-api.md`。
+网页配置保存在 `data/plugin_state.json`。正常从 `main.py` 启动时，插件启停会通过 Runtime generation 热重载自动应用；新 Runtime 构建失败时会保留旧 Runtime 并显示错误。详细架构见 `docs/plugins.md`，第三方插件开发接口见 `docs/plugin-api.md`。
 
 ## 首次配置与登录
 
@@ -79,7 +83,7 @@ $env:FUCKCLASSROOM_PLUGINS="classroom"
 
 直播课件出现新页面时，程序会自动识别其中的畅课或课堂派二维码。畅课二维码包含有效的 `rollcallId` 和动态数据时，程序会复用统一桂电账号的 CAS 会话完成签到；CAS 会话失效时会用已加密保存的统一账号自动恢复。课堂派使用独立登录令牌，登录后会提交二维码中的 `ticketid`、`expire` 和 `sign`。两种平台都会在课程页明确提示签到成功、二维码过期、点名结束、账号未登录或会话失效。程序不会使用共享账号、伪造位置或绕过平台校验。
 
-默认安装使用 OpenCV 识别二维码，无需额外配置。安装了 `rust_module/wxscan_py` 原生扩展时会优先使用 wxscan，所需模型会在首次识别时自动下载；模型或扩展不可用时会自动回退到 OpenCV。
+Attendance 插件随正式版及 beta ZIP 提供针对 Windows、Linux 和 macOS 的 wxscan 扩展，在支持的平台上会先校验 SHA-256 再加载；所需模型仍在首次识别时按需下载。原生扩展不可用时自动回退 OpenCV，无需在主仓编译 wxscan。
 
 ## 文字提取
 

@@ -5,12 +5,12 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
-from fuckclassroom.plugins import build_plugin_registry
+from tests.legacy_plugin_registry import build_legacy_business_registry
 
 
 class SidebarNavigationTests(unittest.TestCase):
     def test_navigation_is_registered_by_plugins(self) -> None:
-        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
+        registry = build_legacy_business_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
         groups = {group.aria_label: group for group in registry.navigation_groups}
 
         self.assertEqual(
@@ -51,7 +51,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertNotIn('aria-label="本科选课导航"', template)
 
     def test_settings_panels_and_plugin_templates_are_registered(self) -> None:
-        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
+        registry = build_legacy_business_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
         panel_keys = [panel.key for panel in registry.settings_panels]
 
         self.assertEqual(
@@ -99,7 +99,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertEqual(registry.system_label("selection"), "本科选课")
 
     def test_account_panels_are_registered_by_plugins(self) -> None:
-        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
+        registry = build_legacy_business_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
         panels = {panel.key: panel for panel in registry.account_panels}
 
         self.assertEqual(
@@ -116,7 +116,7 @@ class SidebarNavigationTests(unittest.TestCase):
         for panel in registry.account_panels:
             environment.get_template(panel.template)
 
-        classroom_only = build_plugin_registry({"classroom"})
+        classroom_only = build_legacy_business_registry({"classroom"})
         self.assertEqual(
             [panel.key for panel in classroom_only.account_panels],
             ["classroom"],
@@ -298,7 +298,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("/static/app.css?v=20260927-1", base)
 
     def test_plugin_ui_assets_are_registered_by_enabled_plugins(self) -> None:
-        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
+        registry = build_legacy_business_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
             "/plugins/core_ui/static/core_ui.css?v=20260928-4",
@@ -329,7 +329,7 @@ class SidebarNavigationTests(unittest.TestCase):
             registry.page_assets("downloads", "script") + registry.page_assets("selection_info", "script"),
         )
 
-        classroom_only = build_plugin_registry({"classroom"})
+        classroom_only = build_legacy_business_registry({"classroom"})
         self.assertIn(
             "/plugins/classroom/static/classroom.css?v=20260922-1",
             classroom_only.stylesheets,
@@ -348,7 +348,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn('plugin_registry.page_assets(ui_page, "script")', base)
 
     def test_plugin_static_mounts_are_isolated(self) -> None:
-        registry = build_plugin_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
+        registry = build_legacy_business_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
         mounts = {mount.plugin_id: mount for mount in registry.static_mounts}
 
         self.assertEqual(

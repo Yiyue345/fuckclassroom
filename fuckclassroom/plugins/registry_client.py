@@ -25,7 +25,7 @@ from .rpc import PLUGIN_RPC_API_VERSION
 
 
 DEFAULT_PLUGIN_REGISTRY_URL = (
-    "https://yiyue345.github.io/f-classroom-plugin-website/api/v1/registry.json"
+    "https://classroom.yiyuemeow.com/api/v1/registry.json"
 )
 MAX_REGISTRY_JSON_BYTES = 2 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024

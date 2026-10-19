@@ -1184,9 +1184,9 @@ if context.registry.is_enabled("classroom"):
 
 ---
 
-## 18. 当前内置功能插件暴露的 service
+## 18. 官方独立功能插件暴露的 service
 
-下面这些 service 当前可以通过 `context.services` 获取，但它们属于**具体功能插件接口**，稳定性低于 core Plugin API。
+下面这些 service 在对应官方独立插件启用后可以通过 `context.services` 获取，但它们属于**具体功能插件接口**，稳定性低于 core Plugin API。
 
 使用前必须在 `requires` 中声明对应插件。
 

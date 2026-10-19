@@ -7,6 +7,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from fuckclassroom.core.plugins import PluginRegistry, PluginSpec, UIAsset, UISlot
 from fuckclassroom.core.settings import AppSettings
 from fuckclassroom.plugins import build_plugin_registry
+from tests.legacy_plugin_registry import build_legacy_business_registry
 
 
 ALL = {"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"}
@@ -55,7 +56,7 @@ class UIContractTests(unittest.TestCase):
         self.assertEqual(PluginRegistry([a]).slot_templates("unknown"), ())
 
     def test_all_enabled_templates_compile(self):
-        env = environment(build_plugin_registry(ALL))
+        env = environment(build_legacy_business_registry(ALL))
         for name in env.list_templates():
             with self.subTest(template=name):
                 env.get_template(name)
@@ -72,7 +73,7 @@ class UIContractTests(unittest.TestCase):
         self.assertNotIn('<script>', html)
 
     def test_settings_panels_preserve_saved_selects_and_numeric_limits(self):
-        env = environment(build_plugin_registry(ALL))
+        env = environment(build_legacy_business_registry(ALL))
         settings = AppSettings().to_public_dict()
         settings.update(
             asr_device="cuda",
@@ -118,7 +119,7 @@ class UIContractTests(unittest.TestCase):
         self.assertIn('name="asr_cpu_threads" type="number" value="4" min="1" max="64" step="1"', html)
 
     def test_transcription_model_actions_are_integrated_into_selector(self):
-        registry = build_plugin_registry(ALL)
+        registry = build_legacy_business_registry(ALL)
         env = environment(registry)
         settings = AppSettings().to_public_dict()
         settings.update(asr_model="small")
@@ -180,7 +181,7 @@ class UIContractTests(unittest.TestCase):
         self.assertIsNotNone(transcription.route_factory)
 
     def test_transcription_model_aliases_share_frontend_repo_state(self):
-        registry = build_plugin_registry(ALL)
+        registry = build_legacy_business_registry(ALL)
         env = environment(registry)
         settings = AppSettings().to_public_dict()
         settings.update(asr_model="turbo")
@@ -227,7 +228,7 @@ class UIContractTests(unittest.TestCase):
         self.assertIn("renderRepoState(row, action === 'download')", html)
 
     def test_transcription_settings_disable_unavailable_cuda_and_compute_types(self):
-        env = environment(build_plugin_registry(ALL))
+        env = environment(build_legacy_business_registry(ALL))
         settings = AppSettings().to_public_dict()
         settings.update(asr_device="cuda", asr_compute_type="float16")
         runtime = {
@@ -262,7 +263,7 @@ class UIContractTests(unittest.TestCase):
         lesson = NS(id="1", title="Lesson", resources=[NS(kind="video", is_downloadable=True, url="/demo.mp4")], is_live=False)
         detail = NS(course=NS(id="1", title="Course"), lessons=[lesson])
         for enabled, has_processing, has_attendance in [({"classroom"}, False, False), ({"processing"}, True, False), (ALL, True, True)]:
-            registry = build_plugin_registry(enabled)
+            registry = build_legacy_business_registry(enabled)
             html = environment(registry).get_template("classroom/course_detail.html").render(request=request(registry), detail=detail)
             with self.subTest(enabled=enabled):
                 self.assertEqual('/lessons/1/extract' in html, has_processing)
@@ -273,13 +274,13 @@ class UIContractTests(unittest.TestCase):
 
     def test_ai_action_is_contributed_only_while_enabled(self):
         for enabled, expected in [({"processing"}, False), ({"ai_summary"}, True)]:
-            registry = build_plugin_registry(enabled)
+            registry = build_legacy_business_registry(enabled)
             html = environment(registry).get_template("processing/lesson_outputs.html").render(request=request(registry), outputs={}, course_id="1", lesson_id="2")
             self.assertEqual('/lessons/2/summarize' in html, expected)
 
 
     def test_completed_transcription_ui_uses_existing_outputs_without_resubmitting(self):
-        registry = build_plugin_registry(ALL)
+        registry = build_legacy_business_registry(ALL)
         env = environment(registry)
         lesson = NS(id="lesson-1", title="Lesson", resources=[NS(kind="video", is_downloadable=True, url="/demo.mp4")], is_live=False)
         detail = NS(course=NS(id="course-1", title="Course"), lessons=[lesson])
