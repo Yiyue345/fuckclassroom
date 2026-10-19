@@ -271,7 +271,7 @@ def build_router(context: PluginContext) -> APIRouter:
                 f"{action_text}完成：{descriptor.id}@{descriptor.version}，完整性校验：{verification}"
             )
             return _registry_location(
-                include_beta,
+                selected_beta,
                 notice=f"{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用",
             )
 
