@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import tempfile
 from pathlib import Path
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -31,6 +31,16 @@ def _restore_file(path: Path, payload: bytes | None) -> None:
     temporary = path.with_name(path.name + ".rollback")
     temporary.write_bytes(payload)
     temporary.replace(path)
+
+
+def _registry_channels(include_beta: bool) -> tuple[str, ...]:
+    return ("stable", "beta") if include_beta else ("stable",)
+
+
+def _registry_location(include_beta: bool, **parameters: str) -> str:
+    query = {"include_beta": "1"} if include_beta else {}
+    query.update(parameters)
+    return "/plugins/registry" + (f"?{urlencode(query)}" if query else "")
 
 
 def build_router(context: PluginContext) -> APIRouter:
@@ -139,12 +149,13 @@ def build_router(context: PluginContext) -> APIRouter:
         )
 
     @router.get("/plugins/registry", response_class=HTMLResponse)
-    def plugin_registry_page(request: Request) -> HTMLResponse:
+    def plugin_registry_page(request: Request, include_beta: bool = False) -> HTMLResponse:
         error = request.query_params.get("error")
         rows: list[dict[str, object]] = []
         try:
             rows = registry_client.catalog(
                 current_enabled=plugin_registry.plugin_ids,
+                channels=_registry_channels(include_beta),
             )
         except (PluginRegistryError, PluginManagerError) as exc:
             error = str(exc)
@@ -154,6 +165,7 @@ def build_router(context: PluginContext) -> APIRouter:
             {
                 "registry_plugins": rows,
                 "registry_url": registry_client.registry_url,
+                "include_beta": include_beta,
                 "plugin_config_mutable": plugin_manager.mutable,
                 "notice": request.query_params.get("notice"),
                 "error": error,
@@ -161,40 +173,43 @@ def build_router(context: PluginContext) -> APIRouter:
         )
 
     @router.get("/api/plugins/registry")
-    def plugin_registry_api() -> JSONResponse:
+    def plugin_registry_api(include_beta: bool = False) -> JSONResponse:
         try:
             rows = registry_client.catalog(
                 current_enabled=plugin_registry.plugin_ids,
+                channels=_registry_channels(include_beta),
             )
         except (PluginRegistryError, PluginManagerError) as exc:
             return JSONResponse({"detail": str(exc)}, status_code=502)
         return JSONResponse(
             {
                 "registry_url": registry_client.registry_url,
+                "include_beta": include_beta,
                 "plugins": rows,
             }
         )
 
     @router.post("/plugins/registry/{plugin_id}/install")
-    def install_registry_plugin(request: Request, plugin_id: str) -> Response:
+    def install_registry_plugin(request: Request, plugin_id: str, include_beta: bool = False) -> Response:
         if not plugin_manager.mutable:
             message = "当前插件配置为只读，不能从 Registry 安装插件"
             if "application/json" in request.headers.get("accept", ""):
                 return JSONResponse({"detail": message}, status_code=409)
             return RedirectResponse(
-                f"/plugins/registry?error={quote(message)}",
+                _registry_location(include_beta, error=message),
                 status_code=303,
             )
         try:
             plan = registry_client.resolve_install_plan(
                 plugin_id,
                 current_enabled=plugin_registry.plugin_ids,
+                channels=_registry_channels(include_beta),
             )
         except (PluginRegistryError, PluginManagerError) as exc:
             if "application/json" in request.headers.get("accept", ""):
                 return JSONResponse({"detail": str(exc)}, status_code=409)
             return RedirectResponse(
-                f"/plugins/registry?error={quote(str(exc))}",
+                _registry_location(include_beta, error=str(exc)),
                 status_code=303,
             )
 
@@ -207,7 +222,7 @@ def build_router(context: PluginContext) -> APIRouter:
             if "application/json" in request.headers.get("accept", ""):
                 return JSONResponse({"detail": message}, status_code=409)
             return RedirectResponse(
-                f"/plugins/registry?error={quote(message)}",
+                _registry_location(include_beta, error=message),
                 status_code=303,
             )
         if plan.update_blocked:
@@ -215,7 +230,7 @@ def build_router(context: PluginContext) -> APIRouter:
             if "application/json" in request.headers.get("accept", ""):
                 return JSONResponse({"detail": message}, status_code=409)
             return RedirectResponse(
-                f"/plugins/registry?error={quote(message)}",
+                _registry_location(include_beta, error=message),
                 status_code=303,
             )
 
@@ -225,6 +240,7 @@ def build_router(context: PluginContext) -> APIRouter:
             descriptor, action, signed = registry_client.install(
                 plugin_id,
                 current_enabled=current_enabled,
+                channels=_registry_channels(include_beta),
                 progress=progress,
             )
             verification = "SHA-256 + Ed25519" if signed else "SHA-256"
@@ -232,16 +248,16 @@ def build_router(context: PluginContext) -> APIRouter:
             progress.log(
                 f"{action_text}完成：{descriptor.id}@{descriptor.version}，完整性校验：{verification}"
             )
-            return (
-                f"/plugins/registry?notice="
-                f"{quote(f'{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用')}"
+            return _registry_location(
+                include_beta,
+                notice=f"{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用",
             )
 
         task = task_manager.start(
             f"{'更新' if plan.action == 'update' else '下载'}插件 · {plan.name}",
             worker,
         )
-        return task_started_response(request, task, "/plugins/registry")
+        return task_started_response(request, task, _registry_location(include_beta))
 
     def plugin_action_response(
         request: Request,
