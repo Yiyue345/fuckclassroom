@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import threading
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -91,16 +93,79 @@ class RegistryPreferenceTests(unittest.TestCase):
                     self.assertIn('aria-checked="false"', disabled.text)
                 self.assertFalse(RegistryPreferences(root).include_beta())
 
+    def test_parallel_plugin_downloads_and_duplicate_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            app = create_app(AppConfig(data_dir=Path(folder)))
+            both_started = threading.Event()
+            release = threading.Event()
+            lock = threading.Lock()
+            active: set[str] = set()
+            peak = 0
+
+            def blocked_install(_self, plugin_id, *, current_enabled, channels, progress):
+                nonlocal peak
+                with lock:
+                    active.add(plugin_id)
+                    peak = max(peak, len(active))
+                    if len(active) == 2:
+                        both_started.set()
+                progress(12, "正在下载")
+                if not release.wait(timeout=5):
+                    raise RuntimeError("test downloads did not overlap")
+                with lock:
+                    active.remove(plugin_id)
+                return (
+                    SimpleNamespace(id=plugin_id, name=plugin_id, version="1.0.0"),
+                    "install",
+                    False,
+                )
+
+            with (
+                patch.object(
+                    PluginRegistryClient, "install",
+                    autospec=True, side_effect=blocked_install,
+                ),
+                TestClient(app) as http,
+            ):
+                try:
+                    with ThreadPoolExecutor(max_workers=2) as pool:
+                        first = pool.submit(
+                            http.post, "/plugins/registry/first_plugin/install",
+                            headers={"Accept": "application/json"},
+                        ).result(timeout=3)
+                        second = pool.submit(
+                            http.post, "/plugins/registry/second_plugin/install",
+                            headers={"Accept": "application/json"},
+                        ).result(timeout=3)
+
+                    self.assertEqual(first.status_code, 200)
+                    self.assertEqual(second.status_code, 200)
+                    self.assertNotEqual(first.json()["task_id"], second.json()["task_id"])
+                    self.assertTrue(both_started.wait(timeout=2))
+                    self.assertEqual(peak, 2)
+
+                    duplicate = http.post(
+                        "/plugins/registry/first_plugin/install",
+                        headers={"Accept": "application/json"},
+                    )
+                    self.assertEqual(duplicate.status_code, 409)
+                    self.assertIn("已有下载或安装任务", duplicate.json()["detail"])
+                finally:
+                    release.set()
+
+                for response in (first, second):
+                    for _ in range(100):
+                        task = http.get(response.json()["status_url"]).json()
+                        if task["status"] != "running":
+                            break
+                        time.sleep(0.01)
+                    self.assertEqual(task["status"], "succeeded")
+
     def test_inline_install_uses_task_json_and_saved_channel(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             RegistryPreferences(root).set_include_beta(True)
             app = create_app(AppConfig(data_dir=root))
-            plan = SimpleNamespace(
-                action="install", name="Demo", update_blocked=False,
-                compatibility_message="",
-            )
-
             def fake_install(_self, plugin_id, *, current_enabled, channels, progress):
                 self.assertEqual(plugin_id, "demo")
                 self.assertEqual(channels, ("stable", "beta"))
@@ -111,7 +176,7 @@ class RegistryPreferenceTests(unittest.TestCase):
                 return SimpleNamespace(id="demo", name="Demo", version="0.1.0-beta.1"), "install", False
 
             with (
-                patch.object(PluginRegistryClient, "resolve_install_plan", return_value=plan) as resolve,
+                patch.object(PluginRegistryClient, "resolve_install_plan", side_effect=AssertionError("POST should not preflight")),
                 patch.object(PluginRegistryClient, "install", autospec=True, side_effect=fake_install),
                 TestClient(app) as client,
             ):
@@ -123,7 +188,6 @@ class RegistryPreferenceTests(unittest.TestCase):
                 data = response.json()
                 self.assertIn("status_url", data)
                 self.assertIn("task_id", data)
-                self.assertEqual(resolve.call_args.kwargs["channels"], ("stable", "beta"))
 
                 task = None
                 for _ in range(100):
