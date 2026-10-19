@@ -387,9 +387,21 @@
 }
 .plugin-market-button:hover { border-color: var(--border-strong); background: var(--surface-subtle); color: var(--text); }
 .plugin-market-shell { display: grid; gap: 16px; }
-.plugin-market-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; }
+.plugin-market-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }
 .plugin-market-meta span { color: var(--text-muted); font-size: 11px; }
+.plugin-market-meta-main { display: grid; flex: 1 1 260px; min-width: 0; gap: 5px; }
 .plugin-market-meta .mono { overflow-wrap: anywhere; }
+.plugin-market-channel-form { margin: 0; }
+.plugin-market-channel-toggle { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
+.plugin-market-channel-toggle input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.plugin-market-switch { position: relative; display: inline-block; flex: 0 0 34px; width: 34px; height: 19px; border-radius: 12px; background: var(--border-strong); transition: background 150ms ease; }
+.plugin-market-switch::after { position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: white; content: ""; transition: transform 150ms ease; }
+.plugin-market-channel-toggle input:checked + .plugin-market-switch { background: var(--primary); }
+.plugin-market-channel-toggle input:checked + .plugin-market-switch::after { transform: translateX(15px); }
+.plugin-market-channel-toggle input:focus-visible + .plugin-market-switch { outline: 2px solid var(--primary); outline-offset: 3px; }
+.plugin-market-channel-label { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.plugin-market-channel-label small { font-size: 10px; opacity: .7; }
+.plugin-market-channel-apply { margin-left: 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); padding: 5px 10px; font-size: 11px; cursor: pointer; }
 .plugin-market-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .plugin-market-card { display: grid; gap: 14px; padding: 18px; }
 .plugin-market-head { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; align-items: center; }
