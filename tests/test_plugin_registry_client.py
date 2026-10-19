@@ -6,6 +6,8 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -161,6 +163,90 @@ class PluginRegistryClientTests(unittest.TestCase):
             self.assertEqual(row["action"], "install")
             self.assertEqual(row["compatibility_state"], "app_version_mismatch")
             self.assertEqual(row["compatibility_label"], "⚠ 主程序版本不满足")
+
+
+    def test_beta_only_release_requires_beta_channel(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            responses = registry_responses()
+            base = "https://registry.example/api/v1/"
+            beta_version = "0.1.0-beta.2"
+            responses[base + "plugins/demo.json"]["versions"] = [
+                {
+                    "version": beta_version,
+                    "channel": "beta",
+                    "released_at": "2026-10-02T00:00:00Z",
+                    "yanked": False,
+                    "detail": f"plugins/demo/versions/{beta_version}.json",
+                }
+            ]
+            responses[base + f"plugins/demo/versions/{beta_version}.json"] = {
+                "schema_version": 1,
+                "plugin_id": "demo",
+                "version": beta_version,
+                "channel": "beta",
+                "released_at": "2026-10-02T00:00:00Z",
+                "yanked": False,
+                "runtime": runtime(app_requires=">=0"),
+                "artifact": artifact(beta_version),
+            }
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            client = FakeRegistryClient(manager, responses)
+
+            stable = client.catalog()[0]
+            self.assertEqual(stable["compatibility_state"], "channel_unavailable")
+            self.assertEqual(stable["action"], "unavailable")
+            self.assertEqual(stable["target_version"], "")
+
+            beta = client.catalog(channels=("stable", "beta"))[0]
+            self.assertEqual(beta["compatibility_state"], "compatible")
+            self.assertEqual(beta["action"], "install")
+            self.assertEqual(beta["target_version"], beta_version)
+
+            with patch.object(
+                client, "_download_artifact",
+                return_value=Path(directory) / "demo.zip",
+            ), patch.object(
+                manager, "install_from_path",
+                return_value=SimpleNamespace(name="Demo", version=beta_version),
+            ) as installer:
+                client.install("demo", channels=("stable", "beta"))
+
+            self.assertEqual(installer.call_args.kwargs["expected_version"], beta_version)
+
+    def test_beta_toggle_prefers_newest_compatible_release(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            responses = registry_responses()
+            base = "https://registry.example/api/v1/"
+            beta_version = "2.5.0-beta.1"
+            responses[base + "plugins/demo.json"]["versions"].insert(
+                0,
+                {
+                    "version": beta_version,
+                    "channel": "beta",
+                    "released_at": "2026-10-02T00:00:00Z",
+                    "yanked": False,
+                    "detail": f"plugins/demo/versions/{beta_version}.json",
+                },
+            )
+            responses[base + f"plugins/demo/versions/{beta_version}.json"] = {
+                "schema_version": 1,
+                "plugin_id": "demo",
+                "version": beta_version,
+                "channel": "beta",
+                "released_at": "2026-10-02T00:00:00Z",
+                "yanked": False,
+                "runtime": runtime(app_requires=">=0"),
+                "artifact": artifact(beta_version),
+            }
+            client = FakeRegistryClient(
+                PluginManager(AppConfig(data_dir=Path(directory))), responses
+            )
+
+            self.assertEqual(client.catalog()[0]["target_version"], "1.5.0")
+            self.assertEqual(
+                client.catalog(channels=("stable", "beta"))[0]["target_version"],
+                beta_version,
+            )
 
     def test_catalog_reports_missing_plugin_dependencies_before_install(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
