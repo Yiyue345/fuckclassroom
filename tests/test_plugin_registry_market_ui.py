@@ -70,9 +70,11 @@ class RegistryPreferenceTests(unittest.TestCase):
                     self.assertEqual(enabled.status_code, 200)
                     self.assertIn('role="switch"', enabled.text)
                     self.assertIn('aria-checked="true"', enabled.text)
-                    self.assertIn('data-market-install-form', enabled.text)
+                    self.assertIn('data-registry-results-url', enabled.text)
                     self.assertIn("plugin_registry.js", enabled.text)
-                    self.assertIn('data-market-download-state', enabled.text)
+                    fragment = client.get("/plugins/registry/results?include_beta=1")
+                    self.assertIn('data-market-install-form', fragment.text)
+                    self.assertIn('data-market-download-state', fragment.text)
 
                     kept = client.get("/plugins/registry")
                     self.assertEqual(kept.status_code, 200)

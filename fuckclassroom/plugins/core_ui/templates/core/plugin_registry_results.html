@@ -1,0 +1,100 @@
+{% if error %}
+  <section class="plugin-market-empty surface" role="alert">
+    <strong>无法获取在线插件</strong>
+    <span>{{ error }}</span>
+  </section>
+{% else %}
+  {% if registry_plugins %}
+    <section class="plugin-market-grid" aria-label="Registry 插件">
+      {% for plugin in registry_plugins %}
+        <article class="plugin-market-card surface" data-market-plugin="{{ plugin.id }}" data-market-version="{{ plugin.target_version }}" data-market-beta="{{ '1' if include_beta else '0' }}">
+          <header class="plugin-market-head">
+            <span class="plugin-market-icon">{{ plugin.name[:1] }}</span>
+            <div class="plugin-market-title">
+              <strong>{{ plugin.name }}</strong>
+              <span class="mono">{{ plugin.id }} · {{ plugin.publisher }}{% if plugin.official %} · 官方{% endif %}</span>
+            </div>
+          </header>
+
+          <p class="plugin-market-summary">{{ plugin.summary or "该插件未提供简介。" }}</p>
+
+          <div class="plugin-market-badges">
+            <span class="plugin-state-badge {{ 'green' if plugin.compatibility_severity == 'success' else ('amber' if plugin.compatibility_severity == 'warning' else 'red') }}"
+              title="{{ plugin.compatibility_message }}">{{ plugin.compatibility_label }}</span>
+            {% if plugin.signed %}
+              <span class="plugin-state-badge green" title="安装时仍会执行 SHA-256 与 Ed25519 验证">含 Ed25519 签名</span>
+            {% else %}
+              <span class="plugin-state-badge">SHA-256</span>
+            {% endif %}
+            {% if plugin.missing_plugin_dependencies %}
+              <span class="plugin-state-badge amber">缺少插件依赖</span>
+            {% endif %}
+            {% if plugin.status == "deprecated" %}
+              <span class="plugin-state-badge amber">已弃用</span>
+            {% endif %}
+          </div>
+
+          <div class="plugin-market-version">
+            <div>
+              <span>本地版本</span>
+              <strong class="mono" data-market-installed-version>{{ plugin.installed_version or "未安装" }}</strong>
+            </div>
+            <div>
+              <span>可安装版本</span>
+              <strong class="mono">{{ ("v" ~ plugin.target_version) if plugin.target_version else "无" }}{% if plugin.channel %} · {{ plugin.channel }}{% endif %}</strong>
+            </div>
+          </div>
+
+          {% if plugin.compatibility_message and plugin.compatibility_state != "compatible" %}
+            <div class="notice {{ 'warning' if plugin.compatibility_severity == 'warning' else 'error' }} plugin-detail-notice">
+              <span>{{ plugin.compatibility_message }}</span>
+            </div>
+          {% endif %}
+          {% if plugin.missing_plugin_dependencies %}
+            <div class="notice warning plugin-detail-notice">
+              <span>缺少插件依赖：{{ plugin.missing_plugin_dependencies|join(", ") }}。可以先下载安装，但补齐依赖前不能启用。</span>
+            </div>
+          {% endif %}
+
+          <div class="plugin-market-actions">
+            <span class="mono">{{ plugin.released_at or "" }}</span>
+            {% if plugin.action in ["install", "update"] %}
+              <form method="post" data-market-install-form action="/plugins/registry/{{ plugin.id }}/install?include_beta={{ 1 if include_beta else 0 }}">
+                <button class="plugin-market-install" type="submit" data-market-install-button
+                  {% if not plugin_config_mutable or plugin.update_blocked %}disabled{% endif %}
+                  title="{% if plugin.update_blocked %}更新前请先停用插件及依赖它的插件{% elif not plugin_config_mutable %}当前插件配置为只读{% else %}{{ '更新插件' if plugin.action == 'update' else '下载并安装插件' }}{% endif %}">
+                  {{ "更新" if plugin.action == "update" else "安装" }}
+                </button>
+              </form>
+            {% elif plugin.action == "installed" %}
+              <button class="plugin-market-install" type="button" disabled>已安装</button>
+            {% else %}
+              <button class="plugin-market-install" type="button" disabled>不可安装</button>
+            {% endif %}
+            <div class="plugin-market-download-state" data-market-download-state hidden aria-live="polite">
+              <span class="plugin-market-progress" data-market-progress role="progressbar" aria-label="插件安装进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <svg viewBox="0 0 44 44" aria-hidden="true" focusable="false">
+                  <circle class="plugin-market-progress-track" cx="22" cy="22" r="18"></circle>
+                  <circle class="plugin-market-progress-arc" data-market-progress-arc cx="22" cy="22" r="18"></circle>
+                </svg>
+                <span data-market-percent>0%</span>
+              </span>
+              <svg class="plugin-market-done" data-market-done viewBox="0 0 40 40" aria-hidden="true" hidden>
+                <circle cx="20" cy="20" r="18"></circle>
+                <path d="m11 20 6 6 12-13"></path>
+              </svg>
+              <span class="sr-only" data-market-status-label>正在准备下载</span>
+            </div>
+          </div>
+          <p class="plugin-market-download-note" data-market-download-note role="status" hidden></p>
+          <p class="plugin-market-download-error" data-market-download-error role="alert" hidden></p>
+        </article>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="plugin-market-empty surface">
+      <strong>Registry 暂无已发布插件</strong>
+      <span>草稿不会进入公开 Index。插件 Release 被 Registry 导入后会自动出现在这里，不需要更新客户端。</span>
+    </section>
+  {% endif %}
+{% endif %}

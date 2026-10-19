@@ -20,8 +20,10 @@ from fuckclassroom.plugins.manager import PluginManager, PluginManagerError
 from fuckclassroom.plugins.registry_client import (
     DEFAULT_PLUGIN_REGISTRY_URL,
     PluginRegistryClient,
+    PluginRegistryError,
 )
 from fuckclassroom.plugins.rpc import PLUGIN_RPC_API_VERSION
+from fuckclassroom.web import create_app
 
 
 class FakeRegistryClient(PluginRegistryClient):
@@ -249,6 +251,46 @@ class PluginRegistryClientTests(unittest.TestCase):
                 client.catalog(channels=("stable", "beta"))[0]["target_version"],
                 beta_version,
             )
+
+    def test_registry_page_does_not_block_on_network(self) -> None:
+        from fastapi.testclient import TestClient
+
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(AppConfig(data_dir=Path(directory)))
+            with (
+                patch.object(
+                    PluginRegistryClient,
+                    "catalog",
+                    side_effect=AssertionError("page must not call the Registry"),
+                ),
+                TestClient(app) as client,
+            ):
+                page = client.get("/plugins/registry")
+
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("正在加载在线插件", page.text)
+            self.assertIn("data-registry-results-url", page.text)
+
+    def test_registry_cards_fragment_handles_unavailable_registry(self) -> None:
+        from fastapi.testclient import TestClient
+
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(AppConfig(data_dir=Path(directory)))
+            with TestClient(app) as client:
+                with patch.object(PluginRegistryClient, "catalog", return_value=[]):
+                    ok = client.get("/plugins/registry/results")
+                with patch.object(
+                    PluginRegistryClient,
+                    "catalog",
+                    side_effect=PluginRegistryError("Registry unavailable"),
+                ):
+                    failed = client.get("/plugins/registry/results")
+
+            self.assertEqual(ok.status_code, 200)
+            self.assertIn("Registry 暂无已发布插件", ok.text)
+            self.assertEqual(ok.headers.get("cache-control"), "no-store")
+            self.assertEqual(failed.status_code, 200)
+            self.assertIn("Registry unavailable", failed.text)
 
     def test_catalog_fetches_plugin_details_concurrently_and_caches_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

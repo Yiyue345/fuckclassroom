@@ -138,7 +138,8 @@
     }
   }
 
-  market.querySelectorAll("[data-market-install-form]").forEach((form) => {
+  function bindInstallForms(root) {
+    root.querySelectorAll("[data-market-install-form]").forEach((form) => {
     const ui = cardUi(form);
     if (!ui.card || !ui.button || !ui.state || !ui.ring || !ui.done) return;
 
@@ -161,5 +162,40 @@
         fail(ui, error?.message || "无法创建安装任务");
       }
     });
-  });
+    });
+  }
+
+  async function loadRegistryCards() {
+    const container = market.querySelector("[data-registry-results-url]");
+    if (!container) return;
+    try {
+      const response = await fetch(container.dataset.registryResultsUrl, {
+        credentials: "same-origin",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        signal: pageSignal,
+      });
+      if (!response.ok) throw new Error(`目录请求失败（HTTP ${response.status}）`);
+      const html = await response.text();
+      if (disposed() || !container.isConnected) return;
+      // Same-origin server-generated Jinja HTML: Registry fields are escaped
+      // by Jinja and no remote HTML is inserted directly.
+      container.innerHTML = html;
+      container.setAttribute("aria-busy", "false");
+      bindInstallForms(container);
+    } catch (error) {
+      if (disposed() || error?.name === "AbortError" || !container.isConnected) return;
+      const notice = document.createElement("section");
+      notice.className = "plugin-market-empty surface";
+      notice.setAttribute("role", "alert");
+      const heading = document.createElement("strong");
+      heading.textContent = "无法加载在线插件";
+      const detail = document.createElement("span");
+      detail.textContent = String(error?.message || error);
+      notice.append(heading, detail);
+      container.replaceChildren(notice);
+      container.setAttribute("aria-busy", "false");
+    }
+  }
+
+  loadRegistryCards();
 })();

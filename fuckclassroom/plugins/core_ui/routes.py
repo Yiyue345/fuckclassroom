@@ -155,8 +155,32 @@ def build_router(context: PluginContext) -> APIRouter:
 
     @router.get("/plugins/registry", response_class=HTMLResponse)
     def plugin_registry_page(request: Request, include_beta: bool | None = None) -> HTMLResponse:
+        # Render the page before contacting the remote Registry; client-side
+        # loading uses the existing page runtime's abort signal.
         selected_beta = selected_registry_beta(include_beta)
-        error = request.query_params.get("error")
+        if include_beta is not None:
+            try:
+                registry_preferences.set_include_beta(selected_beta)
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500, detail="无法保存插件市场频道偏好"
+                ) from exc
+        return templates.TemplateResponse(
+            request,
+            "core/plugin_registry.html",
+            {
+                "registry_url": registry_client.registry_url,
+                "include_beta": selected_beta,
+                "plugin_config_mutable": plugin_manager.mutable,
+                "notice": request.query_params.get("notice"),
+                "error": request.query_params.get("error"),
+            },
+        )
+
+    @router.get("/plugins/registry/results", response_class=HTMLResponse)
+    def plugin_registry_results(request: Request, include_beta: bool | None = None) -> HTMLResponse:
+        selected_beta = selected_registry_beta(include_beta)
+        error: str | None = None
         rows: list[dict[str, object]] = []
         try:
             rows = registry_client.catalog(
@@ -167,23 +191,15 @@ def build_router(context: PluginContext) -> APIRouter:
             error = str(exc)
         response = templates.TemplateResponse(
             request,
-            "core/plugin_registry.html",
+            "core/plugin_registry_results.html",
             {
                 "registry_plugins": rows,
-                "registry_url": registry_client.registry_url,
                 "include_beta": selected_beta,
                 "plugin_config_mutable": plugin_manager.mutable,
-                "notice": request.query_params.get("notice"),
                 "error": error,
             },
         )
-        if include_beta is not None:
-            try:
-                registry_preferences.set_include_beta(selected_beta)
-            except OSError as exc:
-                raise HTTPException(
-                    status_code=500, detail="无法保存插件市场频道偏好"
-                ) from exc
+        response.headers["Cache-Control"] = "no-store"
         return response
 
     @router.get("/api/plugins/registry")
