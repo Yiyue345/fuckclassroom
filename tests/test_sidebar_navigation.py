@@ -304,7 +304,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_legacy_business_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20261019-3",
+            "/plugins/core_ui/static/core_ui.css?v=20261019-4",
             registry.stylesheets,
         )
         self.assertIn(
