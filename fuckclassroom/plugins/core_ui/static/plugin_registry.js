@@ -35,6 +35,7 @@
       arc: card?.querySelector("[data-market-progress-arc]"),
       percent: card?.querySelector("[data-market-percent]"),
       done: card?.querySelector("[data-market-done]"),
+      successLabel: card?.querySelector("[data-market-success-label]"),
       note: card?.querySelector("[data-market-download-note]"),
       error: card?.querySelector("[data-market-download-error]"),
       status: card?.querySelector("[data-market-status-label]"),
@@ -54,6 +55,9 @@
   function begin(ui) {
     ui.running = true;
     ui.progress = 0;
+    ui.form.hidden = false;
+    ui.state.classList.remove("is-complete");
+    if (ui.successLabel) ui.successLabel.hidden = true;
     ui.button.disabled = true;
     ui.button.hidden = true;
     ui.state.hidden = false;
@@ -72,14 +76,22 @@
     if (task.status === "succeeded") {
       showProgress(ui, 100);
       const updated = ui.button.textContent.trim().includes("更新");
-      ui.note.textContent = updated ? "更新完成，保持当前启用状态" : "安装完成，默认保持停用";
+      ui.note.textContent = updated ? "更新完成" : "安装完成，默认保持停用";
       if (ui.status) ui.status.textContent = updated ? "插件更新成功" : "下载并安装成功";
       if (ui.installed) ui.installed.textContent = ui.card.dataset.marketVersion;
-      // Let the circle reach 100% before replacing it with a success tick.
+
+      // The backend has completed installation: update the card to its final
+      // "installed" state immediately, without navigating or refetching.
+      ui.card.dataset.marketAction = "installed";
+      ui.form.hidden = true;
+      // Let users see the completed ring before transitioning to the same
+      // green installed check used on freshly rendered market cards.
       schedule(() => {
         if (disposed()) return;
         ui.ring.hidden = true;
         ui.done.hidden = false;
+        if (ui.successLabel) ui.successLabel.hidden = false;
+        ui.state.classList.add("is-complete");
         ui.running = false;
       }, 350);
       return;
@@ -91,6 +103,9 @@
   function fail(ui, message) {
     if (disposed()) return;
     ui.running = false;
+    ui.form.hidden = false;
+    ui.state.classList.remove("is-complete");
+    if (ui.successLabel) ui.successLabel.hidden = true;
     ui.state.hidden = true;
     ui.ring.hidden = false;
     ui.done.hidden = true;
