@@ -176,11 +176,13 @@ class PluginRegistryClient:
         plugin_id: str,
         *,
         current_enabled: tuple[str, ...] | list[str] | set[str] = (),
+        channels: tuple[str, ...] = ("stable",),
         progress=None,
     ) -> tuple[PluginDescriptor, str, bool]:
         plan = self.resolve_install_plan(
             plugin_id,
             current_enabled=current_enabled,
+            channels=channels,
         )
         if plan.action not in {"install", "update"} or plan.version_record is None:
             if plan.action == "installed":
@@ -353,6 +355,15 @@ class PluginRegistryClient:
                 continue
             candidates.append((parsed, summary))
         candidates.sort(key=lambda item: item[0], reverse=True)
+        if not candidates:
+            return None, {
+                "compatible": False,
+                "state": "channel_unavailable",
+                "label": "— 当前频道无版本",
+                "severity": "warning",
+                "message": "当前频道没有可安装版本；可尝试开启「包含测试版」",
+                "app_version_satisfied": True,
+            }
 
         rejected: dict[str, object] | None = None
         plugin_id = str(plugin_detail.get("id") or "")
