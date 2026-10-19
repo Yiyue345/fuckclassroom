@@ -304,7 +304,7 @@ DELETE /api/plugins/{plugin_id}
 插件管理页提供“在线插件”入口，默认读取：
 
 ```text
-https://yiyue345.github.io/f-classroom-plugin-website/api/v1/registry.json
+https://classroom.yiyuemeow.com/api/v1/registry.json
 ```
 
 开发或镜像环境可以通过 `FUCKCLASSROOM_PLUGIN_REGISTRY_URL` 覆盖入口。远程 Registry 必须使用 HTTPS；仅 loopback 本地开发允许 HTTP。
