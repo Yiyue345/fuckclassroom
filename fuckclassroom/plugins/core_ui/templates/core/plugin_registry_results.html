@@ -66,17 +66,18 @@
                   {{ "更新" if plugin.action == "update" else "安装" }}
                 </button>
               </form>
-            {% elif plugin.action == "installed" %}
-              <span class="plugin-market-installed" data-market-installed-status aria-label="已安装">
-                <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
-                  <circle cx="20" cy="20" r="18"></circle>
-                  <path d="m11 20 6 6 12-13"></path>
-                </svg>
-                <span>已安装</span>
-              </span>
-            {% else %}
+            {% elif plugin.action != "installed" %}
               <button class="plugin-market-install" type="button" disabled>不可安装</button>
             {% endif %}
+            {# Both preinstalled and just-installed cards use this exact same badge. #}
+            <span class="plugin-market-installed" data-market-installed-status aria-label="已安装"
+              {% if plugin.action != "installed" %}hidden{% endif %}>
+              <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+                <circle cx="20" cy="20" r="18"></circle>
+                <path d="m11 20 6 6 12-13"></path>
+              </svg>
+              <span>已安装</span>
+            </span>
             <div class="plugin-market-download-state" data-market-download-state hidden aria-live="polite">
               <span class="plugin-market-progress" data-market-progress role="progressbar" aria-label="插件安装进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <svg viewBox="0 0 44 44" aria-hidden="true" focusable="false">
@@ -85,11 +86,6 @@
                 </svg>
                 <span data-market-percent>0%</span>
               </span>
-              <svg class="plugin-market-done" data-market-done viewBox="0 0 40 40" aria-hidden="true" hidden>
-                <circle cx="20" cy="20" r="18"></circle>
-                <path d="m11 20 6 6 12-13"></path>
-              </svg>
-              <span class="plugin-market-success-label" data-market-success-label hidden>已安装</span>
               <span class="sr-only" data-market-status-label>正在准备下载</span>
             </div>
           </div>
