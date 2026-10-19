@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import json
 import tempfile
+import threading
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -247,6 +249,94 @@ class PluginRegistryClientTests(unittest.TestCase):
                 client.catalog(channels=("stable", "beta"))[0]["target_version"],
                 beta_version,
             )
+
+    def test_catalog_fetches_plugin_details_concurrently_and_caches_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            responses = registry_responses()
+            base = "https://registry.example/api/v1/"
+            entries = responses[base + "index.json"]["plugins"]
+            original_detail = responses[base + "plugins/demo.json"]
+            original_version = responses[base + "plugins/demo/versions/1.5.0.json"]
+            for plugin_id in ("extra_a", "extra_b", "extra_c"):
+                entries.append(
+                    {
+                        "id": plugin_id,
+                        "name": plugin_id,
+                        "summary": plugin_id,
+                        "publisher": "example",
+                        "official": False,
+                        "status": "active",
+                        "detail": f"plugins/{plugin_id}.json",
+                    }
+                )
+                responses[base + f"plugins/{plugin_id}.json"] = {
+                    **original_detail,
+                    "id": plugin_id,
+                    "name": plugin_id,
+                    "versions": [
+                        {
+                            **original_detail["versions"][1],
+                            "detail": f"plugins/{plugin_id}/versions/1.5.0.json",
+                        }
+                    ],
+                }
+                responses[base + f"plugins/{plugin_id}/versions/1.5.0.json"] = {
+                    **original_version,
+                    "plugin_id": plugin_id,
+                }
+            client = FakeRegistryClient(manager, responses)
+            fetch = client._fetch_json
+            calls: list[str] = []
+            lock = threading.Lock()
+            active = 0
+            peak = 0
+
+            def instrumented_fetch(url: str) -> dict[str, object]:
+                nonlocal active, peak
+                with lock:
+                    calls.append(url)
+                    active += 1
+                    peak = max(peak, active)
+                try:
+                    # Make overlapping requests observable without relying on
+                    # wall-clock timing thresholds for the overall catalog.
+                    if "/plugins/" in url:
+                        time.sleep(0.04)
+                    return fetch(url)
+                finally:
+                    with lock:
+                        active -= 1
+
+            with patch.object(client, "_fetch_json", side_effect=instrumented_fetch):
+                rows = client.catalog()
+                first_fetches = len(calls)
+                cached_rows = client.catalog()
+
+            self.assertEqual(len(rows), 4)
+            self.assertEqual([row["id"] for row in rows], [
+                "demo", "extra_a", "extra_b", "extra_c",
+            ])
+            self.assertEqual(cached_rows, rows)
+            self.assertGreaterEqual(peak, 2)
+            self.assertEqual(len(calls), first_fetches)
+
+    def test_install_plan_refetches_remote_version_after_catalog_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            responses = registry_responses()
+            client = FakeRegistryClient(manager, responses)
+
+            self.assertEqual(client.catalog()[0]["target_version"], "1.5.0")
+            record = "https://registry.example/api/v1/plugins/demo/versions/2.0.0.json"
+            responses[record] = {
+                **responses[record],
+                "runtime": runtime(),
+            }
+
+            plan = client.resolve_install_plan("demo")
+
+            self.assertEqual(plan.target_version, "2.0.0")
 
     def test_catalog_reports_missing_plugin_dependencies_before_install(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
