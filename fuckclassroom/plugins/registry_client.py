@@ -7,6 +7,7 @@ import os
 import re
 import tempfile
 import threading
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ DEFAULT_PLUGIN_REGISTRY_URL = (
 MAX_REGISTRY_JSON_BYTES = 2 * 1024 * 1024
 CATALOG_CACHE_SECONDS = 60
 CATALOG_MAX_WORKERS = 8
+MAX_PARALLEL_PLUGIN_DOWNLOADS = 4
 REGISTRY_REQUEST_TIMEOUT_SECONDS = 10
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
 _ARTIFACT_PATH_RE = re.compile(
@@ -117,6 +119,7 @@ class PluginRegistryClient:
         self.api_base = urljoin(self.registry_url, "./")
         self._catalog_cache: dict[str, tuple[float, dict[str, object]]] = {}
         self._catalog_cache_lock = threading.Lock()
+        self._download_slots = threading.BoundedSemaphore(MAX_PARALLEL_PLUGIN_DOWNLOADS)
 
     def catalog(
         self,
@@ -214,13 +217,22 @@ class PluginRegistryClient:
             raise PluginRegistryError("Registry 版本记录缺少 runtime/artifact")
 
         self._report(progress, 5, f"正在准备下载 {plan.name} v{plan.target_version}")
-        zip_path = self._download_artifact(
-            plugin_id=plan.plugin_id,
-            version=plan.target_version,
-            publisher=plan.publisher,
-            artifact=artifact,
-            progress=progress,
-        )
+        # Only bound the network transfer. Different plugins can resolve
+        # versions, download and finish their own installation concurrently.
+        self._report(progress, 8, "正在等待插件下载槽位")
+        while not self._download_slots.acquire(timeout=0.2):
+            self._check_cancelled(progress)
+        try:
+            self._check_cancelled(progress)
+            zip_path = self._download_artifact(
+                plugin_id=plan.plugin_id,
+                version=plan.target_version,
+                publisher=plan.publisher,
+                artifact=artifact,
+                progress=progress,
+            )
+        finally:
+            self._download_slots.release()
         try:
             self._report(progress, 82, "正在验证插件包声明")
             descriptor = self.manager.install_from_path(
