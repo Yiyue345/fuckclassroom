@@ -71,9 +71,10 @@
     if (disposed()) return;
     if (task.status === "succeeded") {
       showProgress(ui, 100);
-      ui.note.textContent = "安装完成，默认保持停用";
-      if (ui.status) ui.status.textContent = "下载并安装成功";
-      if (ui.installed) ui.installed.textContent = `v${ui.card.dataset.marketVersion}`;
+      const updated = ui.button.textContent.trim().includes("更新");
+      ui.note.textContent = updated ? "更新完成，保持当前启用状态" : "安装完成，默认保持停用";
+      if (ui.status) ui.status.textContent = updated ? "插件更新成功" : "下载并安装成功";
+      if (ui.installed) ui.installed.textContent = ui.card.dataset.marketVersion;
       // Let the circle reach 100% before replacing it with a success tick.
       schedule(() => {
         if (disposed()) return;
