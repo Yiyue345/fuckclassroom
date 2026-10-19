@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import tempfile
+import threading
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
 
@@ -57,6 +58,8 @@ def build_router(context: PluginContext) -> APIRouter:
     verification_broker = services.get("verification_broker")
     plugin_manager = services.get("plugin_manager")
     registry_client = PluginRegistryClient(plugin_manager)
+    active_market_installs: set[str] = set()
+    active_market_installs_lock = threading.Lock()
     registry_preferences = RegistryPreferences(plugin_manager.config.data_dir)
 
     def selected_registry_beta(requested: bool | None) -> bool:
@@ -231,64 +234,49 @@ def build_router(context: PluginContext) -> APIRouter:
                 _registry_location(selected_beta, error=message),
                 status_code=303,
             )
-        try:
-            plan = registry_client.resolve_install_plan(
-                plugin_id,
-                current_enabled=plugin_registry.plugin_ids,
-                channels=_registry_channels(selected_beta),
-            )
-        except (PluginRegistryError, PluginManagerError) as exc:
-            if "application/json" in request.headers.get("accept", ""):
-                return JSONResponse({"detail": str(exc)}, status_code=409)
-            return RedirectResponse(
-                _registry_location(selected_beta, error=str(exc)),
-                status_code=303,
-            )
-
-        if plan.action not in {"install", "update"}:
-            message = (
-                "插件已是当前可安装的最新版本"
-                if plan.action == "installed"
-                else plan.compatibility_message or "当前没有可安装版本"
-            )
-            if "application/json" in request.headers.get("accept", ""):
-                return JSONResponse({"detail": message}, status_code=409)
-            return RedirectResponse(
-                _registry_location(selected_beta, error=message),
-                status_code=303,
-            )
-        if plan.update_blocked:
-            message = "更新前请先停用该插件及依赖它的插件，等待 Runtime 卸载完成"
-            if "application/json" in request.headers.get("accept", ""):
-                return JSONResponse({"detail": message}, status_code=409)
-            return RedirectResponse(
-                _registry_location(selected_beta, error=message),
-                status_code=303,
-            )
+        with active_market_installs_lock:
+            if plugin_id in active_market_installs:
+                message = f"插件 {plugin_id} 已有下载或安装任务进行中"
+                if "application/json" in request.headers.get("accept", ""):
+                    return JSONResponse({"detail": message}, status_code=409)
+                return RedirectResponse(
+                    _registry_location(selected_beta, error=message),
+                    status_code=303,
+                )
+            active_market_installs.add(plugin_id)
 
         current_enabled = tuple(plugin_registry.plugin_ids)
 
         def worker(progress):
-            descriptor, action, signed = registry_client.install(
-                plugin_id,
-                current_enabled=current_enabled,
-                channels=_registry_channels(selected_beta),
-                progress=progress,
-            )
-            verification = "SHA-256 + Ed25519" if signed else "SHA-256"
-            action_text = "更新" if action == "update" else "安装"
-            progress.log(
-                f"{action_text}完成：{descriptor.id}@{descriptor.version}，完整性校验：{verification}"
-            )
-            return _registry_location(
-                selected_beta,
-                notice=f"{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用",
-            )
+            try:
+                # Resolve the remote install plan in the background, so
+                # submitting another card never waits for this one's network.
+                progress(2, "正在检查 Registry 版本及兼容性")
+                descriptor, action, signed = registry_client.install(
+                    plugin_id,
+                    current_enabled=current_enabled,
+                    channels=_registry_channels(selected_beta),
+                    progress=progress,
+                )
+                verification = "SHA-256 + Ed25519" if signed else "SHA-256"
+                action_text = "更新" if action == "update" else "安装"
+                progress.log(
+                    f"{action_text}完成：{descriptor.id}@{descriptor.version}，完整性校验：{verification}"
+                )
+                return _registry_location(
+                    selected_beta,
+                    notice=f"{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用",
+                )
+            finally:
+                with active_market_installs_lock:
+                    active_market_installs.discard(plugin_id)
 
-        task = task_manager.start(
-            f"{'更新' if plan.action == 'update' else '下载'}插件 · {plan.name}",
-            worker,
-        )
+        try:
+            task = task_manager.start(f"下载或更新插件 · {plugin_id}", worker)
+        except Exception:
+            with active_market_installs_lock:
+                active_market_installs.discard(plugin_id)
+            raise
         return task_started_response(request, task, _registry_location(selected_beta))
 
     def plugin_action_response(
