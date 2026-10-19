@@ -197,5 +197,25 @@
     }
   }
 
+  const channelForm = market.querySelector(".plugin-market-channel-form");
+  const channelSwitch = channelForm?.querySelector('[role="switch"]');
+  channelForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (disposed() || !channelSwitch || channelSwitch.disabled) return;
+    const isEnabled = channelSwitch.getAttribute("aria-checked") === "true";
+    channelSwitch.setAttribute("aria-checked", isEnabled ? "false" : "true");
+    channelSwitch.disabled = true;
+    const destination = new URL(channelForm.action, window.location.href);
+    destination.searchParams.set("include_beta", isEnabled ? "0" : "1");
+    schedule(() => {
+      if (disposed()) return;
+      if (window.FuckClassroomShell?.navigate) {
+        window.FuckClassroomShell.navigate(destination.href);
+      } else {
+        window.location.assign(destination.href);
+      }
+    }, 190);
+  });
+
   loadRegistryCards();
 })();
