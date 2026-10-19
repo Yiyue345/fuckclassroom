@@ -33,6 +33,15 @@ def _restore_file(path: Path, payload: bytes | None) -> None:
     temporary.replace(path)
 
 
+_REGISTRY_BETA_COOKIE = "fuckclassroom_registry_include_beta"
+
+
+def _registry_beta_enabled(request: Request, requested: bool | None) -> bool:
+    if requested is not None:
+        return requested
+    return request.cookies.get(_REGISTRY_BETA_COOKIE) == "1"
+
+
 def _registry_channels(include_beta: bool) -> tuple[str, ...]:
     return ("stable", "beta") if include_beta else ("stable",)
 
@@ -149,67 +158,80 @@ def build_router(context: PluginContext) -> APIRouter:
         )
 
     @router.get("/plugins/registry", response_class=HTMLResponse)
-    def plugin_registry_page(request: Request, include_beta: bool = False) -> HTMLResponse:
+    def plugin_registry_page(request: Request, include_beta: bool | None = None) -> HTMLResponse:
+        selected_beta = _registry_beta_enabled(request, include_beta)
         error = request.query_params.get("error")
         rows: list[dict[str, object]] = []
         try:
             rows = registry_client.catalog(
                 current_enabled=plugin_registry.plugin_ids,
-                channels=_registry_channels(include_beta),
+                channels=_registry_channels(selected_beta),
             )
         except (PluginRegistryError, PluginManagerError) as exc:
             error = str(exc)
-        return templates.TemplateResponse(
+        response = templates.TemplateResponse(
             request,
             "core/plugin_registry.html",
             {
                 "registry_plugins": rows,
                 "registry_url": registry_client.registry_url,
-                "include_beta": include_beta,
+                "include_beta": selected_beta,
                 "plugin_config_mutable": plugin_manager.mutable,
                 "notice": request.query_params.get("notice"),
                 "error": error,
             },
         )
+        if include_beta is not None:
+            response.set_cookie(
+                key=_REGISTRY_BETA_COOKIE,
+                value="1" if selected_beta else "0",
+                max_age=60 * 60 * 24 * 365,
+                httponly=True,
+                samesite="lax",
+                path="/",
+            )
+        return response
 
     @router.get("/api/plugins/registry")
-    def plugin_registry_api(include_beta: bool = False) -> JSONResponse:
+    def plugin_registry_api(request: Request, include_beta: bool | None = None) -> JSONResponse:
+        selected_beta = _registry_beta_enabled(request, include_beta)
         try:
             rows = registry_client.catalog(
                 current_enabled=plugin_registry.plugin_ids,
-                channels=_registry_channels(include_beta),
+                channels=_registry_channels(selected_beta),
             )
         except (PluginRegistryError, PluginManagerError) as exc:
             return JSONResponse({"detail": str(exc)}, status_code=502)
         return JSONResponse(
             {
                 "registry_url": registry_client.registry_url,
-                "include_beta": include_beta,
+                "include_beta": selected_beta,
                 "plugins": rows,
             }
         )
 
     @router.post("/plugins/registry/{plugin_id}/install")
-    def install_registry_plugin(request: Request, plugin_id: str, include_beta: bool = False) -> Response:
+    def install_registry_plugin(request: Request, plugin_id: str, include_beta: bool | None = None) -> Response:
+        selected_beta = _registry_beta_enabled(request, include_beta)
         if not plugin_manager.mutable:
             message = "当前插件配置为只读，不能从 Registry 安装插件"
             if "application/json" in request.headers.get("accept", ""):
                 return JSONResponse({"detail": message}, status_code=409)
             return RedirectResponse(
-                _registry_location(include_beta, error=message),
+                _registry_location(selected_beta, error=message),
                 status_code=303,
             )
         try:
             plan = registry_client.resolve_install_plan(
                 plugin_id,
                 current_enabled=plugin_registry.plugin_ids,
-                channels=_registry_channels(include_beta),
+                channels=_registry_channels(selected_beta),
             )
         except (PluginRegistryError, PluginManagerError) as exc:
             if "application/json" in request.headers.get("accept", ""):
                 return JSONResponse({"detail": str(exc)}, status_code=409)
             return RedirectResponse(
-                _registry_location(include_beta, error=str(exc)),
+                _registry_location(selected_beta, error=str(exc)),
                 status_code=303,
             )
 
@@ -222,7 +244,7 @@ def build_router(context: PluginContext) -> APIRouter:
             if "application/json" in request.headers.get("accept", ""):
                 return JSONResponse({"detail": message}, status_code=409)
             return RedirectResponse(
-                _registry_location(include_beta, error=message),
+                _registry_location(selected_beta, error=message),
                 status_code=303,
             )
         if plan.update_blocked:
@@ -230,7 +252,7 @@ def build_router(context: PluginContext) -> APIRouter:
             if "application/json" in request.headers.get("accept", ""):
                 return JSONResponse({"detail": message}, status_code=409)
             return RedirectResponse(
-                _registry_location(include_beta, error=message),
+                _registry_location(selected_beta, error=message),
                 status_code=303,
             )
 
@@ -240,7 +262,7 @@ def build_router(context: PluginContext) -> APIRouter:
             descriptor, action, signed = registry_client.install(
                 plugin_id,
                 current_enabled=current_enabled,
-                channels=_registry_channels(include_beta),
+                channels=_registry_channels(selected_beta),
                 progress=progress,
             )
             verification = "SHA-256 + Ed25519" if signed else "SHA-256"
@@ -257,7 +279,7 @@ def build_router(context: PluginContext) -> APIRouter:
             f"{'更新' if plan.action == 'update' else '下载'}插件 · {plan.name}",
             worker,
         )
-        return task_started_response(request, task, _registry_location(include_beta))
+        return task_started_response(request, task, _registry_location(selected_beta))
 
     def plugin_action_response(
         request: Request,
