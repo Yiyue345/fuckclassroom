@@ -15,6 +15,7 @@ from ...core.plugins import PluginContext
 from ...core.tasks import cancel_registered_task
 from ...web.responses import task_started_response
 from ..manager import PluginManagerError
+from ..registry_preferences import RegistryPreferences
 from ..registry_client import PluginRegistryClient, PluginRegistryError
 from ..rpc import PLUGIN_RPC_API_VERSION
 
@@ -31,15 +32,6 @@ def _restore_file(path: Path, payload: bytes | None) -> None:
     temporary = path.with_name(path.name + ".rollback")
     temporary.write_bytes(payload)
     temporary.replace(path)
-
-
-_REGISTRY_BETA_COOKIE = "fuckclassroom_registry_include_beta"
-
-
-def _registry_beta_enabled(request: Request, requested: bool | None) -> bool:
-    if requested is not None:
-        return requested
-    return request.cookies.get(_REGISTRY_BETA_COOKIE) == "1"
 
 
 def _registry_channels(include_beta: bool) -> tuple[str, ...]:
@@ -65,6 +57,10 @@ def build_router(context: PluginContext) -> APIRouter:
     verification_broker = services.get("verification_broker")
     plugin_manager = services.get("plugin_manager")
     registry_client = PluginRegistryClient(plugin_manager)
+    registry_preferences = RegistryPreferences(plugin_manager.config.data_dir)
+
+    def selected_registry_beta(requested: bool | None) -> bool:
+        return registry_preferences.include_beta() if requested is None else requested
     plugin_reload = services.maybe("plugin_reload")
     plugin_reload_background = services.maybe("plugin_reload_background")
     plugin_reload_status = services.maybe("plugin_reload_status")
@@ -159,7 +155,7 @@ def build_router(context: PluginContext) -> APIRouter:
 
     @router.get("/plugins/registry", response_class=HTMLResponse)
     def plugin_registry_page(request: Request, include_beta: bool | None = None) -> HTMLResponse:
-        selected_beta = _registry_beta_enabled(request, include_beta)
+        selected_beta = selected_registry_beta(include_beta)
         error = request.query_params.get("error")
         rows: list[dict[str, object]] = []
         try:
@@ -182,19 +178,17 @@ def build_router(context: PluginContext) -> APIRouter:
             },
         )
         if include_beta is not None:
-            response.set_cookie(
-                key=_REGISTRY_BETA_COOKIE,
-                value="1" if selected_beta else "0",
-                max_age=60 * 60 * 24 * 365,
-                httponly=True,
-                samesite="lax",
-                path="/",
-            )
+            try:
+                registry_preferences.set_include_beta(selected_beta)
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500, detail="无法保存插件市场频道偏好"
+                ) from exc
         return response
 
     @router.get("/api/plugins/registry")
     def plugin_registry_api(request: Request, include_beta: bool | None = None) -> JSONResponse:
-        selected_beta = _registry_beta_enabled(request, include_beta)
+        selected_beta = selected_registry_beta(include_beta)
         try:
             rows = registry_client.catalog(
                 current_enabled=plugin_registry.plugin_ids,
@@ -212,7 +206,7 @@ def build_router(context: PluginContext) -> APIRouter:
 
     @router.post("/plugins/registry/{plugin_id}/install")
     def install_registry_plugin(request: Request, plugin_id: str, include_beta: bool | None = None) -> Response:
-        selected_beta = _registry_beta_enabled(request, include_beta)
+        selected_beta = selected_registry_beta(include_beta)
         if not plugin_manager.mutable:
             message = "当前插件配置为只读，不能从 Registry 安装插件"
             if "application/json" in request.headers.get("accept", ""):
