@@ -46,6 +46,7 @@ class PluginRegistryInstalledUiTests(unittest.TestCase):
         self.assertIn('data-market-installed-status', response.text)
         self.assertIn("已安装</span>", response.text)
         self.assertNotIn("data-market-install-form", response.text)
+        self.assertNotIn('data-market-installed-status aria-label="已安装"\n              hidden', response.text)
 
     def test_active_download_has_in_place_completion_target(self) -> None:
         template = Path(
@@ -54,12 +55,17 @@ class PluginRegistryInstalledUiTests(unittest.TestCase):
         script = Path(
             "fuckclassroom/plugins/core_ui/static/plugin_registry.js"
         ).read_text(encoding="utf-8")
-        self.assertIn("data-market-success-label", template)
-        self.assertIn("data-market-done", template)
+        # The exact same element (not two lookalikes) is rendered for all
+        # cards and unveiled after a successful installation.
+        self.assertEqual(template.count('class="plugin-market-installed"'), 1)
+        self.assertIn('data-market-installed-status', template)
+        self.assertNotIn('data-market-done', template)
+        self.assertNotIn('data-market-success-label', template)
         self.assertIn('ui.card.dataset.marketAction = "installed"', script)
         self.assertIn("ui.form.hidden = true", script)
-        self.assertIn("ui.successLabel.hidden = false", script)
-        self.assertIn('ui.state.classList.add("is-complete")', script)
+        self.assertIn("ui.state.hidden = true", script)
+        self.assertIn("ui.installedBadge.hidden = false", script)
+        self.assertNotIn('ui.done.hidden = false', script)
 
     def test_install_button_uses_a_defined_theme_contrast_token(self) -> None:
         css = Path(
@@ -70,7 +76,9 @@ class PluginRegistryInstalledUiTests(unittest.TestCase):
         self.assertNotIn("var(--on-primary)", css)
         self.assertIn("--primary-on: #ffffff", tokens)
         self.assertIn("--primary-on: #102039", tokens)
-        self.assertIn(".plugin-market-download-state.is-complete", css)
+        self.assertIn(".plugin-market-installed[hidden]", css)
+        self.assertIn(".plugin-market-installed svg circle", css)
+        self.assertNotIn(".plugin-market-download-state.is-complete", css)
 
 
 if __name__ == "__main__":
