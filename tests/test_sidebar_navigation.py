@@ -132,6 +132,9 @@ class SidebarNavigationTests(unittest.TestCase):
         registry_template = Path(
             "fuckclassroom/plugins/core_ui/templates/core/plugin_registry.html"
         ).read_text(encoding="utf-8")
+        registry_results_template = Path(
+            "fuckclassroom/plugins/core_ui/templates/core/plugin_registry_results.html"
+        ).read_text(encoding="utf-8")
         base = Path("templates/base.html").read_text(encoding="utf-8")
 
         self.assertIn('class="plugin-toolbar surface"', template)
@@ -218,11 +221,11 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertIn("plugin-dependency-box", template)
         self.assertIn("plugin-manage-row", template)
 
-        self.assertIn("含 Ed25519 签名", registry_template)
-        self.assertIn("安装时仍会执行 SHA-256 与 Ed25519 验证", registry_template)
-        self.assertNotIn(">已签名</span>", registry_template)
-        self.assertIn("plugin.missing_plugin_dependencies", registry_template)
-        self.assertIn("补齐依赖前不能启用", registry_template)
+        self.assertIn("含 Ed25519 签名", registry_results_template)
+        self.assertIn("安装时仍会执行 SHA-256 与 Ed25519 验证", registry_results_template)
+        self.assertNotIn(">已签名</span>", registry_results_template)
+        self.assertIn("plugin.missing_plugin_dependencies", registry_results_template)
+        self.assertIn("补齐依赖前不能启用", registry_results_template)
 
         self.assertIn(
             "grid-template-columns: minmax(0, 1.24fr) minmax(440px, .76fr)",
@@ -301,7 +304,7 @@ class SidebarNavigationTests(unittest.TestCase):
         registry = build_legacy_business_registry({"classroom", "course_selection", "processing", "transcription", "ocr", "ai_summary", "attendance"})
 
         self.assertIn(
-            "/plugins/core_ui/static/core_ui.css?v=20260928-4",
+            "/plugins/core_ui/static/core_ui.css?v=20261019-4",
             registry.stylesheets,
         )
         self.assertIn(

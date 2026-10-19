@@ -6,9 +6,13 @@ import json
 import os
 import re
 import tempfile
+import threading
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
@@ -28,6 +32,10 @@ DEFAULT_PLUGIN_REGISTRY_URL = (
     "https://classroom.yiyuemeow.com/api/v1/registry.json"
 )
 MAX_REGISTRY_JSON_BYTES = 2 * 1024 * 1024
+CATALOG_CACHE_SECONDS = 60
+CATALOG_MAX_WORKERS = 8
+MAX_PARALLEL_PLUGIN_DOWNLOADS = 4
+REGISTRY_REQUEST_TIMEOUT_SECONDS = 10
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
 _ARTIFACT_PATH_RE = re.compile(
     r"^/[^/]+/[^/]+/releases/download/[^/]+/[^/]+\.zip$"
@@ -109,7 +117,9 @@ class PluginRegistryClient:
         ).strip()
         self._validate_transport(self.registry_url)
         self.api_base = urljoin(self.registry_url, "./")
-        self._root_record: dict[str, object] | None = None
+        self._catalog_cache: dict[str, tuple[float, dict[str, object]]] = {}
+        self._catalog_cache_lock = threading.Lock()
+        self._download_slots = threading.BoundedSemaphore(MAX_PARALLEL_PLUGIN_DOWNLOADS)
 
     def catalog(
         self,
@@ -117,7 +127,7 @@ class PluginRegistryClient:
         current_enabled: tuple[str, ...] | list[str] | set[str] = (),
         channels: tuple[str, ...] = ("stable",),
     ) -> list[dict[str, object]]:
-        index = self._index()
+        index = self._index(fetch_json=self._cached_catalog_json)
         raw_plugins = index.get("plugins", [])
         if not isinstance(raw_plugins, list):
             raise PluginRegistryError("Registry index.plugins 格式无效")
@@ -125,22 +135,29 @@ class PluginRegistryClient:
         descriptors = self.manager.descriptor_map()
         desired = self.manager.desired_enabled()
         current = set(current_enabled)
-        rows: list[dict[str, object]] = []
-        for raw_entry in raw_plugins:
-            if not isinstance(raw_entry, Mapping):
-                continue
-            plugin_id = str(raw_entry.get("id") or "")
-            if not plugin_id:
-                continue
+        entries = [
+            entry
+            for entry in raw_plugins
+            if isinstance(entry, Mapping) and str(entry.get("id") or "")
+        ]
+        if not entries:
+            return []
+
+        def build_row(entry: Mapping[str, object]) -> dict[str, object]:
             plan = self._plan_from_entry(
-                raw_entry,
+                entry,
                 descriptors=descriptors,
                 desired=desired,
                 current=current,
                 channels=channels,
+                fetch_json=self._cached_catalog_json,
             )
-            rows.append(plan.to_public_dict())
-        return rows
+            return plan.to_public_dict()
+
+        # Network-bound per-plugin lookups should not block one another.
+        # executor.map retains the Registry index's display order.
+        with ThreadPoolExecutor(max_workers=min(CATALOG_MAX_WORKERS, len(entries))) as pool:
+            return list(pool.map(build_row, entries))
 
     def resolve_install_plan(
         self,
@@ -176,11 +193,13 @@ class PluginRegistryClient:
         plugin_id: str,
         *,
         current_enabled: tuple[str, ...] | list[str] | set[str] = (),
+        channels: tuple[str, ...] = ("stable",),
         progress=None,
     ) -> tuple[PluginDescriptor, str, bool]:
         plan = self.resolve_install_plan(
             plugin_id,
             current_enabled=current_enabled,
+            channels=channels,
         )
         if plan.action not in {"install", "update"} or plan.version_record is None:
             if plan.action == "installed":
@@ -198,13 +217,22 @@ class PluginRegistryClient:
             raise PluginRegistryError("Registry 版本记录缺少 runtime/artifact")
 
         self._report(progress, 5, f"正在准备下载 {plan.name} v{plan.target_version}")
-        zip_path = self._download_artifact(
-            plugin_id=plan.plugin_id,
-            version=plan.target_version,
-            publisher=plan.publisher,
-            artifact=artifact,
-            progress=progress,
-        )
+        # Only bound the network transfer. Different plugins can resolve
+        # versions, download and finish their own installation concurrently.
+        self._report(progress, 8, "正在等待插件下载槽位")
+        while not self._download_slots.acquire(timeout=0.2):
+            self._check_cancelled(progress)
+        try:
+            self._check_cancelled(progress)
+            zip_path = self._download_artifact(
+                plugin_id=plan.plugin_id,
+                version=plan.target_version,
+                publisher=plan.publisher,
+                artifact=artifact,
+                progress=progress,
+            )
+        finally:
+            self._download_slots.release()
         try:
             self._report(progress, 82, "正在验证插件包声明")
             descriptor = self.manager.install_from_path(
@@ -236,16 +264,20 @@ class PluginRegistryClient:
         desired: set[str],
         current: set[str],
         channels: tuple[str, ...],
+        fetch_json: Callable[[str], dict[str, object]] | None = None,
     ) -> RegistryInstallPlan:
+        fetch = fetch_json or self._fetch_json
         plugin_id = str(entry.get("id") or "")
         detail_ref = str(entry.get("detail") or "")
         if not detail_ref:
             raise PluginRegistryError(f"插件 {plugin_id} 缺少 detail 链接")
-        detail = self._fetch_json(self._resolve_api(detail_ref))
+        detail = fetch(self._resolve_api(detail_ref))
         if str(detail.get("id") or "") != plugin_id:
             raise PluginRegistryError(f"Registry 插件详情 ID 不匹配：{plugin_id}")
 
-        chosen, rejected = self._select_version(detail, channels=channels)
+        chosen, rejected = self._select_version(
+            detail, channels=channels, fetch_json=fetch
+        )
         compatibility = (
             self._runtime_compatibility(chosen.get("runtime", {}))
             if chosen is not None
@@ -334,7 +366,9 @@ class PluginRegistryClient:
         plugin_detail: Mapping[str, object],
         *,
         channels: tuple[str, ...],
+        fetch_json: Callable[[str], dict[str, object]] | None = None,
     ) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+        fetch = fetch_json or self._fetch_json
         raw_versions = plugin_detail.get("versions", [])
         if not isinstance(raw_versions, list):
             raise PluginRegistryError("Registry plugin.versions 格式无效")
@@ -353,6 +387,15 @@ class PluginRegistryClient:
                 continue
             candidates.append((parsed, summary))
         candidates.sort(key=lambda item: item[0], reverse=True)
+        if not candidates:
+            return None, {
+                "compatible": False,
+                "state": "channel_unavailable",
+                "label": "— 当前频道无版本",
+                "severity": "warning",
+                "message": "当前频道没有可安装版本；可尝试开启「包含测试版」",
+                "app_version_satisfied": True,
+            }
 
         rejected: dict[str, object] | None = None
         plugin_id = str(plugin_detail.get("id") or "")
@@ -360,7 +403,7 @@ class PluginRegistryClient:
             detail_ref = str(summary.get("detail") or "")
             if not detail_ref:
                 continue
-            record = self._fetch_json(self._resolve_api(detail_ref))
+            record = fetch(self._resolve_api(detail_ref))
             if str(record.get("plugin_id") or "") != plugin_id:
                 raise PluginRegistryError(
                     f"Registry 版本记录 plugin_id 不匹配：{plugin_id}"
@@ -449,21 +492,44 @@ class PluginRegistryClient:
             "app_version_satisfied": True,
         }
 
-    def _index(self) -> dict[str, object]:
-        root = self._root()
+    def _cached_catalog_json(self, url: str) -> dict[str, object]:
+        now = time.monotonic()
+        with self._catalog_cache_lock:
+            cached = self._catalog_cache.get(url)
+            if cached is not None and cached[0] > now:
+                return cached[1]
+        record = self._fetch_json(url)
+        with self._catalog_cache_lock:
+            self._catalog_cache[url] = (
+                time.monotonic() + CATALOG_CACHE_SECONDS,
+                record,
+            )
+        return record
+
+    def _index(
+        self,
+        *,
+        fetch_json: Callable[[str], dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        fetch = fetch_json or self._fetch_json
+        root = self._root(fetch_json=fetch)
         index_ref = str(root.get("index") or "index.json")
-        index = self._fetch_json(self._resolve_api(index_ref))
+        index = fetch(self._resolve_api(index_ref))
         if int(index.get("schema_version") or 0) != 1:
             raise PluginRegistryError("不支持的 Registry index schema_version")
         return index
 
-    def _root(self) -> dict[str, object]:
-        if self._root_record is None:
-            root = self._fetch_json(self.registry_url)
-            if int(root.get("schema_version") or 0) != 1:
-                raise PluginRegistryError("不支持的 Registry schema_version")
-            self._root_record = root
-        return self._root_record
+    def _root(
+        self,
+        *,
+        fetch_json: Callable[[str], dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        # A fresh install/verification must not silently reuse browsing cache.
+        fetch = fetch_json or self._fetch_json
+        root = fetch(self.registry_url)
+        if int(root.get("schema_version") or 0) != 1:
+            raise PluginRegistryError("不支持的 Registry schema_version")
+        return root
 
     def _publisher(self, publisher_id: str) -> dict[str, object]:
         root = self._root()
@@ -634,7 +700,7 @@ class PluginRegistryClient:
         self._validate_registry_url(url)
         request = Request(url, headers={"User-Agent": "FuckClassroom-Registry/1"})
         try:
-            response = urlopen(request, timeout=20)
+            response = urlopen(request, timeout=REGISTRY_REQUEST_TIMEOUT_SECONDS)
         except (HTTPError, URLError, OSError) as exc:
             raise PluginRegistryError(f"读取 Registry 失败：{exc}") from exc
         with response:

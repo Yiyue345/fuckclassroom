@@ -3,9 +3,13 @@ from __future__ import annotations
 import base64
 import json
 import tempfile
+import threading
+import time
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -16,8 +20,10 @@ from fuckclassroom.plugins.manager import PluginManager, PluginManagerError
 from fuckclassroom.plugins.registry_client import (
     DEFAULT_PLUGIN_REGISTRY_URL,
     PluginRegistryClient,
+    PluginRegistryError,
 )
 from fuckclassroom.plugins.rpc import PLUGIN_RPC_API_VERSION
+from fuckclassroom.web import create_app
 
 
 class FakeRegistryClient(PluginRegistryClient):
@@ -161,6 +167,218 @@ class PluginRegistryClientTests(unittest.TestCase):
             self.assertEqual(row["action"], "install")
             self.assertEqual(row["compatibility_state"], "app_version_mismatch")
             self.assertEqual(row["compatibility_label"], "⚠ 主程序版本不满足")
+
+
+    def test_beta_only_release_requires_beta_channel(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            responses = registry_responses()
+            base = "https://registry.example/api/v1/"
+            beta_version = "0.1.0-beta.2"
+            responses[base + "plugins/demo.json"]["versions"] = [
+                {
+                    "version": beta_version,
+                    "channel": "beta",
+                    "released_at": "2026-10-02T00:00:00Z",
+                    "yanked": False,
+                    "detail": f"plugins/demo/versions/{beta_version}.json",
+                }
+            ]
+            responses[base + f"plugins/demo/versions/{beta_version}.json"] = {
+                "schema_version": 1,
+                "plugin_id": "demo",
+                "version": beta_version,
+                "channel": "beta",
+                "released_at": "2026-10-02T00:00:00Z",
+                "yanked": False,
+                "runtime": runtime(app_requires=">=0"),
+                "artifact": artifact(beta_version),
+            }
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            client = FakeRegistryClient(manager, responses)
+
+            stable = client.catalog()[0]
+            self.assertEqual(stable["compatibility_state"], "channel_unavailable")
+            self.assertEqual(stable["action"], "unavailable")
+            self.assertEqual(stable["target_version"], "")
+
+            beta = client.catalog(channels=("stable", "beta"))[0]
+            self.assertEqual(beta["compatibility_state"], "compatible")
+            self.assertEqual(beta["action"], "install")
+            self.assertEqual(beta["target_version"], beta_version)
+
+            with patch.object(
+                client, "_download_artifact",
+                return_value=Path(directory) / "demo.zip",
+            ), patch.object(
+                manager, "install_from_path",
+                return_value=SimpleNamespace(name="Demo", version=beta_version),
+            ) as installer:
+                client.install("demo", channels=("stable", "beta"))
+
+            self.assertEqual(installer.call_args.kwargs["expected_version"], beta_version)
+
+    def test_beta_toggle_prefers_newest_compatible_release(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            responses = registry_responses()
+            base = "https://registry.example/api/v1/"
+            beta_version = "2.5.0-beta.1"
+            responses[base + "plugins/demo.json"]["versions"].insert(
+                0,
+                {
+                    "version": beta_version,
+                    "channel": "beta",
+                    "released_at": "2026-10-02T00:00:00Z",
+                    "yanked": False,
+                    "detail": f"plugins/demo/versions/{beta_version}.json",
+                },
+            )
+            responses[base + f"plugins/demo/versions/{beta_version}.json"] = {
+                "schema_version": 1,
+                "plugin_id": "demo",
+                "version": beta_version,
+                "channel": "beta",
+                "released_at": "2026-10-02T00:00:00Z",
+                "yanked": False,
+                "runtime": runtime(app_requires=">=0"),
+                "artifact": artifact(beta_version),
+            }
+            client = FakeRegistryClient(
+                PluginManager(AppConfig(data_dir=Path(directory))), responses
+            )
+
+            self.assertEqual(client.catalog()[0]["target_version"], "1.5.0")
+            self.assertEqual(
+                client.catalog(channels=("stable", "beta"))[0]["target_version"],
+                beta_version,
+            )
+
+    def test_registry_page_does_not_block_on_network(self) -> None:
+        from fastapi.testclient import TestClient
+
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(AppConfig(data_dir=Path(directory)))
+            with (
+                patch.object(
+                    PluginRegistryClient,
+                    "catalog",
+                    side_effect=AssertionError("page must not call the Registry"),
+                ),
+                TestClient(app) as client,
+            ):
+                page = client.get("/plugins/registry")
+
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("正在加载在线插件", page.text)
+            self.assertIn("data-registry-results-url", page.text)
+
+    def test_registry_cards_fragment_handles_unavailable_registry(self) -> None:
+        from fastapi.testclient import TestClient
+
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(AppConfig(data_dir=Path(directory)))
+            with TestClient(app) as client:
+                with patch.object(PluginRegistryClient, "catalog", return_value=[]):
+                    ok = client.get("/plugins/registry/results")
+                with patch.object(
+                    PluginRegistryClient,
+                    "catalog",
+                    side_effect=PluginRegistryError("Registry unavailable"),
+                ):
+                    failed = client.get("/plugins/registry/results")
+
+            self.assertEqual(ok.status_code, 200)
+            self.assertIn("Registry 暂无已发布插件", ok.text)
+            self.assertEqual(ok.headers.get("cache-control"), "no-store")
+            self.assertEqual(failed.status_code, 200)
+            self.assertIn("Registry unavailable", failed.text)
+
+    def test_catalog_fetches_plugin_details_concurrently_and_caches_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            responses = registry_responses()
+            base = "https://registry.example/api/v1/"
+            entries = responses[base + "index.json"]["plugins"]
+            original_detail = responses[base + "plugins/demo.json"]
+            original_version = responses[base + "plugins/demo/versions/1.5.0.json"]
+            for plugin_id in ("extra_a", "extra_b", "extra_c"):
+                entries.append(
+                    {
+                        "id": plugin_id,
+                        "name": plugin_id,
+                        "summary": plugin_id,
+                        "publisher": "example",
+                        "official": False,
+                        "status": "active",
+                        "detail": f"plugins/{plugin_id}.json",
+                    }
+                )
+                responses[base + f"plugins/{plugin_id}.json"] = {
+                    **original_detail,
+                    "id": plugin_id,
+                    "name": plugin_id,
+                    "versions": [
+                        {
+                            **original_detail["versions"][1],
+                            "detail": f"plugins/{plugin_id}/versions/1.5.0.json",
+                        }
+                    ],
+                }
+                responses[base + f"plugins/{plugin_id}/versions/1.5.0.json"] = {
+                    **original_version,
+                    "plugin_id": plugin_id,
+                }
+            client = FakeRegistryClient(manager, responses)
+            fetch = client._fetch_json
+            calls: list[str] = []
+            lock = threading.Lock()
+            active = 0
+            peak = 0
+
+            def instrumented_fetch(url: str) -> dict[str, object]:
+                nonlocal active, peak
+                with lock:
+                    calls.append(url)
+                    active += 1
+                    peak = max(peak, active)
+                try:
+                    # Make overlapping requests observable without relying on
+                    # wall-clock timing thresholds for the overall catalog.
+                    if "/plugins/" in url:
+                        time.sleep(0.04)
+                    return fetch(url)
+                finally:
+                    with lock:
+                        active -= 1
+
+            with patch.object(client, "_fetch_json", side_effect=instrumented_fetch):
+                rows = client.catalog()
+                first_fetches = len(calls)
+                cached_rows = client.catalog()
+
+            self.assertEqual(len(rows), 4)
+            self.assertEqual([row["id"] for row in rows], [
+                "demo", "extra_a", "extra_b", "extra_c",
+            ])
+            self.assertEqual(cached_rows, rows)
+            self.assertGreaterEqual(peak, 2)
+            self.assertEqual(len(calls), first_fetches)
+
+    def test_install_plan_refetches_remote_version_after_catalog_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            responses = registry_responses()
+            client = FakeRegistryClient(manager, responses)
+
+            self.assertEqual(client.catalog()[0]["target_version"], "1.5.0")
+            record = "https://registry.example/api/v1/plugins/demo/versions/2.0.0.json"
+            responses[record] = {
+                **responses[record],
+                "runtime": runtime(),
+            }
+
+            plan = client.resolve_install_plan("demo")
+
+            self.assertEqual(plan.target_version, "2.0.0")
 
     def test_catalog_reports_missing_plugin_dependencies_before_install(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

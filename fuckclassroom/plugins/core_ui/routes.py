@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import tempfile
+import threading
 from pathlib import Path
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -15,6 +16,7 @@ from ...core.plugins import PluginContext
 from ...core.tasks import cancel_registered_task
 from ...web.responses import task_started_response
 from ..manager import PluginManagerError
+from ..registry_preferences import RegistryPreferences
 from ..registry_client import PluginRegistryClient, PluginRegistryError
 from ..rpc import PLUGIN_RPC_API_VERSION
 
@@ -33,6 +35,16 @@ def _restore_file(path: Path, payload: bytes | None) -> None:
     temporary.replace(path)
 
 
+def _registry_channels(include_beta: bool) -> tuple[str, ...]:
+    return ("stable", "beta") if include_beta else ("stable",)
+
+
+def _registry_location(include_beta: bool, **parameters: str) -> str:
+    query = {"include_beta": "1"} if include_beta else {}
+    query.update(parameters)
+    return "/plugins/registry" + (f"?{urlencode(query)}" if query else "")
+
+
 def build_router(context: PluginContext) -> APIRouter:
     router = APIRouter()
     plugin_registry = context.registry
@@ -46,6 +58,12 @@ def build_router(context: PluginContext) -> APIRouter:
     verification_broker = services.get("verification_broker")
     plugin_manager = services.get("plugin_manager")
     registry_client = PluginRegistryClient(plugin_manager)
+    active_market_installs: set[str] = set()
+    active_market_installs_lock = threading.Lock()
+    registry_preferences = RegistryPreferences(plugin_manager.config.data_dir)
+
+    def selected_registry_beta(requested: bool | None) -> bool:
+        return registry_preferences.include_beta() if requested is None else requested
     plugin_reload = services.maybe("plugin_reload")
     plugin_reload_background = services.maybe("plugin_reload_background")
     plugin_reload_status = services.maybe("plugin_reload_status")
@@ -139,109 +157,127 @@ def build_router(context: PluginContext) -> APIRouter:
         )
 
     @router.get("/plugins/registry", response_class=HTMLResponse)
-    def plugin_registry_page(request: Request) -> HTMLResponse:
-        error = request.query_params.get("error")
-        rows: list[dict[str, object]] = []
-        try:
-            rows = registry_client.catalog(
-                current_enabled=plugin_registry.plugin_ids,
-            )
-        except (PluginRegistryError, PluginManagerError) as exc:
-            error = str(exc)
+    def plugin_registry_page(request: Request, include_beta: bool | None = None) -> HTMLResponse:
+        # Render the page before contacting the remote Registry; client-side
+        # loading uses the existing page runtime's abort signal.
+        selected_beta = selected_registry_beta(include_beta)
+        if include_beta is not None:
+            try:
+                registry_preferences.set_include_beta(selected_beta)
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500, detail="无法保存插件市场频道偏好"
+                ) from exc
         return templates.TemplateResponse(
             request,
             "core/plugin_registry.html",
             {
-                "registry_plugins": rows,
                 "registry_url": registry_client.registry_url,
+                "include_beta": selected_beta,
                 "plugin_config_mutable": plugin_manager.mutable,
                 "notice": request.query_params.get("notice"),
-                "error": error,
+                "error": request.query_params.get("error"),
             },
         )
 
-    @router.get("/api/plugins/registry")
-    def plugin_registry_api() -> JSONResponse:
+    @router.get("/plugins/registry/results", response_class=HTMLResponse)
+    def plugin_registry_results(request: Request, include_beta: bool | None = None) -> HTMLResponse:
+        selected_beta = selected_registry_beta(include_beta)
+        error: str | None = None
+        rows: list[dict[str, object]] = []
         try:
             rows = registry_client.catalog(
                 current_enabled=plugin_registry.plugin_ids,
+                channels=_registry_channels(selected_beta),
+            )
+        except (PluginRegistryError, PluginManagerError) as exc:
+            error = str(exc)
+        response = templates.TemplateResponse(
+            request,
+            "core/plugin_registry_results.html",
+            {
+                "registry_plugins": rows,
+                "include_beta": selected_beta,
+                "plugin_config_mutable": plugin_manager.mutable,
+                "error": error,
+            },
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @router.get("/api/plugins/registry")
+    def plugin_registry_api(request: Request, include_beta: bool | None = None) -> JSONResponse:
+        selected_beta = selected_registry_beta(include_beta)
+        try:
+            rows = registry_client.catalog(
+                current_enabled=plugin_registry.plugin_ids,
+                channels=_registry_channels(selected_beta),
             )
         except (PluginRegistryError, PluginManagerError) as exc:
             return JSONResponse({"detail": str(exc)}, status_code=502)
         return JSONResponse(
             {
                 "registry_url": registry_client.registry_url,
+                "include_beta": selected_beta,
                 "plugins": rows,
             }
         )
 
     @router.post("/plugins/registry/{plugin_id}/install")
-    def install_registry_plugin(request: Request, plugin_id: str) -> Response:
+    def install_registry_plugin(request: Request, plugin_id: str, include_beta: bool | None = None) -> Response:
+        selected_beta = selected_registry_beta(include_beta)
         if not plugin_manager.mutable:
             message = "当前插件配置为只读，不能从 Registry 安装插件"
             if "application/json" in request.headers.get("accept", ""):
                 return JSONResponse({"detail": message}, status_code=409)
             return RedirectResponse(
-                f"/plugins/registry?error={quote(message)}",
+                _registry_location(selected_beta, error=message),
                 status_code=303,
             )
-        try:
-            plan = registry_client.resolve_install_plan(
-                plugin_id,
-                current_enabled=plugin_registry.plugin_ids,
-            )
-        except (PluginRegistryError, PluginManagerError) as exc:
-            if "application/json" in request.headers.get("accept", ""):
-                return JSONResponse({"detail": str(exc)}, status_code=409)
-            return RedirectResponse(
-                f"/plugins/registry?error={quote(str(exc))}",
-                status_code=303,
-            )
-
-        if plan.action not in {"install", "update"}:
-            message = (
-                "插件已是当前可安装的最新版本"
-                if plan.action == "installed"
-                else plan.compatibility_message or "当前没有可安装版本"
-            )
-            if "application/json" in request.headers.get("accept", ""):
-                return JSONResponse({"detail": message}, status_code=409)
-            return RedirectResponse(
-                f"/plugins/registry?error={quote(message)}",
-                status_code=303,
-            )
-        if plan.update_blocked:
-            message = "更新前请先停用该插件及依赖它的插件，等待 Runtime 卸载完成"
-            if "application/json" in request.headers.get("accept", ""):
-                return JSONResponse({"detail": message}, status_code=409)
-            return RedirectResponse(
-                f"/plugins/registry?error={quote(message)}",
-                status_code=303,
-            )
+        with active_market_installs_lock:
+            if plugin_id in active_market_installs:
+                message = f"插件 {plugin_id} 已有下载或安装任务进行中"
+                if "application/json" in request.headers.get("accept", ""):
+                    return JSONResponse({"detail": message}, status_code=409)
+                return RedirectResponse(
+                    _registry_location(selected_beta, error=message),
+                    status_code=303,
+                )
+            active_market_installs.add(plugin_id)
 
         current_enabled = tuple(plugin_registry.plugin_ids)
 
         def worker(progress):
-            descriptor, action, signed = registry_client.install(
-                plugin_id,
-                current_enabled=current_enabled,
-                progress=progress,
-            )
-            verification = "SHA-256 + Ed25519" if signed else "SHA-256"
-            action_text = "更新" if action == "update" else "安装"
-            progress.log(
-                f"{action_text}完成：{descriptor.id}@{descriptor.version}，完整性校验：{verification}"
-            )
-            return (
-                f"/plugins/registry?notice="
-                f"{quote(f'{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用')}"
-            )
+            try:
+                # Resolve the remote install plan in the background, so
+                # submitting another card never waits for this one's network.
+                progress(2, "正在检查 Registry 版本及兼容性")
+                descriptor, action, signed = registry_client.install(
+                    plugin_id,
+                    current_enabled=current_enabled,
+                    channels=_registry_channels(selected_beta),
+                    progress=progress,
+                )
+                verification = "SHA-256 + Ed25519" if signed else "SHA-256"
+                action_text = "更新" if action == "update" else "安装"
+                progress.log(
+                    f"{action_text}完成：{descriptor.id}@{descriptor.version}，完整性校验：{verification}"
+                )
+                return _registry_location(
+                    selected_beta,
+                    notice=f"{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用",
+                )
+            finally:
+                with active_market_installs_lock:
+                    active_market_installs.discard(plugin_id)
 
-        task = task_manager.start(
-            f"{'更新' if plan.action == 'update' else '下载'}插件 · {plan.name}",
-            worker,
-        )
-        return task_started_response(request, task, "/plugins/registry")
+        try:
+            task = task_manager.start(f"下载或更新插件 · {plugin_id}", worker)
+        except Exception:
+            with active_market_installs_lock:
+                active_market_installs.discard(plugin_id)
+            raise
+        return task_started_response(request, task, _registry_location(selected_beta))
 
     def plugin_action_response(
         request: Request,

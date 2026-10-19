@@ -387,9 +387,19 @@
 }
 .plugin-market-button:hover { border-color: var(--border-strong); background: var(--surface-subtle); color: var(--text); }
 .plugin-market-shell { display: grid; gap: 16px; }
-.plugin-market-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; }
+.plugin-market-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }
 .plugin-market-meta span { color: var(--text-muted); font-size: 11px; }
+.plugin-market-meta-main { display: grid; flex: 1 1 260px; min-width: 0; gap: 5px; }
 .plugin-market-meta .mono { overflow-wrap: anywhere; }
+.plugin-market-channel-form { margin: 0; }
+.plugin-market-channel-switch { display: inline-flex; align-items: center; gap: 10px; border: 0; border-radius: 10px; background: transparent; padding: 5px 2px; color: var(--text-soft); font: inherit; cursor: pointer; text-align: left; }
+.plugin-market-channel-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.plugin-market-switch-track { display: flex; flex: 0 0 56px; align-items: center; width: 56px; height: 32px; border: 2px solid var(--border-strong); border-radius: 999px; background: var(--surface-subtle); padding: 3px; transition: background 170ms ease, border-color 170ms ease; }
+.plugin-market-switch-thumb { display: block; width: 20px; height: 20px; border-radius: 999px; background: var(--text-muted); box-shadow: 0 1px 4px rgba(0,0,0,.14); transition: transform 170ms ease, background 170ms ease, width 170ms ease; }
+.plugin-market-channel-switch[aria-checked="true"] .plugin-market-switch-track { border-color: var(--primary); background: var(--primary); }
+.plugin-market-channel-switch[aria-checked="true"] .plugin-market-switch-thumb { width: 24px; height: 24px; background: #fff; transform: translateX(23px); }
+.plugin-market-channel-label { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; font-size: 12px; font-weight: 650; }
+.plugin-market-channel-label small { color: var(--text-muted); font-size: 10px; font-weight: 500; }
 .plugin-market-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .plugin-market-card { display: grid; gap: 14px; padding: 18px; }
 .plugin-market-head { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; align-items: center; }
@@ -408,14 +418,66 @@
 .plugin-market-install {
   min-height: 36px;
   border: 1px solid var(--primary);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--primary);
-  color: var(--on-primary);
-  padding: 0 14px;
-  font-size: 11px;
-  font-weight: 700;
+  color: var(--primary-on);
+  padding: 0 15px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
+.plugin-market-install:hover:not(:disabled) { border-color: var(--primary-hover); background: var(--primary-hover); color: var(--primary-on); }
+.plugin-market-install:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .plugin-market-install:disabled { border-color: var(--border); background: var(--surface-subtle); color: var(--text-muted); cursor: default; }
+
+.plugin-market-install[hidden], .plugin-market-actions form[hidden], .plugin-market-installed[hidden], .plugin-market-download-state[hidden], .plugin-market-download-note[hidden], .plugin-market-download-error[hidden], .plugin-market-progress[hidden] { display: none !important; }
+.plugin-market-download-state { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; min-height: 44px; margin-left: auto; }
+.plugin-market-download-state .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.plugin-market-progress { position: relative; display: inline-grid; width: 44px; height: 44px; place-items: center; font-size: 10px; font-weight: 700; color: var(--primary); font-variant-numeric: tabular-nums; }
+.plugin-market-progress svg { position: absolute; inset: 0; width: 44px; height: 44px; transform: rotate(-90deg); overflow: visible; }
+.plugin-market-progress circle { fill: none; stroke-width: 4px; }
+.plugin-market-progress-track { stroke: var(--border-strong); }
+.plugin-market-progress-arc { stroke: var(--primary); stroke-linecap: round; stroke-dasharray: 113.097; stroke-dashoffset: 113.097; transition: stroke-dashoffset 230ms ease; }
+.plugin-market-progress [data-market-percent] { position: relative; z-index: 1; }
+/* A single installed badge is shared by server-rendered and live-completed cards. */
+.plugin-market-installed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  margin-left: auto;
+  padding: 4px 12px 4px 5px;
+  border: 1px solid color-mix(in srgb, var(--green) 25%, transparent);
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.plugin-market-installed svg {
+  display: block;
+  flex: 0 0 27px;
+  width: 27px;
+  height: 27px;
+}
+.plugin-market-installed svg circle { fill: var(--green); }
+.plugin-market-installed svg path {
+  fill: none;
+  stroke: var(--surface);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.plugin-market-download-note, .plugin-market-download-error { margin: -6px 0 0; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.plugin-market-download-note { color: var(--text-muted); }
+.plugin-market-download-error { color: var(--red, #dc2626); }
+@media (prefers-reduced-motion: reduce) {
+  .plugin-market-switch-track, .plugin-market-switch-thumb, .plugin-market-progress-arc { transition: none; }
+}
+
 .plugin-market-empty { display: grid; min-height: 260px; place-items: center; align-content: center; gap: 8px; padding: 28px; color: var(--text-muted); text-align: center; }
 .plugin-market-empty strong { color: var(--text-soft); font-size: 14px; }
 .plugin-market-empty span { max-width: 520px; font-size: 11px; line-height: 1.6; }
