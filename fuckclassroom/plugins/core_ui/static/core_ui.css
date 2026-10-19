@@ -418,16 +418,20 @@
 .plugin-market-install {
   min-height: 36px;
   border: 1px solid var(--primary);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--primary);
-  color: var(--on-primary);
-  padding: 0 14px;
-  font-size: 11px;
-  font-weight: 700;
+  color: var(--primary-on);
+  padding: 0 15px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
+.plugin-market-install:hover:not(:disabled) { border-color: var(--primary-hover); background: var(--primary-hover); color: var(--primary-on); }
+.plugin-market-install:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .plugin-market-install:disabled { border-color: var(--border); background: var(--surface-subtle); color: var(--text-muted); cursor: default; }
 
-.plugin-market-install[hidden], .plugin-market-download-state[hidden], .plugin-market-download-note[hidden], .plugin-market-download-error[hidden], .plugin-market-done[hidden], .plugin-market-progress[hidden] { display: none !important; }
+.plugin-market-install[hidden], .plugin-market-actions form[hidden], .plugin-market-download-state[hidden], .plugin-market-download-note[hidden], .plugin-market-download-error[hidden], .plugin-market-done[hidden], .plugin-market-progress[hidden], .plugin-market-success-label[hidden] { display: none !important; }
 .plugin-market-download-state { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; min-height: 44px; margin-left: auto; }
 .plugin-market-download-state .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .plugin-market-progress { position: relative; display: inline-grid; width: 44px; height: 44px; place-items: center; font-size: 10px; font-weight: 700; color: var(--primary); font-variant-numeric: tabular-nums; }
@@ -437,8 +441,32 @@
 .plugin-market-progress-arc { stroke: var(--primary); stroke-linecap: round; stroke-dasharray: 113.097; stroke-dashoffset: 113.097; transition: stroke-dashoffset 230ms ease; }
 .plugin-market-progress [data-market-percent] { position: relative; z-index: 1; }
 .plugin-market-done { width: 44px; height: 44px; }
-.plugin-market-done circle { fill: var(--green, #16a34a); }
-.plugin-market-done path { fill: none; stroke: #fff; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
+.plugin-market-done circle, .plugin-market-installed svg circle { fill: var(--green); }
+.plugin-market-done path, .plugin-market-installed svg path { fill: none; stroke: var(--surface); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
+.plugin-market-installed,
+.plugin-market-download-state.is-complete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  margin-left: auto;
+  padding: 4px 12px 4px 5px;
+  border: 1px solid color-mix(in srgb, var(--green) 25%, transparent);
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.plugin-market-installed svg,
+.plugin-market-download-state.is-complete .plugin-market-done {
+  display: block;
+  flex: 0 0 27px;
+  width: 27px;
+  height: 27px;
+}
 .plugin-market-download-note, .plugin-market-download-error { margin: -6px 0 0; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .plugin-market-download-note { color: var(--text-muted); }
 .plugin-market-download-error { color: var(--red, #dc2626); }
