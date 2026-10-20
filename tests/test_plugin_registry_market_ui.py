@@ -71,8 +71,8 @@ class RegistryPreferenceTests(unittest.TestCase):
                 with TestClient(app) as client:
                     page = client.get("/plugins/registry?include_beta=1")
                     self.assertEqual(page.status_code, 200)
-                    self.assertIn('aria-checked="true"', page.text)
-                    # GET controls filtering only and MUST NOT mutate disk.
+                    self.assertIn('aria-checked="false"', page.text)
+                    # Historical GET parameters MUST NOT mutate or override the switch.
                     self.assertFalse(RegistryPreferences(root).include_beta())
                     self.assertFalse(RegistryPreferences(root).path.exists())
                     invalid = client.post(
@@ -93,7 +93,7 @@ class RegistryPreferenceTests(unittest.TestCase):
                     self.assertEqual(catalog.call_args.kwargs["channels"], ("stable", "beta"))
                     # Visiting a historical URL does not overwrite saved state.
                     old = client.get("/plugins/registry?include_beta=0")
-                    self.assertIn('aria-checked="false"', old.text)
+                    self.assertIn('aria-checked="true"', old.text)
                     self.assertTrue(RegistryPreferences(root).include_beta())
 
                 restarted = create_app(AppConfig(data_dir=root))

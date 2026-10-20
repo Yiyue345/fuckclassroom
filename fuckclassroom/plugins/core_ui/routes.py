@@ -163,9 +163,9 @@ def build_router(context: PluginContext) -> APIRouter:
 
     @router.get("/plugins/registry", response_class=HTMLResponse)
     def plugin_registry_page(request: Request, include_beta: bool | None = None) -> HTMLResponse:
-        # Render the page before contacting the remote Registry; client-side
-        # loading uses the existing page runtime's abort signal.
-        selected_beta = selected_registry_beta(include_beta)
+        # Render from the persisted preference only. Historical GET query
+        # parameters never mutate or override the application's switch state.
+        selected_beta = registry_preferences.include_beta()
         return templates.TemplateResponse(
             request,
             "core/plugin_registry.html",
