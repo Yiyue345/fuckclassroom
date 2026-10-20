@@ -1,1 +1,7 @@
+{% for notice in panel_context.get("notices", ()) %}
+<div class="notice {{ notice.kind }}">
+  <svg class="icon"><use href="/static/icons.svg#{{ notice.icon }}"></use></svg>
+  <span>{{ notice.message }}</span>
+</div>
+{% endfor %}
 {% include panel.template %}

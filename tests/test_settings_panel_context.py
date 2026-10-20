@@ -72,6 +72,26 @@ class SettingsPanelContextTests(unittest.TestCase):
             self.assertIn("settings_deferred.js", page.text)
             self.assertIn('id="network"', page.text)
 
+    def test_cache_statistics_do_not_block_settings_shell(self) -> None:
+        from fastapi.testclient import TestClient
+        from fuckclassroom.core.cache import JsonCacheStore
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            app = create_app(AppConfig(data_dir=Path(directory)), enabled_plugins=set())
+            with (
+                patch.object(
+                    JsonCacheStore,
+                    "info",
+                    side_effect=AssertionError("initial settings request must not scan cache"),
+                ),
+                TestClient(app) as client,
+            ):
+                response = client.get("/settings")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('data-settings-deferred="storage"', response.text)
+            self.assertIn('id="appearance"', response.text)
+
     def test_classroom_settings_context_supplies_terms_to_its_panel(self) -> None:
         term = SimpleNamespace(id="2026-1", year="2026", season="1", current=True)
         snapshot = SimpleNamespace(terms=[term], error=None)
