@@ -166,13 +166,6 @@ def build_router(context: PluginContext) -> APIRouter:
         # Render the page before contacting the remote Registry; client-side
         # loading uses the existing page runtime's abort signal.
         selected_beta = selected_registry_beta(include_beta)
-        if include_beta is not None:
-            try:
-                registry_preferences.set_include_beta(selected_beta)
-            except OSError as exc:
-                raise HTTPException(
-                    status_code=500, detail="无法保存插件市场频道偏好"
-                ) from exc
         return templates.TemplateResponse(
             request,
             "core/plugin_registry.html",
@@ -184,6 +177,20 @@ def build_router(context: PluginContext) -> APIRouter:
                 "error": request.query_params.get("error"),
             },
         )
+
+    @router.post("/api/plugins/registry/preferences")
+    async def update_registry_preferences(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="无效的频道配置") from exc
+        if not isinstance(payload, dict) or type(payload.get("include_beta")) is not bool:
+            raise HTTPException(status_code=422, detail="include_beta 必须是布尔值")
+        try:
+            registry_preferences.set_include_beta(payload["include_beta"])
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="无法保存插件市场频道偏好") from exc
+        return JSONResponse({"include_beta": registry_preferences.include_beta()})
 
     @router.get("/plugins/registry/results", response_class=HTMLResponse)
     def plugin_registry_results(request: Request, include_beta: bool | None = None) -> HTMLResponse:
