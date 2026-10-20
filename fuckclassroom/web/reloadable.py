@@ -101,6 +101,36 @@ class ReloadableApplication:
         loop.call_soon_threadsafe(self._schedule_reload)
         return True
 
+    async def _reload_and_wait_for_update(self) -> bool:
+        """Await a fresh generation using the newly updated plugin files."""
+        existing = self._reload_task
+        if existing is not None and not existing.done():
+            await existing
+        if not self._schedule_reload():
+            return False
+        task = self._reload_task
+        if task is None:
+            return False
+        await task
+        if self._last_reload_error:
+            raise RuntimeError(f"Runtime 热重载失败：{self._last_reload_error}")
+        return True
+
+    def reload_updated_plugin_from_worker(self) -> bool:
+        """Wait for reload in a task worker without blocking the ASGI loop."""
+        loop = self._loop
+        if self._shutting_down or loop is None or not loop.is_running():
+            return False
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            raise RuntimeError("不能在 ASGI 事件循环中同步等待 Runtime 热重载")
+        return asyncio.run_coroutine_threadsafe(
+            self._reload_and_wait_for_update(), loop
+        ).result(timeout=120)
+
     def runtime_status(self) -> dict[str, object]:
         task = self._reload_task
         return {
@@ -201,6 +231,7 @@ def create_reloadable_app(
             enabled_plugins=enabled,
             reload_callback=reload_callback,
             reload_background_callback=shell.request_reload_threadsafe,
+            reload_wait_callback=shell.reload_updated_plugin_from_worker,
             reload_status=reload_status,
             shared_task_manager=shared_task_manager,
         )
