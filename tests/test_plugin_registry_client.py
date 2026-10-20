@@ -522,6 +522,56 @@ class PluginRegistryClientTests(unittest.TestCase):
 
             self.assertEqual(plan.target_version, "2.0.0")
 
+    def test_single_unavailable_registry_entry_does_not_hide_healthy_plugins(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            responses = registry_responses()
+            base = "https://registry.example/api/v1/"
+            entries = responses[base + "index.json"]["plugins"]
+            for name in ("broken", "healthy"):
+                entries.append({
+                    "id": name,
+                    "name": name.capitalize(),
+                    "summary": "Test",
+                    "publisher": "example",
+                    "official": False,
+                    "status": "active",
+                    "detail": f"plugins/{name}.json",
+                })
+            responses[base + "plugins/healthy.json"] = {
+                **responses[base + "plugins/demo.json"],
+                "id": "healthy",
+                "versions": [{
+                    "version": "1.5.0",
+                    "channel": "stable",
+                    "detail": "plugins/healthy/versions/1.5.0.json",
+                }],
+            }
+            responses[base + "plugins/healthy/versions/1.5.0.json"] = {
+                **responses[base + "plugins/demo/versions/1.5.0.json"],
+                "plugin_id": "healthy",
+            }
+            class FailingClient(FakeRegistryClient):
+                def _fetch_json(self, url: str) -> dict[str, object]:
+                    if url.endswith("/plugins/broken.json"):
+                        raise PluginRegistryError("TLS handshake timed out: private diagnostic")
+                    return super()._fetch_json(url)
+
+            client = FailingClient(manager, responses)
+            rows = client.catalog()
+            self.assertEqual([row["id"] for row in rows], ["demo", "broken", "healthy"])
+            self.assertEqual(rows[0]["action"], "install")
+            self.assertEqual(rows[2]["action"], "install")
+            self.assertEqual(rows[1]["action"], "unavailable")
+            self.assertEqual(rows[1]["compatibility_label"], "暂不可用")
+            self.assertNotIn("private diagnostic", rows[1]["compatibility_message"])
+
+            # Only index/root failures should still fail the entire catalog.
+            responses[base + "index.json"]["schema_version"] = 999
+            other = FailingClient(manager, responses)
+            with self.assertRaises(PluginRegistryError):
+                other.catalog()
+
     def test_catalog_reports_missing_plugin_dependencies_before_install(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             responses = registry_responses()
