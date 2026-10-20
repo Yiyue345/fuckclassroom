@@ -73,7 +73,16 @@
     if (task.status === "succeeded") {
       showProgress(ui, 100);
       const updated = ui.button.textContent.trim().includes("更新");
-      ui.note.textContent = updated ? "更新完成" : "安装完成，默认保持停用";
+      let resultNotice = "";
+      if (task.result_url) {
+        try {
+          resultNotice = new URL(task.result_url, window.location.href)
+            .searchParams.get("notice") || "";
+        } catch (_error) {
+          // Ignore an invalid optional task result URL.
+        }
+      }
+      ui.note.textContent = resultNotice || (updated ? "更新完成" : "安装完成，默认保持停用");
       if (ui.status) ui.status.textContent = updated ? "插件更新成功" : "下载并安装成功";
       if (ui.installed) ui.installed.textContent = ui.card.dataset.marketVersion;
 
@@ -83,7 +92,8 @@
       schedule(() => {
         if (disposed()) return;
         ui.state.hidden = true;
-        ui.note.hidden = true;
+        // Keep Runtime reload/fallback outcome visible for updates.
+        ui.note.hidden = !updated;
         ui.installedBadge.hidden = false;
         ui.running = false;
       }, 350);
