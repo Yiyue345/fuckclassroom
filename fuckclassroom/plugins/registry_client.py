@@ -151,15 +151,45 @@ class PluginRegistryClient:
             return []
 
         def build_row(entry: Mapping[str, object]) -> dict[str, object]:
-            plan = self._plan_from_entry(
-                entry,
-                descriptors=descriptors,
-                desired=desired,
-                current=current,
-                channels=channels,
-                fetch_json=self._cached_catalog_json,
-            )
-            return plan.to_public_dict()
+            try:
+                plan = self._plan_from_entry(
+                    entry,
+                    descriptors=descriptors,
+                    desired=desired,
+                    current=current,
+                    channels=channels,
+                    fetch_json=self._cached_catalog_json,
+                )
+                return plan.to_public_dict()
+            except (PluginRegistryError, PluginManagerError, ValueError, TypeError, KeyError) as exc:
+                # A broken detail/version record must not hide healthy plugins.
+                # Do not surface raw URLs or underlying network exceptions in
+                # cards: detailed diagnostics remain in server logs.
+                plugin_id = str(entry.get("id") or "")
+                logger.warning("Registry plugin %s detail failed: %s", plugin_id, exc)
+                installed = descriptors.get(plugin_id)
+                return {
+                    "id": plugin_id,
+                    "name": str(entry.get("name") or plugin_id),
+                    "summary": str(entry.get("summary") or ""),
+                    "publisher": str(entry.get("publisher") or ""),
+                    "official": bool(entry.get("official")),
+                    "status": str(entry.get("status") or "active"),
+                    "installed_version": installed.version if installed else "",
+                    "target_version": "",
+                    "action": "unavailable",
+                    "update_blocked": False,
+                    "compatibility_state": "unavailable",
+                    "compatibility_label": "暂不可用",
+                    "compatibility_message": "该插件版本信息加载失败，可稍后刷新重试；其他插件不受影响",
+                    "compatibility_severity": "warning",
+                    "app_version_satisfied": False,
+                    "channel": "",
+                    "released_at": "",
+                    "signed": False,
+                    "required_plugins": [],
+                    "missing_plugin_dependencies": [],
+                }
 
         # Network-bound per-plugin lookups should not block one another.
         # executor.map retains the Registry index's display order.
