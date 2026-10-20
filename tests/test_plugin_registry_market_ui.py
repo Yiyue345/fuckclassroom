@@ -68,30 +68,58 @@ class RegistryPreferenceTests(unittest.TestCase):
             with patch.object(PluginRegistryClient, "catalog", return_value=[_market_row()]) as catalog:
                 app = create_app(AppConfig(data_dir=root))
                 with TestClient(app) as client:
-                    enabled = client.get("/plugins/registry?include_beta=1")
-                    self.assertEqual(enabled.status_code, 200)
-                    self.assertIn('role="switch"', enabled.text)
-                    self.assertIn('aria-checked="true"', enabled.text)
-                    self.assertIn('data-registry-results-url', enabled.text)
-                    self.assertIn("plugin_registry.js", enabled.text)
-                    fragment = client.get("/plugins/registry/results?include_beta=1")
-                    self.assertIn('data-market-install-form', fragment.text)
-                    self.assertIn('data-market-download-state', fragment.text)
-
+                    page = client.get("/plugins/registry?include_beta=1")
+                    self.assertEqual(page.status_code, 200)
+                    self.assertIn('aria-checked="true"', page.text)
+                    # GET controls filtering only and MUST NOT mutate disk.
+                    self.assertFalse(RegistryPreferences(root).include_beta())
+                    self.assertFalse(RegistryPreferences(root).path.exists())
+                    invalid = client.post(
+                        "/api/plugins/registry/preferences",
+                        json={"include_beta": "true"},
+                    )
+                    self.assertEqual(invalid.status_code, 422)
+                    saved = client.post(
+                        "/api/plugins/registry/preferences",
+                        json={"include_beta": True},
+                    )
+                    self.assertEqual(saved.status_code, 200)
+                    self.assertTrue(saved.json()["include_beta"])
                     kept = client.get("/plugins/registry")
-                    self.assertEqual(kept.status_code, 200)
                     self.assertIn('aria-checked="true"', kept.text)
+                    fragment = client.get("/plugins/registry/results?include_beta=1")
+                    self.assertIn("data-market-install-form", fragment.text)
                     self.assertEqual(catalog.call_args.kwargs["channels"], ("stable", "beta"))
-                self.assertTrue(RegistryPreferences(root).include_beta())
+                    # Visiting a historical URL does not overwrite saved state.
+                    old = client.get("/plugins/registry?include_beta=0")
+                    self.assertIn('aria-checked="false"', old.text)
+                    self.assertTrue(RegistryPreferences(root).include_beta())
 
-                restarted_app = create_app(AppConfig(data_dir=root))
-                with TestClient(restarted_app) as client:
-                    data = client.get("/api/plugins/registry").json()
-                    self.assertTrue(data["include_beta"])
-                    disabled = client.get("/plugins/registry?include_beta=0")
+                restarted = create_app(AppConfig(data_dir=root))
+                with TestClient(restarted) as client:
+                    self.assertTrue(client.get("/api/plugins/registry").json()["include_beta"])
+                    disabled = client.post(
+                        "/api/plugins/registry/preferences",
+                        json={"include_beta": False},
+                    )
                     self.assertEqual(disabled.status_code, 200)
-                    self.assertIn('aria-checked="false"', disabled.text)
                 self.assertFalse(RegistryPreferences(root).include_beta())
+
+    def test_failed_preference_write_keeps_previous_value(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            pref = RegistryPreferences(Path(folder))
+            pref.set_include_beta(True)
+            app = create_app(AppConfig(data_dir=Path(folder)))
+            with (
+                patch.object(RegistryPreferences, "set_include_beta", side_effect=OSError("read-only")),
+                TestClient(app) as client,
+            ):
+                response = client.post(
+                    "/api/plugins/registry/preferences",
+                    json={"include_beta": False},
+                )
+            self.assertEqual(response.status_code, 500)
+            self.assertTrue(pref.include_beta())
 
     def test_parallel_plugin_downloads_and_duplicate_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

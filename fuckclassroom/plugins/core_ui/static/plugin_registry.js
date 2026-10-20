@@ -206,22 +206,41 @@
 
   const channelForm = market.querySelector(".plugin-market-channel-form");
   const channelSwitch = channelForm?.querySelector('[role="switch"]');
-  channelForm?.addEventListener("submit", (event) => {
+  channelForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (disposed() || !channelSwitch || channelSwitch.disabled) return;
-    const isEnabled = channelSwitch.getAttribute("aria-checked") === "true";
-    channelSwitch.setAttribute("aria-checked", isEnabled ? "false" : "true");
+    const next = channelSwitch.getAttribute("aria-checked") !== "true";
     channelSwitch.disabled = true;
-    const destination = new URL(channelForm.action, window.location.href);
-    destination.searchParams.set("include_beta", isEnabled ? "0" : "1");
-    schedule(() => {
+    const previousError = market.querySelector("[data-market-channel-error]");
+    previousError?.remove();
+    try {
+      const response = await fetch("/api/plugins/registry/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ include_beta: next }),
+        credentials: "same-origin",
+        signal: pageSignal,
+      });
+      const saved = await readResponse(response);
       if (disposed()) return;
+      if (saved.include_beta !== next) throw new Error("频道偏好未能保存");
+      channelSwitch.setAttribute("aria-checked", String(next));
+      const destination = "/plugins/registry";
       if (window.FuckClassroomShell?.navigate) {
-        window.FuckClassroomShell.navigate(destination.href);
+        window.FuckClassroomShell.navigate(destination);
       } else {
-        window.location.assign(destination.href);
+        window.location.assign(destination);
       }
-    }, 190);
+    } catch (error) {
+      if (disposed() || error?.name === "AbortError") return;
+      const notice = document.createElement("p");
+      notice.dataset.marketChannelError = "true";
+      notice.className = "plugin-market-download-error";
+      notice.setAttribute("role", "alert");
+      notice.textContent = error?.message || "频道偏好保存失败，请重试";
+      channelForm.after(notice);
+      channelSwitch.disabled = false;
+    }
   });
 
   loadRegistryCards();
