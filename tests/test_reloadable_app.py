@@ -67,6 +67,61 @@ class ReloadableApplicationTests(unittest.TestCase):
             self.assertTrue(result["scheduled"])
             self.assertEqual(client.get("/generation").json()["generation"], 2)
 
+    def test_update_worker_waits_for_runtime_generation_swap(self) -> None:
+        builds = {"count": 0}
+
+        def factory(_reload_callback, _reload_status):
+            builds["count"] += 1
+            generation = builds["count"]
+            app = FastAPI()
+
+            @app.get("/generation")
+            def get_generation():
+                return {"generation": generation}
+
+            return app
+
+        shell = ReloadableApplication(factory)
+        with TestClient(shell) as client:
+            self.assertEqual(client.get("/generation").json()["generation"], 1)
+            outcome = {}
+
+            def worker():
+                outcome["success"] = shell.reload_updated_plugin_from_worker()
+
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+            self.assertTrue(outcome["success"])
+            self.assertEqual(client.get("/generation").json()["generation"], 2)
+
+    def test_update_worker_reports_reload_failure_without_claiming_success(self) -> None:
+        builds = {"count": 0}
+
+        def factory(_reload_callback, _reload_status):
+            builds["count"] += 1
+            if builds["count"] > 1:
+                raise RuntimeError("new runtime refused to start")
+            return FastAPI()
+
+        shell = ReloadableApplication(factory)
+        with TestClient(shell):
+            outcome = {}
+
+            def worker():
+                try:
+                    shell.reload_updated_plugin_from_worker()
+                except RuntimeError as exc:
+                    outcome["error"] = str(exc)
+
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+            self.assertIn("Runtime 热重载失败", outcome.get("error", ""))
+            self.assertIn("new runtime refused", outcome["error"])
+
     def test_failed_reload_keeps_previous_generation(self) -> None:
         builds = {"count": 0}
         shell = None
