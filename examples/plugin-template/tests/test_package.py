@@ -1,11 +1,13 @@
 """Tests run without installing FuckClassroom: validate the publishing contract."""
 
 import hashlib
+import importlib.util
 import json
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.build_registry_artifact import ROOT, build
 
@@ -36,6 +38,33 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(manifest["id"], plugin_id)
                 self.assertEqual(manifest["version"], "0.1.0-beta.1")
                 self.assertEqual(manifest["entry"], "plugin.py")
+
+    def test_actual_plugin_spec_when_host_is_available(self):
+        # Standalone publishing checks do not require the host to be installed.
+        try:
+            from fastapi import APIRouter
+            from fuckclassroom.core.plugins import PluginSpec
+        except ImportError:
+            self.skipTest("FuckClassroom/FastAPI not installed in template-only environment")
+        module_spec = importlib.util.spec_from_file_location(
+            "sample_plugin_template_runtime", ROOT / "plugin.py"
+        )
+        self.assertIsNotNone(module_spec)
+        self.assertIsNotNone(module_spec.loader)
+        module = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(module)
+        plugin = module.build_plugin()
+        manifest = json.loads((ROOT / "plugin.json").read_text(encoding="utf-8"))
+        self.assertIsInstance(plugin, PluginSpec)
+        self.assertEqual(plugin.id, manifest["id"])
+        self.assertEqual(plugin.api_version, manifest["api_version"])
+        self.assertEqual(list(plugin.requires), manifest["requires"])
+        self.assertIsNotNone(plugin.route_factory)
+        router = plugin.route_factory(SimpleNamespace(plugin_id=manifest["id"]))
+        self.assertIsInstance(router, APIRouter)
+        routes = [route for route in router.routes if route.path == "/sample-plugin/hello"]
+        self.assertEqual(len(routes), 1)
+        self.assertEqual(routes[0].endpoint()["plugin_id"], manifest["id"])
 
     def test_invalid_versions_fail_closed(self):
         with tempfile.TemporaryDirectory() as temp:
