@@ -160,16 +160,57 @@
           headers: { Accept: "application/json" },
           signal: pageSignal,
         });
-        const job = await readResponse(response);
+        let job;
+        if (response.status === 409) {
+          const existing = await response.json().catch(() => ({}));
+          if (existing.status_url) {
+            poll(ui, existing.status_url);
+            return;
+          }
+          throw new Error(existing.detail || "下载任务已存在");
+        }
+        job = await readResponse(response);
         if (disposed()) return;
         if (!job.task_id || !job.status_url) throw new Error("服务端未返回安装任务信息");
         poll(ui, job.status_url);
       } catch (error) {
         if (disposed() || error?.name === "AbortError") return;
+        // Another router generation may already own this plugin's task.
+        // Recover its progress rather than leaving an unusable 409 card.
         fail(ui, error?.message || "无法创建安装任务");
       }
     });
     });
+  }
+
+  async function resumeInstallTasks(container) {
+    try {
+      const response = await fetch("/api/plugins/registry/install-tasks", {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: pageSignal,
+      });
+      const data = await readResponse(response);
+      if (disposed() || !container.isConnected) return;
+      for (const [pluginId, job] of Object.entries(data.tasks || {})) {
+        // The fresh Registry catalog already reflects completed installations.
+        // Only resume unfinished jobs or surface a past failed/cancelled job.
+        if (job.status === "succeeded") continue;
+        const card = Array.from(container.querySelectorAll("[data-market-plugin]"))
+          .find((item) => item.dataset.marketPlugin === pluginId);
+        const form = card?.querySelector("[data-market-install-form]");
+        if (!form || !job.status_url) continue;
+        const ui = cardUi(form);
+        if (!ui.running) {
+          begin(ui);
+          poll(ui, job.status_url);
+        }
+      }
+    } catch (error) {
+      if (!disposed() && error?.name !== "AbortError") {
+        console.warn("无法恢复插件安装任务", error);
+      }
+    }
   }
 
   async function loadRegistryCards() {
@@ -189,6 +230,7 @@
       container.innerHTML = html;
       container.setAttribute("aria-busy", "false");
       bindInstallForms(container);
+      resumeInstallTasks(container);
     } catch (error) {
       if (disposed() || error?.name === "AbortError" || !container.isConnected) return;
       const notice = document.createElement("section");
