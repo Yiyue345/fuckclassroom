@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import tempfile
 import threading
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
 
@@ -19,6 +21,9 @@ from ..manager import PluginManagerError
 from ..registry_preferences import RegistryPreferences
 from ..registry_client import PluginRegistryClient, PluginRegistryError
 from ..rpc import PLUGIN_RPC_API_VERSION
+
+
+logger = logging.getLogger(__name__)
 
 
 def _snapshot_file(path: Path) -> bytes | None:
@@ -523,15 +528,28 @@ def build_router(context: PluginContext) -> APIRouter:
             },
         )
 
+    # A plugin panel can synchronously invoke remote service/RPC calls.
+    # Only lightweight built-in contexts are rendered on the initial GET.
+    _fast_settings_panel_keys = frozenset({"network", "storage"})
+
     @router.get("/settings", response_class=HTMLResponse)
     def settings(request: Request) -> HTMLResponse:
         panels = []
+        deferred_keys: list[str] = []
         for panel in plugin_registry.settings_panels:
-            panel_context = (
-                panel.context_factory(services, request)
-                if panel.context_factory is not None
-                else {}
+            deferred = (
+                panel.context_factory is not None
+                and panel.key not in _fast_settings_panel_keys
             )
+            if deferred:
+                deferred_keys.append(panel.key)
+                panel_context = {}
+            else:
+                panel_context = (
+                    panel.context_factory(services, request)
+                    if panel.context_factory is not None
+                    else {}
+                )
             panels.append({"panel": panel, "context": panel_context})
         return templates.TemplateResponse(
             request,
@@ -539,6 +557,7 @@ def build_router(context: PluginContext) -> APIRouter:
             {
                 "settings": settings_store.load().to_public_dict(),
                 "settings_panels": panels,
+                "deferred_settings_panel_keys": deferred_keys,
                 "saved": request.query_params.get("saved") == "1",
                 "settings_error": request.query_params.get("settings_error"),
                 "cache_cleared": request.query_params.get("cache_cleared") == "1",
@@ -549,6 +568,35 @@ def build_router(context: PluginContext) -> APIRouter:
                 "login_state_error": request.query_params.get("login_state_error"),
             },
         )
+
+    @router.get("/settings/panels/{panel_key}", response_class=HTMLResponse)
+    def settings_panel_fragment(request: Request, panel_key: str) -> HTMLResponse:
+        panel = next(
+            (item for item in plugin_registry.settings_panels if item.key == panel_key),
+            None,
+        )
+        if (
+            panel is None
+            or panel.context_factory is None
+            or panel.key in _fast_settings_panel_keys
+        ):
+            raise HTTPException(status_code=404, detail="设置面板不存在")
+        started_at = time.monotonic()
+        panel_context = panel.context_factory(services, request)
+        elapsed = time.monotonic() - started_at
+        if elapsed >= 0.5:
+            logger.warning("设置面板 %s 载入上下文耗时 %.2fs", panel_key, elapsed)
+        response = templates.TemplateResponse(
+            request,
+            "core/settings_panel_fragment.html",
+            {
+                "panel": panel,
+                "panel_context": panel_context,
+                "settings": settings_store.load().to_public_dict(),
+            },
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @router.post("/settings")
     async def save_settings(request: Request) -> RedirectResponse:
