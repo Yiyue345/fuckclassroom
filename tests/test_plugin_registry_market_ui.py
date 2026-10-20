@@ -13,6 +13,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from fuckclassroom.core.config import AppConfig
+from fuckclassroom.core.tasks import TaskManager
 from fuckclassroom.plugins.registry_client import PluginRegistryClient
 from fuckclassroom.plugins.registry_preferences import RegistryPreferences
 from fuckclassroom.web import create_app
@@ -68,30 +69,58 @@ class RegistryPreferenceTests(unittest.TestCase):
             with patch.object(PluginRegistryClient, "catalog", return_value=[_market_row()]) as catalog:
                 app = create_app(AppConfig(data_dir=root))
                 with TestClient(app) as client:
-                    enabled = client.get("/plugins/registry?include_beta=1")
-                    self.assertEqual(enabled.status_code, 200)
-                    self.assertIn('role="switch"', enabled.text)
-                    self.assertIn('aria-checked="true"', enabled.text)
-                    self.assertIn('data-registry-results-url', enabled.text)
-                    self.assertIn("plugin_registry.js", enabled.text)
-                    fragment = client.get("/plugins/registry/results?include_beta=1")
-                    self.assertIn('data-market-install-form', fragment.text)
-                    self.assertIn('data-market-download-state', fragment.text)
-
+                    page = client.get("/plugins/registry?include_beta=1")
+                    self.assertEqual(page.status_code, 200)
+                    self.assertIn('aria-checked="false"', page.text)
+                    # Historical GET parameters MUST NOT mutate or override the switch.
+                    self.assertFalse(RegistryPreferences(root).include_beta())
+                    self.assertFalse(RegistryPreferences(root).path.exists())
+                    invalid = client.post(
+                        "/api/plugins/registry/preferences",
+                        json={"include_beta": "true"},
+                    )
+                    self.assertEqual(invalid.status_code, 422)
+                    saved = client.post(
+                        "/api/plugins/registry/preferences",
+                        json={"include_beta": True},
+                    )
+                    self.assertEqual(saved.status_code, 200)
+                    self.assertTrue(saved.json()["include_beta"])
                     kept = client.get("/plugins/registry")
-                    self.assertEqual(kept.status_code, 200)
                     self.assertIn('aria-checked="true"', kept.text)
+                    fragment = client.get("/plugins/registry/results?include_beta=1")
+                    self.assertIn("data-market-install-form", fragment.text)
                     self.assertEqual(catalog.call_args.kwargs["channels"], ("stable", "beta"))
-                self.assertTrue(RegistryPreferences(root).include_beta())
+                    # Visiting a historical URL does not overwrite saved state.
+                    old = client.get("/plugins/registry?include_beta=0")
+                    self.assertIn('aria-checked="true"', old.text)
+                    self.assertTrue(RegistryPreferences(root).include_beta())
 
-                restarted_app = create_app(AppConfig(data_dir=root))
-                with TestClient(restarted_app) as client:
-                    data = client.get("/api/plugins/registry").json()
-                    self.assertTrue(data["include_beta"])
-                    disabled = client.get("/plugins/registry?include_beta=0")
+                restarted = create_app(AppConfig(data_dir=root))
+                with TestClient(restarted) as client:
+                    self.assertTrue(client.get("/api/plugins/registry").json()["include_beta"])
+                    disabled = client.post(
+                        "/api/plugins/registry/preferences",
+                        json={"include_beta": False},
+                    )
                     self.assertEqual(disabled.status_code, 200)
-                    self.assertIn('aria-checked="false"', disabled.text)
                 self.assertFalse(RegistryPreferences(root).include_beta())
+
+    def test_failed_preference_write_keeps_previous_value(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            pref = RegistryPreferences(Path(folder))
+            pref.set_include_beta(True)
+            app = create_app(AppConfig(data_dir=Path(folder)))
+            with (
+                patch.object(RegistryPreferences, "set_include_beta", side_effect=OSError("read-only")),
+                TestClient(app) as client,
+            ):
+                response = client.post(
+                    "/api/plugins/registry/preferences",
+                    json={"include_beta": False},
+                )
+            self.assertEqual(response.status_code, 500)
+            self.assertTrue(pref.include_beta())
 
     def test_parallel_plugin_downloads_and_duplicate_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -160,6 +189,69 @@ class RegistryPreferenceTests(unittest.TestCase):
                             break
                         time.sleep(0.01)
                     self.assertEqual(task["status"], "succeeded")
+
+    def test_download_task_survives_router_generation_and_resumes_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            shared = TaskManager()
+            first_app = create_app(AppConfig(data_dir=root), shared_task_manager=shared)
+            second_app = create_app(AppConfig(data_dir=root), shared_task_manager=shared)
+            begun = threading.Event()
+            finish = threading.Event()
+
+            def install(_client, plugin_id, *, current_enabled, channels, progress):
+                begun.set()
+                progress(42, "正在下载大文件")
+                if not finish.wait(timeout=5):
+                    raise RuntimeError("test worker timeout")
+                return SimpleNamespace(id=plugin_id, name=plugin_id, version="1.0"), "install", False
+
+            with (
+                patch.object(PluginRegistryClient, "install", autospec=True, side_effect=install) as call,
+                TestClient(first_app) as client_a,
+                TestClient(second_app) as client_b,
+            ):
+                try:
+                    response = client_a.post(
+                        "/plugins/registry/demo/install",
+                        headers={"Accept": "application/json"},
+                    )
+                    self.assertEqual(response.status_code, 200)
+                    task_id = response.json()["task_id"]
+                    self.assertTrue(begun.wait(timeout=2))
+                    resumed = client_b.get("/api/plugins/registry/install-tasks")
+                    self.assertEqual(resumed.status_code, 200)
+                    item = resumed.json()["tasks"]["demo"]
+                    self.assertEqual(item["task_id"], task_id)
+                    self.assertEqual(item["status"], "running")
+                    self.assertEqual(item["status_url"], f"/api/tasks/{task_id}")
+
+                    blocked = client_b.post(
+                        "/plugins/registry/demo/install",
+                        headers={"Accept": "application/json"},
+                    )
+                    self.assertEqual(blocked.status_code, 409)
+                    self.assertEqual(blocked.json()["task_id"], task_id)
+                    self.assertEqual(call.call_count, 1)
+                finally:
+                    finish.set()
+
+                for _ in range(150):
+                    task = client_b.get(f"/api/tasks/{task_id}").json()
+                    if task["status"] != "running":
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(task["status"], "succeeded")
+                self.assertEqual(
+                    client_b.get("/api/plugins/registry/install-tasks").json()
+                    ["tasks"]["demo"]["status"], "succeeded"
+                )
+                retry = client_b.post(
+                    "/plugins/registry/demo/install",
+                    headers={"Accept": "application/json"},
+                )
+                self.assertEqual(retry.status_code, 200)
+                self.assertNotEqual(retry.json()["task_id"], task_id)
 
     def test_inline_install_uses_task_json_and_saved_channel(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

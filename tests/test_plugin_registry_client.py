@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
+import ssl
 import tempfile
 import threading
 import time
 import unittest
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.error import HTTPError, URLError
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -24,6 +28,25 @@ from fuckclassroom.plugins.registry_client import (
 )
 from fuckclassroom.plugins.rpc import PLUGIN_RPC_API_VERSION
 from fuckclassroom.web import create_app
+
+
+class FakeHTTPJSONResponse:
+    def __init__(self, url: str, payload: dict[str, object]):
+        self.url = url
+        self.headers: dict[str, str] = {}
+        self.reader = io.BytesIO(json.dumps(payload).encode("utf-8"))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.reader.close()
+
+    def geturl(self) -> str:
+        return self.url
+
+    def read(self, size: int = -1) -> bytes:
+        return self.reader.read(size)
 
 
 class FakeRegistryClient(PluginRegistryClient):
@@ -140,6 +163,125 @@ def registry_responses() -> dict[str, dict[str, object]]:
 
 
 class PluginRegistryClientTests(unittest.TestCase):
+    def test_registry_tls_handshake_timeout_retries_and_recovers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            client = PluginRegistryClient(manager, "https://registry.example/api/v1/registry.json")
+            timeout = URLError(TimeoutError("_ssl.c:1064: The handshake operation timed out"))
+            record = {"schema_version": 1, "index": "index.json"}
+            response = FakeHTTPJSONResponse(client.registry_url, record)
+            with (
+                patch(
+                    "fuckclassroom.plugins.registry_client.urlopen",
+                    side_effect=[timeout, timeout, response],
+                ) as request,
+                patch("fuckclassroom.plugins.registry_client.REGISTRY_RETRY_DELAY_SECONDS", 0),
+            ):
+                self.assertEqual(client._fetch_json(client.registry_url), record)
+            self.assertEqual(request.call_count, 3)
+
+    def test_registry_tls_timeout_error_is_readable_and_keeps_original_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client = PluginRegistryClient(
+                PluginManager(AppConfig(data_dir=Path(directory))),
+                "https://registry.example/api/v1/registry.json",
+            )
+            with (
+                patch(
+                    "fuckclassroom.plugins.registry_client.urlopen",
+                    side_effect=URLError(
+                        TimeoutError("_ssl.c:1064: The handshake operation timed out")
+                    ),
+                ) as request,
+                patch("fuckclassroom.plugins.registry_client.REGISTRY_RETRY_DELAY_SECONDS", 0),
+            ):
+                with self.assertRaises(PluginRegistryError) as caught:
+                    client._fetch_json(client.registry_url)
+
+            self.assertEqual(request.call_count, 3)
+            self.assertIn("HTTPS 握手未完成", str(caught.exception))
+            self.assertIn("已尝试 3 次", str(caught.exception))
+            self.assertNotIn("_ssl.c:1064", str(caught.exception))
+            self.assertIsInstance(caught.exception.__cause__, URLError)
+
+    def test_registry_certificate_failure_is_not_retried(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client = PluginRegistryClient(
+                PluginManager(AppConfig(data_dir=Path(directory))),
+                "https://registry.example/api/v1/registry.json",
+            )
+            with patch(
+                "fuckclassroom.plugins.registry_client.urlopen",
+                side_effect=URLError(
+                    ssl.SSLCertVerificationError("certificate verify failed")
+                ),
+            ) as request:
+                with self.assertRaisesRegex(PluginRegistryError, "HTTPS 证书验证失败"):
+                    client._fetch_json(client.registry_url)
+            self.assertEqual(request.call_count, 1)
+
+    def test_registry_http_not_found_is_not_retried(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client = PluginRegistryClient(
+                PluginManager(AppConfig(data_dir=Path(directory))),
+                "https://registry.example/api/v1/registry.json",
+            )
+            with patch(
+                "fuckclassroom.plugins.registry_client.urlopen",
+                side_effect=HTTPError(client.registry_url, 404, "not found", {}, None),
+            ) as request:
+                with self.assertRaisesRegex(PluginRegistryError, "HTTP 404"):
+                    client._fetch_json(client.registry_url)
+            self.assertEqual(request.call_count, 1)
+
+    def test_registry_metadata_connections_are_bounded_during_parallel_installs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client = PluginRegistryClient(
+                PluginManager(AppConfig(data_dir=Path(directory))),
+                "https://registry.example/api/v1/registry.json",
+            )
+            release = threading.Event()
+            first_two_started = threading.Event()
+            lock = threading.Lock()
+            active = 0
+            peak = 0
+
+            def slow_urlopen(request, *, timeout):
+                nonlocal active, peak
+                with lock:
+                    active += 1
+                    peak = max(peak, active)
+                    if active == 2:
+                        first_two_started.set()
+                try:
+                    if not release.wait(timeout=3):
+                        raise RuntimeError("test timed out awaiting release")
+                    return FakeHTTPJSONResponse(
+                        client.registry_url,
+                        {"schema_version": 1, "index": "index.json"},
+                    )
+                finally:
+                    with lock:
+                        active -= 1
+
+            with patch(
+                "fuckclassroom.plugins.registry_client.urlopen",
+                side_effect=slow_urlopen,
+            ):
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    futures = [
+                        pool.submit(client._fetch_json, client.registry_url)
+                        for _ in range(4)
+                    ]
+                    try:
+                        self.assertTrue(first_two_started.wait(timeout=2))
+                        self.assertEqual(peak, 2)
+                    finally:
+                        release.set()
+                    for future in futures:
+                        self.assertEqual(future.result(timeout=3)["schema_version"], 1)
+            self.assertEqual(peak, 2)
+
     def test_default_registry_url_points_to_custom_domain(self) -> None:
         self.assertEqual(
             DEFAULT_PLUGIN_REGISTRY_URL,
@@ -379,6 +521,56 @@ class PluginRegistryClientTests(unittest.TestCase):
             plan = client.resolve_install_plan("demo")
 
             self.assertEqual(plan.target_version, "2.0.0")
+
+    def test_single_unavailable_registry_entry_does_not_hide_healthy_plugins(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            responses = registry_responses()
+            base = "https://registry.example/api/v1/"
+            entries = responses[base + "index.json"]["plugins"]
+            for name in ("broken", "healthy"):
+                entries.append({
+                    "id": name,
+                    "name": name.capitalize(),
+                    "summary": "Test",
+                    "publisher": "example",
+                    "official": False,
+                    "status": "active",
+                    "detail": f"plugins/{name}.json",
+                })
+            responses[base + "plugins/healthy.json"] = {
+                **responses[base + "plugins/demo.json"],
+                "id": "healthy",
+                "versions": [{
+                    "version": "1.5.0",
+                    "channel": "stable",
+                    "detail": "plugins/healthy/versions/1.5.0.json",
+                }],
+            }
+            responses[base + "plugins/healthy/versions/1.5.0.json"] = {
+                **responses[base + "plugins/demo/versions/1.5.0.json"],
+                "plugin_id": "healthy",
+            }
+            class FailingClient(FakeRegistryClient):
+                def _fetch_json(self, url: str) -> dict[str, object]:
+                    if url.endswith("/plugins/broken.json"):
+                        raise PluginRegistryError("TLS handshake timed out: private diagnostic")
+                    return super()._fetch_json(url)
+
+            client = FailingClient(manager, responses)
+            rows = client.catalog()
+            self.assertEqual([row["id"] for row in rows], ["demo", "broken", "healthy"])
+            self.assertEqual(rows[0]["action"], "install")
+            self.assertEqual(rows[2]["action"], "install")
+            self.assertEqual(rows[1]["action"], "unavailable")
+            self.assertEqual(rows[1]["compatibility_label"], "暂不可用")
+            self.assertNotIn("private diagnostic", rows[1]["compatibility_message"])
+
+            # Only index/root failures should still fail the entire catalog.
+            responses[base + "index.json"]["schema_version"] = 999
+            other = FailingClient(manager, responses)
+            with self.assertRaises(PluginRegistryError):
+                other.catalog()
 
     def test_catalog_reports_missing_plugin_dependencies_before_install(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

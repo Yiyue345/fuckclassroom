@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import tempfile
 import threading
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
 
@@ -19,6 +21,9 @@ from ..manager import PluginManagerError
 from ..registry_preferences import RegistryPreferences
 from ..registry_client import PluginRegistryClient, PluginRegistryError
 from ..rpc import PLUGIN_RPC_API_VERSION
+
+
+logger = logging.getLogger(__name__)
 
 
 def _snapshot_file(path: Path) -> bytes | None:
@@ -58,8 +63,8 @@ def build_router(context: PluginContext) -> APIRouter:
     verification_broker = services.get("verification_broker")
     plugin_manager = services.get("plugin_manager")
     registry_client = PluginRegistryClient(plugin_manager)
-    active_market_installs: set[str] = set()
-    active_market_installs_lock = threading.Lock()
+    registry_install_jobs = task_manager.named_tasks
+    registry_install_prefix = "plugin-registry-install:"
     registry_preferences = RegistryPreferences(plugin_manager.config.data_dir)
 
     def selected_registry_beta(requested: bool | None) -> bool:
@@ -158,16 +163,9 @@ def build_router(context: PluginContext) -> APIRouter:
 
     @router.get("/plugins/registry", response_class=HTMLResponse)
     def plugin_registry_page(request: Request, include_beta: bool | None = None) -> HTMLResponse:
-        # Render the page before contacting the remote Registry; client-side
-        # loading uses the existing page runtime's abort signal.
-        selected_beta = selected_registry_beta(include_beta)
-        if include_beta is not None:
-            try:
-                registry_preferences.set_include_beta(selected_beta)
-            except OSError as exc:
-                raise HTTPException(
-                    status_code=500, detail="无法保存插件市场频道偏好"
-                ) from exc
+        # Render from the persisted preference only. Historical GET query
+        # parameters never mutate or override the application's switch state.
+        selected_beta = registry_preferences.include_beta()
         return templates.TemplateResponse(
             request,
             "core/plugin_registry.html",
@@ -179,6 +177,20 @@ def build_router(context: PluginContext) -> APIRouter:
                 "error": request.query_params.get("error"),
             },
         )
+
+    @router.post("/api/plugins/registry/preferences")
+    async def update_registry_preferences(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="无效的频道配置") from exc
+        if not isinstance(payload, dict) or type(payload.get("include_beta")) is not bool:
+            raise HTTPException(status_code=422, detail="include_beta 必须是布尔值")
+        try:
+            registry_preferences.set_include_beta(payload["include_beta"])
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="无法保存插件市场频道偏好") from exc
+        return JSONResponse({"include_beta": registry_preferences.include_beta()})
 
     @router.get("/plugins/registry/results", response_class=HTMLResponse)
     def plugin_registry_results(request: Request, include_beta: bool | None = None) -> HTMLResponse:
@@ -223,6 +235,21 @@ def build_router(context: PluginContext) -> APIRouter:
             }
         )
 
+    @router.get("/api/plugins/registry/install-tasks")
+    def registry_install_tasks() -> JSONResponse:
+        recent = registry_install_jobs.snapshot(prefix=registry_install_prefix)
+        return JSONResponse({
+            "tasks": {
+                key.removeprefix(registry_install_prefix): {
+                    "task_id": task["id"],
+                    "status_url": f"/api/tasks/{task['id']}",
+                    "status": task["status"],
+                    "progress": task["progress"],
+                }
+                for key, task in recent.items()
+            }
+        })
+
     @router.post("/plugins/registry/{plugin_id}/install")
     def install_registry_plugin(request: Request, plugin_id: str, include_beta: bool | None = None) -> Response:
         selected_beta = selected_registry_beta(include_beta)
@@ -234,49 +261,43 @@ def build_router(context: PluginContext) -> APIRouter:
                 _registry_location(selected_beta, error=message),
                 status_code=303,
             )
-        with active_market_installs_lock:
-            if plugin_id in active_market_installs:
-                message = f"插件 {plugin_id} 已有下载或安装任务进行中"
-                if "application/json" in request.headers.get("accept", ""):
-                    return JSONResponse({"detail": message}, status_code=409)
-                return RedirectResponse(
-                    _registry_location(selected_beta, error=message),
-                    status_code=303,
-                )
-            active_market_installs.add(plugin_id)
-
         current_enabled = tuple(plugin_registry.plugin_ids)
 
         def worker(progress):
-            try:
-                # Resolve the remote install plan in the background, so
-                # submitting another card never waits for this one's network.
-                progress(2, "正在检查 Registry 版本及兼容性")
-                descriptor, action, signed = registry_client.install(
-                    plugin_id,
-                    current_enabled=current_enabled,
-                    channels=_registry_channels(selected_beta),
-                    progress=progress,
-                )
-                verification = "SHA-256 + Ed25519" if signed else "SHA-256"
-                action_text = "更新" if action == "update" else "安装"
-                progress.log(
-                    f"{action_text}完成：{descriptor.id}@{descriptor.version}，完整性校验：{verification}"
-                )
-                return _registry_location(
-                    selected_beta,
-                    notice=f"{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用",
-                )
-            finally:
-                with active_market_installs_lock:
-                    active_market_installs.discard(plugin_id)
+            progress(2, "正在检查 Registry 版本及兼容性")
+            descriptor, action, signed = registry_client.install(
+                plugin_id,
+                current_enabled=current_enabled,
+                channels=_registry_channels(selected_beta),
+                progress=progress,
+            )
+            verification = "SHA-256 + Ed25519" if signed else "SHA-256"
+            action_text = "更新" if action == "update" else "安装"
+            progress.log(
+                f"{action_text}完成：{descriptor.id}@{descriptor.version}，完整性校验：{verification}"
+            )
+            return _registry_location(
+                selected_beta,
+                notice=f"{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用",
+            )
 
-        try:
-            task = task_manager.start(f"下载或更新插件 · {plugin_id}", worker)
-        except Exception:
-            with active_market_installs_lock:
-                active_market_installs.discard(plugin_id)
-            raise
+        task, created = registry_install_jobs.start(
+            registry_install_prefix + plugin_id,
+            f"下载或更新插件 · {plugin_id}",
+            worker,
+        )
+        if not created:
+            message = f"插件 {plugin_id} 已有下载或安装任务进行中"
+            if "application/json" in request.headers.get("accept", ""):
+                return JSONResponse({
+                    "detail": message,
+                    "task_id": task.id,
+                    "status_url": f"/api/tasks/{task.id}",
+                }, status_code=409)
+            return RedirectResponse(
+                _registry_location(selected_beta, error=message),
+                status_code=303,
+            )
         return task_started_response(request, task, _registry_location(selected_beta))
 
     def plugin_action_response(
@@ -523,15 +544,28 @@ def build_router(context: PluginContext) -> APIRouter:
             },
         )
 
+    # A plugin panel can synchronously invoke remote service/RPC calls.
+    # Only lightweight built-in contexts are rendered on the initial GET.
+    _fast_settings_panel_keys = frozenset({"network"})
+
     @router.get("/settings", response_class=HTMLResponse)
     def settings(request: Request) -> HTMLResponse:
         panels = []
+        deferred_keys: list[str] = []
         for panel in plugin_registry.settings_panels:
-            panel_context = (
-                panel.context_factory(services, request)
-                if panel.context_factory is not None
-                else {}
+            deferred = (
+                panel.context_factory is not None
+                and panel.key not in _fast_settings_panel_keys
             )
+            if deferred:
+                deferred_keys.append(panel.key)
+                panel_context = {}
+            else:
+                panel_context = (
+                    panel.context_factory(services, request)
+                    if panel.context_factory is not None
+                    else {}
+                )
             panels.append({"panel": panel, "context": panel_context})
         return templates.TemplateResponse(
             request,
@@ -539,6 +573,7 @@ def build_router(context: PluginContext) -> APIRouter:
             {
                 "settings": settings_store.load().to_public_dict(),
                 "settings_panels": panels,
+                "deferred_settings_panel_keys": deferred_keys,
                 "saved": request.query_params.get("saved") == "1",
                 "settings_error": request.query_params.get("settings_error"),
                 "cache_cleared": request.query_params.get("cache_cleared") == "1",
@@ -549,6 +584,35 @@ def build_router(context: PluginContext) -> APIRouter:
                 "login_state_error": request.query_params.get("login_state_error"),
             },
         )
+
+    @router.get("/settings/panels/{panel_key}", response_class=HTMLResponse)
+    def settings_panel_fragment(request: Request, panel_key: str) -> HTMLResponse:
+        panel = next(
+            (item for item in plugin_registry.settings_panels if item.key == panel_key),
+            None,
+        )
+        if (
+            panel is None
+            or panel.context_factory is None
+            or panel.key in _fast_settings_panel_keys
+        ):
+            raise HTTPException(status_code=404, detail="设置面板不存在")
+        started_at = time.monotonic()
+        panel_context = panel.context_factory(services, request)
+        elapsed = time.monotonic() - started_at
+        if elapsed >= 0.5:
+            logger.warning("设置面板 %s 载入上下文耗时 %.2fs", panel_key, elapsed)
+        response = templates.TemplateResponse(
+            request,
+            "core/settings_panel_fragment.html",
+            {
+                "panel": panel,
+                "panel_context": panel_context,
+                "settings": settings_store.load().to_public_dict(),
+            },
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @router.post("/settings")
     async def save_settings(request: Request) -> RedirectResponse:

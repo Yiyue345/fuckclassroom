@@ -160,16 +160,57 @@
           headers: { Accept: "application/json" },
           signal: pageSignal,
         });
-        const job = await readResponse(response);
+        let job;
+        if (response.status === 409) {
+          const existing = await response.json().catch(() => ({}));
+          if (existing.status_url) {
+            poll(ui, existing.status_url);
+            return;
+          }
+          throw new Error(existing.detail || "下载任务已存在");
+        }
+        job = await readResponse(response);
         if (disposed()) return;
         if (!job.task_id || !job.status_url) throw new Error("服务端未返回安装任务信息");
         poll(ui, job.status_url);
       } catch (error) {
         if (disposed() || error?.name === "AbortError") return;
+        // Another router generation may already own this plugin's task.
+        // Recover its progress rather than leaving an unusable 409 card.
         fail(ui, error?.message || "无法创建安装任务");
       }
     });
     });
+  }
+
+  async function resumeInstallTasks(container) {
+    try {
+      const response = await fetch("/api/plugins/registry/install-tasks", {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: pageSignal,
+      });
+      const data = await readResponse(response);
+      if (disposed() || !container.isConnected) return;
+      for (const [pluginId, job] of Object.entries(data.tasks || {})) {
+        // The fresh Registry catalog already reflects completed installations.
+        // Only resume unfinished jobs or surface a past failed/cancelled job.
+        if (job.status === "succeeded") continue;
+        const card = Array.from(container.querySelectorAll("[data-market-plugin]"))
+          .find((item) => item.dataset.marketPlugin === pluginId);
+        const form = card?.querySelector("[data-market-install-form]");
+        if (!form || !job.status_url) continue;
+        const ui = cardUi(form);
+        if (!ui.running) {
+          begin(ui);
+          poll(ui, job.status_url);
+        }
+      }
+    } catch (error) {
+      if (!disposed() && error?.name !== "AbortError") {
+        console.warn("无法恢复插件安装任务", error);
+      }
+    }
   }
 
   async function loadRegistryCards() {
@@ -189,6 +230,7 @@
       container.innerHTML = html;
       container.setAttribute("aria-busy", "false");
       bindInstallForms(container);
+      resumeInstallTasks(container);
     } catch (error) {
       if (disposed() || error?.name === "AbortError" || !container.isConnected) return;
       const notice = document.createElement("section");
@@ -206,22 +248,41 @@
 
   const channelForm = market.querySelector(".plugin-market-channel-form");
   const channelSwitch = channelForm?.querySelector('[role="switch"]');
-  channelForm?.addEventListener("submit", (event) => {
+  channelForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (disposed() || !channelSwitch || channelSwitch.disabled) return;
-    const isEnabled = channelSwitch.getAttribute("aria-checked") === "true";
-    channelSwitch.setAttribute("aria-checked", isEnabled ? "false" : "true");
+    const next = channelSwitch.getAttribute("aria-checked") !== "true";
     channelSwitch.disabled = true;
-    const destination = new URL(channelForm.action, window.location.href);
-    destination.searchParams.set("include_beta", isEnabled ? "0" : "1");
-    schedule(() => {
+    const previousError = market.querySelector("[data-market-channel-error]");
+    previousError?.remove();
+    try {
+      const response = await fetch("/api/plugins/registry/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ include_beta: next }),
+        credentials: "same-origin",
+        signal: pageSignal,
+      });
+      const saved = await readResponse(response);
       if (disposed()) return;
+      if (saved.include_beta !== next) throw new Error("频道偏好未能保存");
+      channelSwitch.setAttribute("aria-checked", String(next));
+      const destination = "/plugins/registry";
       if (window.FuckClassroomShell?.navigate) {
-        window.FuckClassroomShell.navigate(destination.href);
+        window.FuckClassroomShell.navigate(destination);
       } else {
-        window.location.assign(destination.href);
+        window.location.assign(destination);
       }
-    }, 190);
+    } catch (error) {
+      if (disposed() || error?.name === "AbortError") return;
+      const notice = document.createElement("p");
+      notice.dataset.marketChannelError = "true";
+      notice.className = "plugin-market-download-error";
+      notice.setAttribute("role", "alert");
+      notice.textContent = error?.message || "频道偏好保存失败，请重试";
+      channelForm.after(notice);
+      channelSwitch.disabled = false;
+    }
   });
 
   loadRegistryCards();

@@ -33,7 +33,7 @@
       <span>Registry v1 · {{ "Stable + Beta" if include_beta else "Stable" }} channel</span>
       <span class="mono">{{ registry_url }}</span>
     </div>
-    <form method="get" action="/plugins/registry" class="plugin-market-channel-form">
+    <form method="post" action="/api/plugins/registry/preferences" class="plugin-market-channel-form">
       <button class="plugin-market-channel-switch" type="submit" role="switch"
         aria-checked="{{ 'true' if include_beta else 'false' }}" aria-label="包含测试版 Beta"
         name="include_beta" value="{{ '0' if include_beta else '1' }}">
@@ -53,4 +53,4 @@
 </div>
 {% endblock %}
 
-{% block scripts %}<script src="/plugins/core_ui/static/plugin_registry.js?v=20261019-7"></script>{% endblock %}
+{% block scripts %}<script src="/plugins/core_ui/static/plugin_registry.js?v=20261020-85"></script>{% endblock %}

@@ -37,14 +37,32 @@
     <div>
       <form class="settings-main" id="settings-form" method="post" action="/settings">
         {% for item in settings_panels if item.panel.in_form %}
-          {% set panel_context = item.context %}
-          {% include item.panel.template %}
+          {% if item.panel.key in deferred_settings_panel_keys %}
+            <section class="settings-section" id="{{ item.panel.key }}"
+              data-settings-deferred="{{ item.panel.key }}" aria-busy="true">
+              <div><h2>{{ item.panel.label }}</h2></div>
+              <div class="fields" role="status">加载中…</div>
+            </section>
+          {% else %}
+            {% set panel_context = item.context %}
+            {% include item.panel.template %}
+          {% endif %}
         {% endfor %}
       </form>
       {% for item in settings_panels if not item.panel.in_form %}
-        {% set panel_context = item.context %}
-        {% include item.panel.template %}
+        {% if item.panel.key in deferred_settings_panel_keys %}
+          <section class="settings-section" id="{{ item.panel.key }}"
+            data-settings-deferred="{{ item.panel.key }}" aria-busy="true">
+            <div><h2>{{ item.panel.label }}</h2></div>
+            <div class="fields" role="status">加载中…</div>
+          </section>
+        {% else %}
+          {% set panel_context = item.context %}
+          {% include item.panel.template %}
+        {% endif %}
       {% endfor %}
     </div>
   </div>
 {% endblock %}
+
+{% block scripts %}<script src="/plugins/core_ui/static/settings_deferred.js?v=20261020-1"></script>{% endblock %}

@@ -66,6 +66,39 @@ class PluginSplitRegressionTests(unittest.TestCase):
                 with self.assertRaises(PluginRpcInvalidParams):
                     _decode_image_b64(invalid)
 
+    def test_large_local_ocr_image_preserves_original_bytes(self) -> None:
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from fuckclassroom.plugins.ocr.services import OcrProcessProxy
+        from fuckclassroom.plugins.ocr.worker import handle_call
+        from fuckclassroom.core.config import AppConfig
+
+        class StubWorkerContext:
+            def __init__(self, data_dir):
+                self.data_dir = data_dir
+
+        with tempfile.TemporaryDirectory() as folder:
+            image = Image.new("RGB", (2048, 2048), "white")
+            buffer = io.BytesIO()
+            image.save(buffer, format="BMP")
+            raw = buffer.getvalue()
+            self.assertGreater(len(raw), _RPC_IMAGE_TARGET_BYTES)
+            sent = {}
+
+            def call(method, params, *, timeout):
+                sent.update(params)
+                self.assertEqual(method, "ocr.image")
+                self.assertNotIn("image_b64", params)
+                path = Path(params["image_path"])
+                self.assertEqual(path.read_bytes(), raw)
+                return {"text": "OCR 文本", "stats": {"cache_hits": 0, "inferences": 1}}
+
+            host = SimpleNamespace(data_dir=Path(folder), call_sync=call)
+            proxy = OcrProcessProxy(host)
+            self.assertEqual(proxy.ocr_image(raw, "text.bmp"), "OCR 文本")
+            self.assertFalse(Path(sent["image_path"]).exists())
+
     def test_large_ocr_image_is_bounded_before_rpc(self) -> None:
         source = Image.new("RGB", (2048, 2048), "white")
         buffer = io.BytesIO()

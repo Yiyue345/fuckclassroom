@@ -47,9 +47,50 @@ class SettingsPanelContextTests(unittest.TestCase):
             self.assertIn('id="appearance"', body)
             self.assertIn('id="network"', body)
             self.assertIn('id="storage"', body)
+            self.assertIn('data-settings-deferred="storage"', body)
             self.assertNotIn('id="courses"', body)
             self.assertNotIn('id="selection-network"', body)
             self.assertNotIn("Hy2", body)
+
+    def test_slow_settings_panels_do_not_block_initial_page(self) -> None:
+        from fastapi.testclient import TestClient
+        from fuckclassroom.plugins.classroom.settings_context import build_course_settings_context
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            data_dir = Path(directory)
+            install_legacy_external_plugins(data_dir, {"classroom"})
+            app = create_app(AppConfig(data_dir=data_dir), enabled_plugins={"classroom"})
+            with patch(
+                "fuckclassroom.plugins.classroom.settings_context.build_course_settings_context",
+                side_effect=AssertionError("slow panel context must not run"),
+            ):
+                with TestClient(app) as client:
+                    page = client.get("/settings")
+
+            self.assertEqual(page.status_code, 200)
+            self.assertIn('data-settings-deferred="courses"', page.text)
+            self.assertIn("settings_deferred.js", page.text)
+            self.assertIn('id="network"', page.text)
+
+    def test_cache_statistics_do_not_block_settings_shell(self) -> None:
+        from fastapi.testclient import TestClient
+        from fuckclassroom.core.cache import JsonCache
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            app = create_app(AppConfig(data_dir=Path(directory)), enabled_plugins=set())
+            with (
+                patch.object(
+                    JsonCache,
+                    "info",
+                    side_effect=AssertionError("initial settings request must not scan cache"),
+                ),
+                TestClient(app) as client,
+            ):
+                response = client.get("/settings")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('data-settings-deferred="storage"', response.text)
+            self.assertIn('id="appearance"', response.text)
 
     def test_classroom_settings_context_supplies_terms_to_its_panel(self) -> None:
         term = SimpleNamespace(id="2026-1", year="2026", season="1", current=True)
@@ -67,7 +108,11 @@ class SettingsPanelContextTests(unittest.TestCase):
             )
             route = next(item for item in app.routes if getattr(item, "path", "") == "/settings")
 
-            response = route.endpoint(_request(app))
+            fragment = next(
+                item for item in app.routes
+                if getattr(item, "path", "") == "/settings/panels/{panel_key}"
+            )
+            response = fragment.endpoint(_request(app), "courses")
             body = response.body.decode("utf-8")
 
             self.assertIn('id="courses"', body)

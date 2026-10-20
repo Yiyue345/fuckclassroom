@@ -91,10 +91,51 @@ class TaskProgressReporter:
             raise TaskCancelledError("任务已取消")
 
 
+class NamedTaskCoordinator:
+    """Deduplicate active keyed jobs and keep their last task for UI recovery.
+
+    Owned by TaskManager so jobs and reservations survive app/router reloads.
+    """
+
+    def __init__(self, manager: "TaskManager") -> None:
+        self._manager = manager
+        self._lock = threading.Lock()
+        self._latest: dict[str, str] = {}
+
+    def start(
+        self,
+        key: str,
+        title: str,
+        worker: Callable[[TaskProgressReporter], str | None],
+    ) -> tuple[TaskState, bool]:
+        with self._lock:
+            previous_id = self._latest.get(key)
+            if previous_id is not None:
+                previous = self._manager.get(previous_id)
+                if previous is not None and previous.status == "running":
+                    return previous, False
+            state = self._manager.start(title, worker)
+            self._latest[key] = state.id
+            return state, True
+
+    def snapshot(self, *, prefix: str = "") -> dict[str, dict[str, object]]:
+        with self._lock:
+            latest = dict(self._latest)
+        result: dict[str, dict[str, object]] = {}
+        for key, task_id in latest.items():
+            if prefix and not key.startswith(prefix):
+                continue
+            state = self._manager.as_dict(task_id)
+            if state is not None:
+                result[key] = state
+        return result
+
+
 class TaskManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._tasks: dict[str, TaskState] = {}
+        self.named_tasks = NamedTaskCoordinator(self)
         self._terminal_counts: dict[str, int] = {
             status: 0 for status in _TERMINAL_TASK_STATUSES
         }
