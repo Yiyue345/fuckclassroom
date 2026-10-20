@@ -74,13 +74,13 @@ class SettingsPanelContextTests(unittest.TestCase):
 
     def test_cache_statistics_do_not_block_settings_shell(self) -> None:
         from fastapi.testclient import TestClient
-        from fuckclassroom.core.cache import JsonCacheStore
+        from fuckclassroom.core.cache import JsonCache
 
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             app = create_app(AppConfig(data_dir=Path(directory)), enabled_plugins=set())
             with (
                 patch.object(
-                    JsonCacheStore,
+                    JsonCache,
                     "info",
                     side_effect=AssertionError("initial settings request must not scan cache"),
                 ),
