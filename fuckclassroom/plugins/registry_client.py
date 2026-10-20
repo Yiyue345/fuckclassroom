@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import json
 import os
+import ssl
 import re
 import tempfile
-import threading
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -35,6 +36,9 @@ MAX_REGISTRY_JSON_BYTES = 2 * 1024 * 1024
 CATALOG_CACHE_SECONDS = 60
 CATALOG_MAX_WORKERS = 8
 MAX_PARALLEL_PLUGIN_DOWNLOADS = 4
+MAX_PARALLEL_REGISTRY_REQUESTS = 2
+REGISTRY_FETCH_ATTEMPTS = 3
+REGISTRY_RETRY_DELAY_SECONDS = 0.5
 REGISTRY_REQUEST_TIMEOUT_SECONDS = 10
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
 _ARTIFACT_PATH_RE = re.compile(
@@ -48,6 +52,8 @@ _ARTIFACT_REDIRECT_HOSTS = frozenset(
     }
 )
 _SIGNATURE_SCHEME = "ed25519-sha256-v1"
+
+logger = logging.getLogger(__name__)
 
 
 class PluginRegistryError(RuntimeError):
@@ -120,6 +126,7 @@ class PluginRegistryClient:
         self._catalog_cache: dict[str, tuple[float, dict[str, object]]] = {}
         self._catalog_cache_lock = threading.Lock()
         self._download_slots = threading.BoundedSemaphore(MAX_PARALLEL_PLUGIN_DOWNLOADS)
+        self._registry_request_slots = threading.BoundedSemaphore(MAX_PARALLEL_REGISTRY_REQUESTS)
 
     def catalog(
         self,
@@ -165,8 +172,14 @@ class PluginRegistryClient:
         *,
         current_enabled: tuple[str, ...] | list[str] | set[str] = (),
         channels: tuple[str, ...] = ("stable",),
+        progress=None,
     ) -> RegistryInstallPlan:
-        index = self._index()
+        fetch = (
+            (lambda url: self._fetch_json(url, progress=progress))
+            if progress is not None
+            else self._fetch_json
+        )
+        index = self._index(fetch_json=fetch)
         raw_plugins = index.get("plugins", [])
         if not isinstance(raw_plugins, list):
             raise PluginRegistryError("Registry index.plugins 格式无效")
@@ -186,6 +199,7 @@ class PluginRegistryClient:
             desired=self.manager.desired_enabled(),
             current=set(current_enabled),
             channels=channels,
+            fetch_json=fetch,
         )
 
     def install(
@@ -200,6 +214,7 @@ class PluginRegistryClient:
             plugin_id,
             current_enabled=current_enabled,
             channels=channels,
+            progress=progress,
         )
         if plan.action not in {"install", "update"} or plan.version_record is None:
             if plan.action == "installed":
@@ -696,41 +711,110 @@ class PluginRegistryClient:
         except (ValueError, InvalidSignature) as exc:
             raise PluginRegistryError("Artifact Ed25519 签名验证失败") from exc
 
-    def _fetch_json(self, url: str) -> dict[str, object]:
+    @staticmethod
+    def _registry_failure_kind(exc: OSError) -> str:
+        reason = exc.reason if isinstance(exc, URLError) and not isinstance(exc, HTTPError) else exc
+        detail = str(reason).lower()
+        if isinstance(reason, ssl.SSLCertVerificationError) or (
+            "certificate verify failed" in detail
+            or "certificate_verify_failed" in detail
+        ):
+            return "certificate"
+        if isinstance(exc, HTTPError):
+            return "server" if exc.code in {429, 500, 502, 503, 504} else "http"
+        if "handshake" in detail and ("timed out" in detail or "timeout" in detail):
+            return "handshake_timeout"
+        if isinstance(reason, TimeoutError) or "timed out" in detail or "timeout" in detail:
+            return "timeout"
+        if isinstance(reason, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+            return "connection"
+        return "network"
+
+    @staticmethod
+    def _registry_failure_message(exc: OSError, *, attempts: int) -> str:
+        kind = PluginRegistryClient._registry_failure_kind(exc)
+        retry_note = f"（已尝试 {attempts} 次）" if attempts > 1 else ""
+        if kind == "certificate":
+            return "插件市场 HTTPS 证书验证失败；请检查系统时间和站点证书，程序不会跳过安全验证"
+        if kind == "handshake_timeout":
+            return (
+                f"连接插件市场超时（HTTPS 握手未完成）{retry_note}；"
+                "请稍后重试，并检查网络或代理能否访问 Registry 域名"
+            )
+        if kind == "timeout":
+            return f"连接插件市场超时{retry_note}；请稍后重试或检查网络连接"
+        if kind == "server":
+            return f"插件市场服务器暂时不可用（HTTP {exc.code}）{retry_note}；请稍后重试"
+        if kind == "http":
+            return f"插件市场请求失败（HTTP {exc.code}）；请检查 Registry 地址"
+        return f"无法连接插件市场{retry_note}；请检查网络、代理和 Registry 地址"
+
+    def _fetch_json(self, url: str, *, progress=None) -> dict[str, object]:
         self._validate_registry_url(url)
         request = Request(url, headers={"User-Agent": "FuckClassroom-Registry/1"})
-        try:
-            response = urlopen(request, timeout=REGISTRY_REQUEST_TIMEOUT_SECONDS)
-        except (HTTPError, URLError, OSError) as exc:
-            raise PluginRegistryError(f"读取 Registry 失败：{exc}") from exc
-        with response:
-            final_url = str(response.geturl())
-            self._validate_registry_url(final_url)
-            raw_length = response.headers.get("Content-Length")
-            if raw_length:
-                try:
-                    content_length = int(raw_length)
-                except ValueError:
-                    content_length = 0
-                if content_length > MAX_REGISTRY_JSON_BYTES:
-                    raise PluginRegistryError("Registry JSON 响应过大")
-            chunks: list[bytes] = []
-            total = 0
-            while True:
-                chunk = response.read(64 * 1024)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > MAX_REGISTRY_JSON_BYTES:
-                    raise PluginRegistryError("Registry JSON 响应过大")
-                chunks.append(chunk)
-        try:
-            payload = json.loads(b"".join(chunks).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise PluginRegistryError("Registry 返回了无效 JSON") from exc
-        if not isinstance(payload, dict):
-            raise PluginRegistryError("Registry JSON 根节点必须是对象")
-        return payload
+        for attempt in range(1, REGISTRY_FETCH_ATTEMPTS + 1):
+            self._check_cancelled(progress)
+            try:
+                # Limit metadata handshakes independently of ZIP downloads.
+                # Holding this slot while reading also bounds open TLS sessions.
+                with self._registry_request_slots:
+                    response = urlopen(request, timeout=REGISTRY_REQUEST_TIMEOUT_SECONDS)
+                    with response:
+                        final_url = str(response.geturl())
+                        self._validate_registry_url(final_url)
+                        raw_length = response.headers.get("Content-Length")
+                        if raw_length:
+                            try:
+                                content_length = int(raw_length)
+                            except ValueError:
+                                content_length = 0
+                            if content_length > MAX_REGISTRY_JSON_BYTES:
+                                raise PluginRegistryError("Registry JSON 响应过大")
+                        chunks: list[bytes] = []
+                        total = 0
+                        while True:
+                            self._check_cancelled(progress)
+                            chunk = response.read(64 * 1024)
+                            if not chunk:
+                                break
+                            total += len(chunk)
+                            if total > MAX_REGISTRY_JSON_BYTES:
+                                raise PluginRegistryError("Registry JSON 响应过大")
+                            chunks.append(chunk)
+            except (HTTPError, URLError, OSError) as exc:
+                kind = self._registry_failure_kind(exc)
+                retryable = kind in {
+                    "server", "handshake_timeout", "timeout", "connection"
+                }
+                logger.warning(
+                    "Registry request %s failed (%d/%d): %r",
+                    url, attempt, REGISTRY_FETCH_ATTEMPTS, exc,
+                    exc_info=True,
+                )
+                if retryable and attempt < REGISTRY_FETCH_ATTEMPTS:
+                    message = f"插件市场连接不稳定，正在重新连接（{attempt + 1}/{REGISTRY_FETCH_ATTEMPTS}）"
+                    self._report(progress, 2, message)
+                    self._detail(progress, 2, message)
+                    # Wait outside the semaphore so another plugin can fetch.
+                    # Cancellation is checked during the short backoff.
+                    deadline = time.monotonic() + REGISTRY_RETRY_DELAY_SECONDS * attempt
+                    while time.monotonic() < deadline:
+                        self._check_cancelled(progress)
+                        time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+                    continue
+                raise PluginRegistryError(
+                    self._registry_failure_message(exc, attempts=attempt)
+                ) from exc
+
+            try:
+                payload = json.loads(b"".join(chunks).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise PluginRegistryError("Registry 返回了无效 JSON") from exc
+            if not isinstance(payload, dict):
+                raise PluginRegistryError("Registry JSON 根节点必须是对象")
+            return payload
+
+        raise AssertionError("unreachable Registry fetch retry state")
 
     def _resolve_api(self, reference: str) -> str:
         if not reference:
