@@ -1,0 +1,15 @@
+{
+  "id": "sample_plugin",
+  "name": "Sample Plugin",
+  "version": "0.1.0",
+  "api_version": 1,
+  "app_requires": ">=0.1,<0.3",
+  "description": "Minimal FuckClassroom Plugin API v1 example",
+  "requires": ["core_ui"],
+  "python_requires": [],
+  "execution": "in_process",
+  "entry": "plugin.py",
+  "route_prefix": null,
+  "rpc_api_version": null,
+  "rpc_permissions": []
+}
