@@ -295,9 +295,9 @@ class PluginRegistryClient:
 
         self._report(
             progress,
-            100,
+            93 if plan.action == "update" else 100,
             (
-                f"插件 {descriptor.name} 已更新到 v{descriptor.version}"
+                f"插件 {descriptor.name} 已写入 v{descriptor.version}，等待应用到 Runtime"
                 if plan.action == "update"
                 else f"插件 {descriptor.name} v{descriptor.version} 已下载并安装"
             ),
