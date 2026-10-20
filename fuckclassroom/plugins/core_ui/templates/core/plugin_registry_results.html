@@ -45,6 +45,20 @@
             </div>
           </div>
 
+          {% if plugin.action in ["install", "update"] %}
+            <div class="plugin-market-changelog">
+              <span>{{ "本次更新说明" if plugin.action == "update" else "版本说明" }}</span>
+              {% if plugin.changelog_url %}
+                <a href="{{ plugin.changelog_url }}" target="_blank" rel="noopener noreferrer"
+                  aria-label="查看 {{ plugin.name }} v{{ plugin.target_version }} 的更新说明">
+                  查看 v{{ plugin.target_version }} 更新日志 ↗
+                </a>
+              {% else %}
+                <span class="muted">暂无更新说明</span>
+              {% endif %}
+            </div>
+          {% endif %}
+
           {% if plugin.compatibility_message and plugin.compatibility_state != "compatible" %}
             <div class="notice {{ 'warning' if plugin.compatibility_severity == 'warning' else 'error' }} plugin-detail-notice">
               <span>{{ plugin.compatibility_message }}</span>

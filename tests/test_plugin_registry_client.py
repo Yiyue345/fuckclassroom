@@ -589,6 +589,32 @@ class PluginRegistryClientTests(unittest.TestCase):
             self.assertEqual(rows[0]["missing_plugin_dependencies"], ["base_plugin"])
             self.assertEqual(rows[0]["action"], "install")
 
+    def test_registry_changelog_link_is_exposed_and_restricted_to_https(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(AppConfig(data_dir=Path(directory)))
+            responses = registry_responses()
+            record = responses[
+                "https://registry.example/api/v1/plugins/demo/versions/1.5.0.json"
+            ]
+            release_url = "https://github.com/example/demo/releases/tag/v1.5.0"
+            record["changelog"] = {"url": release_url}
+            client = FakeRegistryClient(manager, responses)
+            self.assertEqual(client.catalog()[0]["changelog_url"], release_url)
+            for value in (
+                "javascript:alert(1)",
+                "http://github.com/example/demo/releases",
+                "https://user:password@github.com/example/demo",
+                "https://github.com/evil\\redirect",
+                "https://github.com/example\nredirect",
+            ):
+                with self.subTest(value=value):
+                    record["changelog"] = {"url": value}
+                    self.assertEqual(
+                        FakeRegistryClient(manager, responses).catalog()[0]["changelog_url"], ""
+                    )
+            record.pop("changelog", None)
+            self.assertEqual(FakeRegistryClient(manager, responses).catalog()[0]["changelog_url"], "")
+
     def test_update_is_blocked_while_installed_plugin_is_active(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
