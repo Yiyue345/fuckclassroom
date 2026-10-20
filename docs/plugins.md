@@ -2,6 +2,8 @@
 
 第三方插件作者需要查看可调用接口、Hook、ServiceContainer、后台任务和完整示例时，请阅读 [`docs/plugin-api.md`](plugin-api.md)。
 
+从零开发、构建 GitHub Release 并收录 Registry 的完整流程见 [插件发布指南](plugin-publishing.md)；可复制的最小插件仓库骨架见 [examples/plugin-template](../examples/plugin-template/README.md)。
+
 应用由一个始终启用的核心壳层与按需安装、启用的独立功能插件组成。
 
 ## 当前插件所有权

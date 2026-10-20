@@ -413,6 +413,10 @@
 .plugin-market-version div { min-width: 0; }
 .plugin-market-version span { display: block; color: var(--text-muted); font-size: 10px; }
 .plugin-market-version strong { display: block; overflow: hidden; margin-top: 4px; color: var(--text-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-market-changelog { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--font-xs); color: var(--text-muted); }
+.plugin-market-changelog a { color: var(--primary); font-weight: 600; text-decoration: none; }
+.plugin-market-changelog a:hover { text-decoration: underline; }
+.plugin-market-changelog .muted { color: var(--text-muted); }
 .plugin-market-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .plugin-market-actions form { margin-left: auto; }
 .plugin-market-install {

@@ -273,13 +273,30 @@ def build_router(context: PluginContext) -> APIRouter:
             )
             verification = "SHA-256 + Ed25519" if signed else "SHA-256"
             action_text = "更新" if action == "update" else "安装"
+            note = f"{descriptor.name} v{descriptor.version} 已{action_text}"
+            if action == "update":
+                progress(96, "正在将插件更新应用到 Runtime")
+                callback = services.maybe("plugin_reload_wait")
+                try:
+                    if callable(callback):
+                        if callback():
+                            note += "，Runtime 已自动热重载"
+                        else:
+                            note += "；当前运行模式不支持热重载，重启后生效"
+                    elif request_plugin_reload_from_worker():
+                        note += "，已请求 Runtime 热重载"
+                    else:
+                        note += "；当前运行模式不支持热重载，重启后生效"
+                except Exception as exc:  # noqa: BLE001 - plugin files already committed.
+                    progress.log(f"插件文件已更新，但 Runtime 热重载失败：{exc}", "warning")
+                    note += "；Runtime 热重载失败，请重启应用后生效"
+            else:
+                note += "；默认保持停用"
+            progress(100, note)
             progress.log(
                 f"{action_text}完成：{descriptor.id}@{descriptor.version}，完整性校验：{verification}"
             )
-            return _registry_location(
-                selected_beta,
-                notice=f"{descriptor.name} v{descriptor.version} 已{action_text}；默认保持停用",
-            )
+            return _registry_location(selected_beta, notice=note)
 
         task, created = registry_install_jobs.start(
             registry_install_prefix + plugin_id,

@@ -79,6 +79,7 @@ class RegistryInstallPlan:
     app_version_satisfied: bool
     channel: str
     released_at: str
+    changelog_url: str
     signed: bool
     required_plugins: tuple[str, ...]
     missing_plugin_dependencies: tuple[str, ...]
@@ -103,6 +104,7 @@ class RegistryInstallPlan:
             "app_version_satisfied": self.app_version_satisfied,
             "channel": self.channel,
             "released_at": self.released_at,
+            "changelog_url": self.changelog_url,
             "signed": self.signed,
             "required_plugins": list(self.required_plugins),
             "missing_plugin_dependencies": list(self.missing_plugin_dependencies),
@@ -186,6 +188,7 @@ class PluginRegistryClient:
                     "app_version_satisfied": False,
                     "channel": "",
                     "released_at": "",
+                    "changelog_url": "",
                     "signed": False,
                     "required_plugins": [],
                     "missing_plugin_dependencies": [],
@@ -292,9 +295,9 @@ class PluginRegistryClient:
 
         self._report(
             progress,
-            100,
+            93 if plan.action == "update" else 100,
             (
-                f"插件 {descriptor.name} 已更新到 v{descriptor.version}"
+                f"插件 {descriptor.name} 已写入 v{descriptor.version}，等待应用到 Runtime"
                 if plan.action == "update"
                 else f"插件 {descriptor.name} v{descriptor.version} 已下载并安装"
             ),
@@ -400,6 +403,7 @@ class PluginRegistryClient:
             ),
             channel=str(chosen.get("channel") or "") if chosen else "",
             released_at=str(chosen.get("released_at") or "") if chosen else "",
+            changelog_url=self._changelog_url(chosen) if chosen else "",
             signed=isinstance(artifact, Mapping) and isinstance(artifact.get("signature"), Mapping),
             required_plugins=required_plugins,
             missing_plugin_dependencies=missing_plugin_dependencies,
@@ -461,6 +465,31 @@ class PluginRegistryClient:
             if rejected is None:
                 rejected = compatibility
         return None, rejected
+
+    @staticmethod
+    def _changelog_url(version_record: Mapping[str, object]) -> str:
+        """Only allow safe HTTPS release-note links from Registry metadata."""
+        data = version_record.get("changelog")
+        if not isinstance(data, Mapping):
+            return ""
+        url = data.get("url")
+        if not isinstance(url, str) or len(url) > 2048 or url != url.strip():
+            return ""
+        if any(ord(char) < 32 or ord(char) == 127 for char in url) or "\\" in url:
+            return ""
+        try:
+            parsed = urlparse(url)
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or (parsed.port is not None and not (1 <= parsed.port <= 65535))
+            ):
+                return ""
+        except ValueError:
+            return ""
+        return url
 
     @staticmethod
     def _runtime_compatibility(runtime: object) -> dict[str, object]:

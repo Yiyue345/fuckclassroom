@@ -17,6 +17,23 @@ permissions:
   contents: read
 
 jobs:
+  plugin-template:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/plugin-template
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate copyable Registry v1 plugin template
+        run: |
+          python -m unittest discover -s tests -v
+          python scripts/build_registry_artifact.py 0.1.0-beta.1
+          cd dist
+          sha256sum -c -- *.sha256
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -44,6 +61,13 @@ jobs:
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Smoke-test plugin template against installed host API
+        working-directory: examples/plugin-template
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m unittest discover -s tests -v
+
 
       - name: Validate Jinja templates
         run: |
