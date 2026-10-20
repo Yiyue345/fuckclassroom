@@ -530,7 +530,7 @@ def build_router(context: PluginContext) -> APIRouter:
 
     # A plugin panel can synchronously invoke remote service/RPC calls.
     # Only lightweight built-in contexts are rendered on the initial GET.
-    _fast_settings_panel_keys = frozenset({"network", "storage"})
+    _fast_settings_panel_keys = frozenset({"network"})
 
     @router.get("/settings", response_class=HTMLResponse)
     def settings(request: Request) -> HTMLResponse:

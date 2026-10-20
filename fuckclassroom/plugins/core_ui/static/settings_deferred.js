@@ -8,17 +8,22 @@
   const signal = runtime?.signal;
   const form = document.getElementById('settings-form');
   const saveButton = document.querySelector('[type="submit"][form="settings-form"]');
-  if (saveButton) saveButton.disabled = true;
-  let pending = placeholders.length;
+  // Non-form panels (such as storage statistics) never affect submitted
+  // settings, so they must not hold up the Save button.
+  let pendingFormPanels = placeholders.filter((node) => form?.contains(node)).length;
+  if (saveButton && pendingFormPanels > 0) saveButton.disabled = true;
 
-  const settled = () => {
-    pending -= 1;
-    if (pending === 0 && saveButton && !signal?.aborted) saveButton.disabled = false;
+  const settled = (wasFormPanel) => {
+    if (wasFormPanel) pendingFormPanels -= 1;
+    if (pendingFormPanels === 0 && saveButton && !signal?.aborted) {
+      saveButton.disabled = false;
+    }
   };
 
   const hydrate = async (placeholder) => {
     try {
       const key = placeholder.dataset.settingsDeferred;
+      const wasFormPanel = Boolean(form?.contains(placeholder));
       const response = await fetch('/settings/panels/' + encodeURIComponent(key), {
         credentials: 'same-origin',
         cache: 'no-store',
@@ -45,7 +50,7 @@
         executable.textContent = script.textContent;
         script.replaceWith(executable);
       }
-      settled();
+      settled(wasFormPanel);
     } catch (error) {
       if (signal?.aborted || error?.name === 'AbortError' || !placeholder.isConnected) return;
       const info = placeholder.querySelector('[role="status"]');
@@ -65,7 +70,7 @@
   // An incomplete form could silently turn unchecked/missing plugin
   // checkboxes into false, so saving is gated until all panels are ready.
   form?.addEventListener('submit', (event) => {
-    if (pending > 0) event.preventDefault();
+    if (pendingFormPanels > 0) event.preventDefault();
   }, signal ? { signal } : undefined);
 
   placeholders.forEach(hydrate);

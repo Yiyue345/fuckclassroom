@@ -47,6 +47,7 @@ class SettingsPanelContextTests(unittest.TestCase):
             self.assertIn('id="appearance"', body)
             self.assertIn('id="network"', body)
             self.assertIn('id="storage"', body)
+            self.assertIn('data-settings-deferred="storage"', body)
             self.assertNotIn('id="courses"', body)
             self.assertNotIn('id="selection-network"', body)
             self.assertNotIn("Hy2", body)
