@@ -38,6 +38,7 @@ def create_app(
     *,
     reload_callback: Callable[[], object] | None = None,
     reload_background_callback: Callable[[], object] | None = None,
+    reload_wait_callback: Callable[[], bool] | None = None,
     reload_status: Callable[[], dict[str, object]] | None = None,
     shared_task_manager: TaskManager | None = None,
 ) -> FastAPI:
@@ -58,6 +59,8 @@ def create_app(
         plugin_runtime.services.add("plugin_reload", reload_callback)
     if reload_background_callback is not None:
         plugin_runtime.services.add("plugin_reload_background", reload_background_callback)
+    if reload_wait_callback is not None:
+        plugin_runtime.services.add("plugin_reload_wait", reload_wait_callback)
     if reload_status is not None:
         plugin_runtime.services.add("plugin_reload_status", reload_status)
     plugin_runtime.initialize_services()
