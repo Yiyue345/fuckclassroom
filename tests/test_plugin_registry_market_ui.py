@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi.testclient import TestClient
 
@@ -252,6 +253,81 @@ class RegistryPreferenceTests(unittest.TestCase):
                 )
                 self.assertEqual(retry.status_code, 200)
                 self.assertNotEqual(retry.json()["task_id"], task_id)
+
+    def test_update_refreshes_runtime_and_reports_verified_outcome(self) -> None:
+        for should_fail in (False, True):
+            with self.subTest(should_fail=should_fail):
+                with tempfile.TemporaryDirectory() as folder:
+                    reloads = []
+
+                    def reload_runtime() -> bool:
+                        reloads.append(True)
+                        if should_fail:
+                            raise RuntimeError("Runtime startup failed")
+                        return True
+
+                    app = create_app(
+                        AppConfig(data_dir=Path(folder)),
+                        reload_wait_callback=reload_runtime,
+                    )
+
+                    def fake_update(_client, plugin_id, *, current_enabled, channels, progress):
+                        progress(93, "插件文件已写入")
+                        return (
+                            SimpleNamespace(id=plugin_id, name="Demo", version="2.0.0"),
+                            "update",
+                            False,
+                        )
+
+                    with (
+                        patch.object(
+                            PluginRegistryClient, "install",
+                            autospec=True, side_effect=fake_update,
+                        ),
+                        TestClient(app) as client,
+                    ):
+                        start = client.post(
+                            "/plugins/registry/demo/install",
+                            headers={"Accept": "application/json"},
+                        )
+                        self.assertEqual(start.status_code, 200)
+                        task = None
+                        for _ in range(200):
+                            task = client.get(start.json()["status_url"]).json()
+                            if task["status"] != "running":
+                                break
+                            time.sleep(0.01)
+
+                    self.assertEqual(len(reloads), 1)
+                    self.assertEqual(task["status"], "succeeded")
+                    self.assertEqual(task["progress"], 100)
+                    notice = parse_qs(urlsplit(task["result_url"]).query)["notice"][0]
+                    if should_fail:
+                        self.assertIn("请重启应用后生效", notice)
+                        self.assertIn("Runtime 热重载失败", notice)
+                    else:
+                        self.assertIn("Runtime 已自动热重载", notice)
+
+    def test_plugin_market_exposes_changelog_for_update(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            app = create_app(AppConfig(data_dir=Path(folder)))
+            row = _market_row()
+            row.update({
+                "action": "update",
+                "installed_version": "0.1.0",
+                "target_version": "0.2.0",
+                "changelog_url": "https://github.com/example/demo/releases/tag/v0.2.0",
+            })
+            with (
+                patch.object(PluginRegistryClient, "catalog", return_value=[row]),
+                TestClient(app) as client,
+            ):
+                response = client.get("/plugins/registry/results")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("本次更新说明", response.text)
+            self.assertIn('target="_blank" rel="noopener noreferrer"', response.text)
+            self.assertIn(row["changelog_url"], response.text)
+            self.assertIn("查看 v0.2.0 更新日志", response.text)
 
     def test_inline_install_uses_task_json_and_saved_channel(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
