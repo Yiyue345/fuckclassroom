@@ -96,9 +96,11 @@ class RealPluginZipIntegrationTests(unittest.TestCase):
             begin_session(broker.storage_path)
             with self.assertRaisesRegex(Exception, "会话已变化"):
                 academic._persist_selection_cookies(jar)
+            # Explicit login rotation clears old SSO cookies, preserving the
+            # independently owned campus-cookie domain.
             self.assertEqual(
                 {item["name"] for item in read_storage_state(broker.storage_path)["cookies"]},
-                {"gateway", "other"},
+                {"other"},
             )
 
 
