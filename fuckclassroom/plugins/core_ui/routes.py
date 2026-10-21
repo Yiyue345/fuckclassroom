@@ -655,10 +655,10 @@ def build_router(context: PluginContext) -> APIRouter:
                 verification_broker.request_cancel(str(challenge["id"]))
             except LoginVerificationError:
                 pass
-        await asyncio.wait_for(
-            asyncio.to_thread(services.get("webvpn_session").clear_session),
-            timeout=30,
-        )
+        # No wait_for(to_thread): cancelling an await does not stop the worker.
+        # Broker enforces its own finite lock deadline and raises *before*
+        # making any session changes on timeout. Await the worker to completion.
+        await asyncio.to_thread(services.get("webvpn_session").clear_session)
 
     @router.post("/settings")
     async def save_settings(request: Request) -> RedirectResponse:
@@ -719,8 +719,8 @@ def build_router(context: PluginContext) -> APIRouter:
     @router.post("/settings/credentials/clear")
     async def clear_selection_credentials() -> RedirectResponse:
         try:
-            credential_store.clear()
             await _clear_gateway_session()
+            credential_store.clear()
         except (CredentialStoreError, OSError, TimeoutError) as exc:
             return RedirectResponse(f"/settings?credential_error={quote(str(exc))}", status_code=303)
         return RedirectResponse("/settings?credentials_cleared=1", status_code=303)
