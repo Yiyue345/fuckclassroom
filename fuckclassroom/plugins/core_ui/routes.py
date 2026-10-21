@@ -265,31 +265,43 @@ def build_router(context: PluginContext) -> APIRouter:
 
         def worker(progress):
             progress(2, "正在检查 Registry 版本及兼容性")
+            transaction = services.maybe("plugin_update_transaction")
+            kwargs = (
+                {"update_transaction": transaction}
+                if callable(transaction)
+                else {}
+            )
             descriptor, action, signed = registry_client.install(
                 plugin_id,
                 current_enabled=current_enabled,
                 channels=_registry_channels(selected_beta),
                 progress=progress,
+                **kwargs,
             )
             verification = "SHA-256 + Ed25519" if signed else "SHA-256"
             action_text = "更新" if action == "update" else "安装"
             note = f"{descriptor.name} v{descriptor.version} 已{action_text}"
             if action == "update":
-                progress(96, "正在将插件更新应用到 Runtime")
-                callback = services.maybe("plugin_reload_wait")
-                try:
-                    if callable(callback):
-                        if callback():
-                            note += "，Runtime 已自动热重载"
+                if callable(transaction):
+                    # Transaction waited for drain, restart and rollback before
+                    # reporting completion; original enabled state is intact.
+                    note += "，Runtime 已自动恢复，原有启用状态保持不变"
+                else:
+                    progress(96, "正在将插件更新应用到 Runtime")
+                    callback = services.maybe("plugin_reload_wait")
+                    try:
+                        if callable(callback):
+                            if callback():
+                                note += "，Runtime 已自动热重载"
+                            else:
+                                note += "；当前运行模式不支持热重载，重启后生效"
+                        elif request_plugin_reload_from_worker():
+                            note += "，已请求 Runtime 热重载"
                         else:
                             note += "；当前运行模式不支持热重载，重启后生效"
-                    elif request_plugin_reload_from_worker():
-                        note += "，已请求 Runtime 热重载"
-                    else:
-                        note += "；当前运行模式不支持热重载，重启后生效"
-                except Exception as exc:  # noqa: BLE001 - plugin files already committed.
-                    progress.log(f"插件文件已更新，但 Runtime 热重载失败：{exc}", "warning")
-                    note += "；Runtime 热重载失败，请重启应用后生效"
+                    except Exception as exc:  # noqa: BLE001 - plugin files already committed.
+                        progress.log(f"插件文件已更新，但 Runtime 热重载失败：{exc}", "warning")
+                        note += "；Runtime 热重载失败，请重启应用后生效"
             else:
                 note += "；默认保持停用"
             progress(100, note)
