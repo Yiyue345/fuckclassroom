@@ -1757,3 +1757,34 @@ Runtime 热重载后服务实例会重新创建，持久会话仍在
 `unknown`，而非强行判为失效；网络不可达为 `unreachable`。
 会话恢复后，仅允许浏览器插件**最多重试一次安全的 GET 页面导航**，
 绝不能自动重放 POST、选课、评价、报名、上传等带副作用操作。
+
+
+### WebVPN Session Generation 与跨进程持久化（#96）
+
+浏览器状态和账号生命周期通过主仓
+`fuckclassroom.auth.webvpn_storage` 统一管理，外部插件不得直接使用
+`context.storage_state(path=".../storage_state.json")` 或不带 CAS 校验的
+`atomic_write_text` 覆盖共享文件。
+
+- `new_browser_context(browser, path)` 配置并登记 BrowserContext 与创建时的
+  session generation（以及初始 Cookie/localStorage 快照）。
+- `save_browser_context(path, context)` 执行 **generation compare-and-swap**
+  和三方差量合并；登出、账号切换前打开的页面不能保存旧 Cookie。
+- HTTP-only 集成必须先用 `read_session_snapshot(path)` 获取
+  `(state, generation)`，操作完成后以
+  `save_storage_state(path, updated, expected_generation=generation,
+  previous_state=state)` 保存，不能在网络操作结束时才重新取得 generation。
+- `invalidate_session(path)` 原子地轮换 generation、标记显式退出并删除
+  Cookie；`begin_session(path)` 只应在**用户显式重新连接/登录**时调用。
+- 合并只传播本次上下文真正改变/删除的 Cookie 与 localStorage 项，
+  保留其他并发上下文写入的不同域和键，淘汰已明确过期的 Cookie；
+  不允许“简单并集”重新复活已删除的旧 Cookie。
+
+`webvpn_session.authorize_login()` 为用户明确登录动作准备新 generation，
+由已有的统一账号登录流程在**交互式重新连接**前调用；它不代替 CAS 身份认证。
+跨进程登录锁仍需服务端集中管理；本机制只保障 shared-state 的持久化并发安全，
+并非对插件进程开放任意 Cookie/账号 RPC 权限。
+
+`get_status()` 只读取当前状态；显式退出会跨进程即时可见。
+同步登录与会话清除不得在 FastAPI async handler 的事件循环线程里等待锁，
+应通过 `asyncio.to_thread`；CAS/SMS 挑战需要先发出取消信号。
