@@ -75,8 +75,8 @@
             {% if plugin.action in ["install", "update"] %}
               <form method="post" data-market-install-form action="/plugins/registry/{{ plugin.id }}/install?include_beta={{ 1 if include_beta else 0 }}">
                 <button class="plugin-market-install" type="submit" data-market-install-button
-                  {% if not plugin_config_mutable or plugin.update_blocked %}disabled{% endif %}
-                  title="{% if plugin.update_blocked %}更新前请先停用插件及依赖它的插件{% elif not plugin_config_mutable %}当前插件配置为只读{% else %}{{ '更新插件' if plugin.action == 'update' else '下载并安装插件' }}{% endif %}">
+                  {% if not plugin_config_mutable %}disabled{% endif %}
+                  title="{% if not plugin_config_mutable %}当前插件配置为只读{% else %}{{ '自动更新插件并恢复 Runtime' if plugin.action == 'update' else '下载并安装插件' }}{% endif %}">
                   {{ "更新" if plugin.action == "update" else "安装" }}
                 </button>
               </form>

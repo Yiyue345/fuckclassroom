@@ -615,7 +615,7 @@ class PluginRegistryClientTests(unittest.TestCase):
             record.pop("changelog", None)
             self.assertEqual(FakeRegistryClient(manager, responses).catalog()[0]["changelog_url"], "")
 
-    def test_update_is_blocked_while_installed_plugin_is_active(self) -> None:
+    def test_active_plugin_updates_are_available_without_manual_disable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             plugin = root / "plugins" / "demo"
@@ -647,7 +647,68 @@ class PluginRegistryClientTests(unittest.TestCase):
             rows = client.catalog(current_enabled={"demo"})
 
             self.assertEqual(rows[0]["action"], "update")
-            self.assertTrue(rows[0]["update_blocked"])
+            self.assertFalse(rows[0]["update_blocked"])
+
+    def test_active_registry_update_uses_runtime_transaction_without_disabling(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin = root / "plugins" / "demo"
+            plugin.mkdir(parents=True)
+            base_manifest = {
+                "id": "demo",
+                "name": "Demo",
+                "version": "1.0.0",
+                "api_version": PLUGIN_API_VERSION,
+                "app_requires": ">=99",
+                "execution": "in_process",
+                "entry": "plugin.py",
+                "requires": [],
+                "python_requires": [],
+            }
+            (plugin / "plugin.json").write_text(
+                json.dumps(base_manifest), encoding="utf-8"
+            )
+            (plugin / "plugin.py").write_text("# old", encoding="utf-8")
+            manager = PluginManager(AppConfig(data_dir=root))
+            manager._save_selected({"core_ui", "demo"})
+            responses = registry_responses()
+            client = FakeRegistryClient(manager, responses)
+            archive = root / "demo-1.5.0.zip"
+            with zipfile.ZipFile(archive, "w") as package:
+                package.writestr(
+                    "plugin.json",
+                    json.dumps({**base_manifest, "version": "1.5.0"}),
+                )
+                package.writestr("plugin.py", "# new")
+            with self.assertRaisesRegex(PluginManagerError, "安全 Runtime 切换"):
+                manager.install_from_path(str(archive), replace=True)
+
+            calls = []
+
+            def apply_update(plugin_id, installer):
+                self.assertEqual(plugin_id, "demo")
+                self.assertIn("demo", manager.desired_enabled())
+                self.assertEqual(
+                    manager.descriptor_map()["demo"].version, "1.0.0"
+                )
+                calls.append(plugin_id)
+                return installer()
+
+            with patch.object(client, "_download_artifact", return_value=archive):
+                descriptor, action, signed = client.install(
+                    "demo",
+                    current_enabled=("demo",),
+                    update_transaction=apply_update,
+                )
+            self.assertEqual(calls, ["demo"])
+            self.assertEqual(action, "update")
+            self.assertFalse(signed)
+            self.assertEqual(descriptor.version, "1.5.0")
+            self.assertEqual(manager.descriptor_map()["demo"].version, "1.5.0")
+            self.assertIn("demo", manager.desired_enabled())
+            self.assertEqual(
+                (plugin / "plugin.py").read_text(encoding="utf-8"), "# new"
+            )
 
     def test_ed25519_signature_verification_uses_registry_domain_payload(self) -> None:
         private_key = Ed25519PrivateKey.generate()

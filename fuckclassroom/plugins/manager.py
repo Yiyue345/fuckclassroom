@@ -258,6 +258,7 @@ class PluginManager:
         expected_id: str = "",
         expected_version: str = "",
         expected_runtime: Mapping[str, object] | None = None,
+        allow_stopped_runtime_replace: bool = False,
     ) -> PluginDescriptor:
         self._ensure_mutable()
         value = raw_path.strip().strip('"')
@@ -296,8 +297,10 @@ class PluginManager:
             if destination.exists() and not replace:
                 raise PluginManagerError(f"插件已存在：{descriptor.id}")
             if replace and destination.exists():
-                if descriptor.id in self.desired_enabled():
-                    raise PluginManagerError("更新插件前请先停用该插件及依赖它的插件")
+                if descriptor.id in self.desired_enabled() and not allow_stopped_runtime_replace:
+                    raise PluginManagerError(
+                        "插件正在运行，须通过更新器的安全 Runtime 切换流程更新"
+                    )
 
             incoming = self.plugin_dir / f".{descriptor.id}.incoming-{uuid.uuid4().hex}"
             backup = self.plugin_dir / f".{descriptor.id}.backup-{uuid.uuid4().hex}"
