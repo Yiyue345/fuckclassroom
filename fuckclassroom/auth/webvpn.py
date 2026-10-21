@@ -333,6 +333,57 @@ class WebVpnSessionService:
         except Exception:
             return self._set("unreachable", "登录流程无法启动或网关连接失败")
 
+    def submit_saved_login(self, page: Any) -> str:
+        """Submit the saved GUET CAS credentials in a trusted Chromium page.
+
+        Called *only* from the browser's owning Playwright thread. This
+        broker-owned method never returns the saved username or password.
+        It does not perform an invisible login, bypass OTP/captcha, or mint
+        a new session generation. The plugin must still save the authenticated
+        BrowserContext through save_browser_state() and verify the gateway.
+        """
+        if session_generation(self.storage_path)[1]:
+            return "logged_out"
+        try:
+            parsed = urlsplit(str(page.url))
+            host = (parsed.hostname or "").lower()
+            path = parsed.path.lower()
+            if parsed.scheme != "https" or not (
+                host == CAS_HOST or
+                (host == GATEWAY_HOST and (
+                    path.startswith("/authserver/") or
+                    path.startswith("/wengine-auth/login")
+                ))
+            ):
+                return "not_cas"
+            if is_sms_verification_page(page) or login_interaction_reason(page):
+                return "verification_required"
+            username = page.locator("#pwdFromId #username")
+            password = page.locator("#pwdFromId #password")
+            if not username.count() or not password.count() or (
+                not username.is_visible() or not password.is_visible()
+            ):
+                return "not_ready"
+        except Exception:
+            return "not_ready"
+
+        # Do not contend indefinitely with an academic/login plugin's CAS
+        # transaction. The caller can retry while the login form is visible.
+        if not self._login_lock.acquire(blocking=False):
+            return "busy"
+        try:
+            if session_generation(self.storage_path)[1]:
+                return "logged_out"
+            try:
+                credentials = self.credential_store.load()
+            except CredentialStoreError:
+                return "credentials_unavailable"
+            if credentials is None:
+                return "no_credentials"
+            return "submitted" if submit_saved_credentials(page, credentials) else "not_ready"
+        finally:
+            self._login_lock.release()
+
     def authorize_login(self) -> None:
         """Explicit user action only. Mint a new generation before a fresh login."""
         with self._recovery_lock:
