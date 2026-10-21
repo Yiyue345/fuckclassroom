@@ -42,6 +42,18 @@ from .webvpn_storage import (
 )
 
 
+@dataclass(frozen=True)
+class WebVpnStatus:
+    state: WebVpnState
+    reason: str
+    checked_at: str | None = None
+    retry_after: int = 0
+
+    @property
+    def is_authenticated(self) -> bool:
+        return self.state == "authenticated"
+
+
 def validate_webvpn_url(url: str, *, allowed_origins: tuple[str, ...] = ()) -> str:
     """Only an HTTPS gateway URL or an explicitly permitted HTTPS campus origin."""
     try:
