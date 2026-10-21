@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import json
 import tempfile
 import threading
 import time
@@ -9,6 +10,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
+from fuckclassroom.auth.webvpn_storage import (
+    WebVpnSessionError as GenerationError,
+    begin_session, invalidate_session, new_browser_context, read_session_snapshot,
+    session_generation, save_browser_context,
+)
 from fuckclassroom.auth.webvpn import (
     WebVpnSessionError, WebVpnSessionService, _classify_gateway_page,
     read_storage_state, safe_history_url, save_storage_state, validate_webvpn_url,
@@ -85,6 +91,113 @@ for i in range(30):
             {cookie["name"] for cookie in state["cookies"]},
             {"webvpn", "p1", "p2"},
         )
+
+    def test_generation_fences_stale_context_after_account_switch(self):
+        class Context:
+            def __init__(self, state):
+                self.state = state
+            def storage_state(self):
+                return self.state
+
+        class Browser:
+            def new_context(self, storage_state=None):
+                return Context(storage_state or {"cookies": [], "origins": []})
+
+        browser = Browser()
+        old_context = new_browser_context(browser, self.service.storage_path)
+        invalidate_session(self.service.storage_path)
+        self.assertTrue(session_generation(self.service.storage_path)[1])
+        with self.assertRaises(GenerationError):
+            save_browser_context(self.service.storage_path, old_context)
+        begin_session(self.service.storage_path)
+        save_storage_state(
+            self.service.storage_path, {"cookies": [
+                {"name": "new-account", "domain": ".v.guet.edu.cn", "value": "NEW", "path": "/"}
+            ], "origins": []},
+            expected_generation=session_generation(self.service.storage_path)[0],
+        )
+        with self.assertRaises(GenerationError):
+            save_browser_context(self.service.storage_path, old_context)
+        self.assertEqual(
+            {x["name"] for x in read_storage_state(self.service.storage_path)["cookies"]},
+            {"new-account"},
+        )
+
+    def test_browser_delta_deletes_removed_cookies_and_local_storage(self):
+        initial = {"cookies": [
+            {"name": "session_a", "domain": ".v.guet.edu.cn", "path": "/", "value": "old"},
+            {"name": "keep", "domain": "bkjwtest.guet.edu.cn", "path": "/", "value": "other"},
+        ], "origins": [
+            {"origin": "https://v.guet.edu.cn", "localStorage": [
+                {"name": "gone", "value": "old"}, {"name": "keep", "value": "same"}]},
+            {"origin": "https://other.guet.edu.cn", "localStorage": [{"name": "unrelated", "value": "1"}]},
+        ]}
+        self.service.storage_path.write_text(json.dumps(initial), encoding="utf-8")
+        before, generation = read_session_snapshot(self.service.storage_path)
+        changed = {"cookies": [
+            {"name": "keep", "domain": "bkjwtest.guet.edu.cn", "path": "/", "value": "other"},
+            {"name": "expired", "domain": ".v.guet.edu.cn", "path": "/", "value": "x", "expires": 1},
+        ], "origins": [
+            {"origin": "https://v.guet.edu.cn", "localStorage": [{"name": "keep", "value": "same"}]},
+            {"origin": "https://other.guet.edu.cn", "localStorage": [{"name": "unrelated", "value": "1"}]},
+        ]}
+        save_storage_state(
+            self.service.storage_path, changed,
+            expected_generation=generation, previous_state=before,
+        )
+        current = read_storage_state(self.service.storage_path)
+        self.assertEqual([x["name"] for x in current["cookies"]], ["keep"])
+        local = {item["origin"]: {x["name"]: x["value"] for x in item["localStorage"]}
+                 for item in current["origins"]}
+        self.assertEqual(local["https://v.guet.edu.cn"], {"keep": "same"})
+        self.assertEqual(local["https://other.guet.edu.cn"], {"unrelated": "1"})
+
+    def test_process_b_cannot_resurrect_a_context_after_logout(self):
+        signal_path = Path(self.tmp.name) / "start"
+        ready_path = Path(self.tmp.name) / "ready"
+        script = """
+import sys, time
+from pathlib import Path
+from fuckclassroom.auth.webvpn_storage import (
+    new_browser_context, save_browser_context, WebVpnSessionError
+)
+class FakeContext:
+    def __init__(self, data): self.data = data
+    def storage_state(self): return self.data
+class FakeBrowser:
+    def new_context(self, storage_state=None):
+        return FakeContext(storage_state or {"cookies": [], "origins": []})
+path, ready, go = map(Path, sys.argv[1:])
+ctx = new_browser_context(FakeBrowser(), path)
+ready.touch()
+deadline = time.time() + 15
+while not go.exists() and time.time() < deadline:
+    time.sleep(.03)
+try:
+    save_browser_context(path, ctx)
+except WebVpnSessionError:
+    sys.exit(0)
+sys.exit(2)
+"""
+        proc = subprocess.Popen([
+            sys.executable, "-c", script, str(self.service.storage_path),
+            str(ready_path), str(signal_path),
+        ])
+        try:
+            deadline = time.monotonic() + 12
+            while not ready_path.exists() and time.monotonic() < deadline:
+                time.sleep(.03)
+            self.assertTrue(ready_path.exists(), "子进程没有创建旧浏览器 Context")
+            self.service.clear_session()
+            self.service.authorize_login()
+            signal_path.touch()
+            self.assertEqual(proc.wait(timeout=20), 0)
+            self.assertFalse(self.service.storage_path.exists())
+        finally:
+            signal_path.touch()
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
 
     def test_expired_parallel_requests_single_flight(self):
         calls = []
