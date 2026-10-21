@@ -1811,9 +1811,12 @@ Runtime 热重载后服务实例会重新创建，持久会话仍在
 清除旧授权 Cookie 与 localStorage，保留其他插件并发写入的不同域数据。
 对常规复用的 Context 保持完整原始快照，允许同账号续期时的正常差异合并。
 
-`account_switch` 是提供给账户级事务使用的精确作用域接口。设置页当前
-的“清除全部登录态”仍使用显式 `clear_session`，会移除整份共享状态；
-该操作与仅轮换账号不同。调用者不要把 `renewal` 当作显式重新登录。
+`account_switch` 作用域也用于设置页切换统一账号：
+`clear_session(account_switch=True)` 在 generation 失效并设置显式登出标志后，
+只清理校园认证状态，保留其他插件拥有的校外 Cookie/Origin。由于切换后
+`logged_out=True`，新凭据不会触发隐式重登，必须用户明确授权。
+设置页“清除全部登录态”仍使用默认 `clear_session()`，删除全部共享状态。
+调用者不要把 `renewal` 当作显式重新登录。
 
 ### Session Clear/Account Switch 操作超时语义（#96）
 
