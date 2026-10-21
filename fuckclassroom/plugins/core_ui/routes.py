@@ -646,6 +646,20 @@ def build_router(context: PluginContext) -> APIRouter:
         response.headers["Cache-Control"] = "no-store"
         return response
 
+    async def _clear_gateway_session() -> None:
+        # A CAS/SMS challenge holds the global login lock: signal cancellation
+        # before waiting for it. The blocking lock acquisition runs off-loop.
+        challenge = verification_broker.current()
+        if challenge is not None:
+            try:
+                verification_broker.request_cancel(str(challenge["id"]))
+            except LoginVerificationError:
+                pass
+        await asyncio.wait_for(
+            asyncio.to_thread(services.get("webvpn_session").clear_session),
+            timeout=30,
+        )
+
     @router.post("/settings")
     async def save_settings(request: Request) -> RedirectResponse:
         body = (await request.body()).decode("utf-8", errors="replace")
@@ -670,8 +684,8 @@ def build_router(context: PluginContext) -> APIRouter:
                 form.get("account_username", ""), form.get("account_password", "")
             )
             if previous_credentials != saved_credentials:
-                services.get("webvpn_session").clear_session()
-        except (CredentialStoreError, OSError) as exc:
+                await _clear_gateway_session()
+        except (CredentialStoreError, OSError, TimeoutError) as exc:
             rollback_errors: list[str] = []
             for path, snapshot in (
                 (settings_store.path, settings_snapshot),
@@ -703,17 +717,23 @@ def build_router(context: PluginContext) -> APIRouter:
         return RedirectResponse("/settings?saved=1", status_code=303)
 
     @router.post("/settings/credentials/clear")
-    def clear_selection_credentials() -> RedirectResponse:
+    async def clear_selection_credentials() -> RedirectResponse:
         try:
             credential_store.clear()
-            services.get("webvpn_session").clear_session()
-        except (CredentialStoreError, OSError) as exc:
+            await _clear_gateway_session()
+        except (CredentialStoreError, OSError, TimeoutError) as exc:
             return RedirectResponse(f"/settings?credential_error={quote(str(exc))}", status_code=303)
         return RedirectResponse("/settings?credentials_cleared=1", status_code=303)
 
     @router.post("/settings/login-state/clear")
     async def clear_login_state() -> RedirectResponse:
-        services.get("webvpn_session").clear_session()
+        try:
+            await _clear_gateway_session()
+        except (OSError, TimeoutError) as exc:
+            return RedirectResponse(
+                f"/settings?login_state_error={quote('会话清除等待超时或失败，请稍后检查：' + str(exc))}",
+                status_code=303,
+            )
         errors = await context.clear_plugin_sessions()
         if errors:
             return RedirectResponse(
