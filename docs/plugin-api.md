@@ -1788,3 +1788,24 @@ Runtime 热重载后服务实例会重新创建，持久会话仍在
 `get_status()` 只读取当前状态；显式退出会跨进程即时可见。
 同步登录与会话清除不得在 FastAPI async handler 的事件循环线程里等待锁，
 应通过 `asyncio.to_thread`；CAS/SMS 挑战需要先发出取消信号。
+
+
+### Session Clear/Account Switch 操作超时语义（#96）
+
+`WebVpnSessionService.clear_session(timeout_seconds=25)` 对共享的
+recovery/login 锁以及跨进程存储锁实施有界等待。超时会在修改 generation、
+Cookie 文件或会话状态前抛出 `TimeoutError`；不存在“HTTP 已报告超时，
+原来的工作线程稍后仍注销新账号”的待执行任务。调用方应**直接等待**
+`await asyncio.to_thread(webvpn.clear_session)` 返回或抛异常，不能再使用
+`await asyncio.wait_for(asyncio.to_thread(...))` 模拟线程取消。
+
+配置提交因清除超时失败时，原设置及凭据通过已有快照回滚；
+单独“清除统一凭据”先完成会话清除再删除凭据，避免锁超时后
+密码已被擦除。登录过程中已有的 CAS/SMS challenge 会先收到取消信号，
+以协助及时释放登录锁；若没有及时退出则报明确的超时信息，不会后台补登出。
+
+持续集成另外运行 `WebVPN external plugin integration`，从外部选课
+与实验课仓库 checkout 源代码，**构造 Registry v1 ZIP、验证 SHA-256、
+通过 PluginManager 安装并启用**，测试真实安装插件的会话 Broker、
+Playwright BrowserContext 和 CookieJar 保存协议。该工作流不访问学校
+认证服务、也不使用真实账号，不能替代 GUET/CAS/SMS 线下验收。
