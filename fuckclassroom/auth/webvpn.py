@@ -151,7 +151,8 @@ def _read_storage_unlocked(path: Path) -> dict[str, Any]:
 
 
 def read_storage_state(path: Path) -> dict[str, Any]:
-    with _locked_storage_file(path):
+    """Atomic rename makes lock-free cross-process reads safe and side-effect-free."""
+    with _state_lock(path):
         return _read_storage_unlocked(path)
 
 
