@@ -50,6 +50,8 @@ class ReloadableApplication:
         self._plugin_dir = Path(plugin_dir) if plugin_dir is not None else None
         self._update_lock: asyncio.Lock | None = None
         self._updating_plugin = False
+        self._update_tasks: set[asyncio.Task[Any]] = set()
+        self._deferred_reload = False
 
     def _primitives(self) -> tuple[asyncio.Event, asyncio.Lock]:
         if self._request_gate is None:
@@ -84,8 +86,13 @@ class ReloadableApplication:
             gate.set()
 
     def _schedule_reload(self) -> bool:
-        if self._shutting_down or self._updating_plugin:
+        if self._shutting_down:
             return False
+        if self._updating_plugin:
+            # A configuration change during an update must never race with
+            # the file replacement or silently lose its Runtime reload.
+            self._deferred_reload = True
+            return True
         gate, _ = self._primitives()
         gate.clear()
         if self._reload_task is None or self._reload_task.done():
@@ -160,7 +167,7 @@ class ReloadableApplication:
             shutil.rmtree(displaced, ignore_errors=True)
 
     async def _apply_plugin_update(self, plugin_id: str, installer: Callable[[], Any]) -> Any:
-        """Drain -> stop old Runtime -> replace -> start new, or roll back."""
+        """Safely update active plugins; atomically replace inactive ones."""
         if self._plugin_dir is None:
             raise RuntimeError("当前启动方式不支持运行中插件自动更新")
         if re.fullmatch(r"[a-z][a-z0-9_-]{1,63}", plugin_id) is None:
@@ -173,6 +180,8 @@ class ReloadableApplication:
             ongoing = self._reload_task
             if ongoing is not None and not ongoing.done():
                 await ongoing
+            if self._shutting_down:
+                raise RuntimeError("应用正在关闭，无法更新插件")
             gate, _ = self._primitives()
             old = self._current
             if old is None:
@@ -181,15 +190,26 @@ class ReloadableApplication:
             destination = self._plugin_dir / plugin_id
             if not destination.is_dir() or destination.is_symlink():
                 raise RuntimeError("待更新插件目录不存在或不安全")
+            loaded = plugin_id in old.app.state.plugin_registry.plugin_ids
+            desired = plugin_id in old.app.state.plugin_manager.desired_enabled()
             backup = self._plugin_dir / f".{plugin_id}.rollback-{uuid.uuid4().hex}"
             backup_ready = False
             stopped = False
+            gate_closed = False
             self._updating_plugin = True
-            gate.clear()
             try:
-                # No new requests enter old routes while the update runs.
-                # A long-lived request causes a safe failure, never a forced
-                # replacement while code remains active.
+                if not loaded and not desired:
+                    # No active code from this plugin is in this generation.
+                    # The manager's same-filesystem atomic replacement is
+                    # sufficient; leave other plugins and requests running.
+                    return await asyncio.to_thread(installer)
+
+                # Active (or configured but temporarily unavailable) plugins
+                # require a coordinated Runtime lifecycle transaction.
+                gate.clear()
+                gate_closed = True
+                # Wait for inflight requests, then retire all active services
+                # before touching the running plugin package.
                 await asyncio.wait_for(old.drained.wait(), timeout=60)
                 await self._stop_generation(old)
                 self._current = None
@@ -227,14 +247,29 @@ class ReloadableApplication:
                         raise RuntimeError(self._last_reload_error) from exc
                     self._last_reload_error = f"插件更新失败，旧版本已恢复：{exc}"
                     raise RuntimeError(self._last_reload_error) from exc
-                # Timed out waiting for inflight requests. The old
-                # generation remains running and no plugin file was touched.
+                # Inactive updates never stopped the Runtime. A drain timeout
+                # likewise leaves the previous generation intact.
                 raise
             finally:
                 self._updating_plugin = False
-                gate.set()
+                if gate_closed and not self._shutting_down:
+                    gate.set()
                 if backup.exists() and self._current is not None:
                     await asyncio.to_thread(shutil.rmtree, backup, ignore_errors=True)
+                if self._deferred_reload and not self._shutting_down:
+                    self._deferred_reload = False
+                    self._schedule_reload()
+
+    async def _tracked_plugin_update(
+        self, plugin_id: str, installer: Callable[[], Any],
+    ) -> Any:
+        task = asyncio.current_task()
+        assert task is not None
+        self._update_tasks.add(task)
+        try:
+            return await self._apply_plugin_update(plugin_id, installer)
+        finally:
+            self._update_tasks.discard(task)
 
     def update_plugin_from_worker(
         self, plugin_id: str, installer: Callable[[], Any],
@@ -250,7 +285,7 @@ class ReloadableApplication:
         if running is loop:
             raise RuntimeError("不能在 ASGI 事件循环中同步更新插件")
         return asyncio.run_coroutine_threadsafe(
-            self._apply_plugin_update(plugin_id, installer), loop,
+            self._tracked_plugin_update(plugin_id, installer), loop,
         ).result()
 
     def runtime_status(self) -> dict[str, object]:
@@ -269,7 +304,8 @@ class ReloadableApplication:
         except Exception as exc:  # noqa: BLE001 - keep the currently running generation alive.
             self._last_reload_error = f"{type(exc).__name__}: {exc}"
             logger.exception("插件配置热重载失败")
-            gate.set()
+            if not self._shutting_down:
+                gate.set()
             return
 
         self._current = candidate
@@ -278,7 +314,8 @@ class ReloadableApplication:
         if old is not None:
             await old.drained.wait()
             await self._stop_generation(old)
-        gate.set()
+        if not self._shutting_down:
+            gate.set()
 
     async def _serve(self, scope, receive, send) -> None:
         await self._ensure_started()
@@ -322,6 +359,11 @@ class ReloadableApplication:
                     await task
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("关闭前等待热重载失败：%s", exc)
+            # Wait for ongoing update / rollback before stopping the final
+            # generation. Preventing new updates via _shutting_down means
+            # the tracked task set cannot grow new filesystem transactions.
+            while self._update_tasks:
+                await asyncio.gather(*tuple(self._update_tasks), return_exceptions=True)
             current = self._current
             if current is not None:
                 await current.drained.wait()
