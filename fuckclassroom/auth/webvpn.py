@@ -6,6 +6,7 @@ No browser cookie, credential, CAS ticket or Playwright state is exposed by stat
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
@@ -96,7 +97,7 @@ def validate_webvpn_url(url: str, *, allowed_origins: tuple[str, ...] = ()) -> s
     """Only an HTTPS gateway URL or an explicitly permitted HTTPS campus origin."""
     try:
         parsed = urlsplit(url)
-        if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+        if (url != url.strip() or parsed.scheme != "https" or not parsed.hostname or parsed.username
                 or parsed.password or parsed.port not in (None, 443)
                 or "\\" in url or any(ord(c) < 32 for c in url)):
             raise ValueError
@@ -263,6 +264,12 @@ class WebVpnSessionService:
                 return WebVpnStatus("unknown", "未找到网关 Cookie", self._status.checked_at)
             if self._status.state == "unknown":
                 return WebVpnStatus("login_required", "尚未保存 WebVPN 网关会话")
+        remaining = max(0.0, self._cooldown - (time.monotonic() - self._last_attempt))
+        if self._last_attempt and not self._status.is_authenticated:
+            return WebVpnStatus(
+                self._status.state, self._status.reason,
+                self._status.checked_at, math.ceil(remaining),
+            )
         return self._status
 
     def _probe(self) -> WebVpnStatus:
@@ -322,7 +329,10 @@ class WebVpnSessionService:
                 return self._set("recovering", "共享认证锁等待超时")
             try:
                 current = self._probe()
-                if current.is_authenticated or current.state in {"unknown", "unreachable"}:
+                if current.is_authenticated:
+                    return current
+                if current.state in {"unknown", "unreachable"}:
+                    self._last_attempt = time.monotonic()
                     return current
                 self._last_attempt = time.monotonic()
                 try:
