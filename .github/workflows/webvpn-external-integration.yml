@@ -1,0 +1,47 @@
+name: WebVPN external plugin integration
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  installed-zips:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout host PR
+        uses: actions/checkout@v4
+      - name: Checkout actual standalone course selection PR
+        uses: actions/checkout@v4
+        with:
+          repository: Yiyue345/fuckclassroom-plugin-course-selection
+          ref: fix/webvpn-session-generation
+          path: vendor-course
+          persist-credentials: false
+      - name: Checkout standalone lab selection
+        uses: actions/checkout@v4
+        with:
+          repository: Yiyue345/fuckclassroom-plugin-lab-selection
+          ref: main
+          path: vendor-lab
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install host dependencies
+        run: python -m pip install -r requirements/all.txt
+      - name: Build actual Registry-format plugin ZIPs
+        run: |
+          python vendor-course/scripts/build_registry_artifact.py 0.1.0-ci.0
+          python vendor-lab/scripts/build_registry_artifact.py 0.1.0-ci.0
+          (cd vendor-course && sha256sum -c course_selection-0.1.0-ci.0.zip.sha256)
+          (cd vendor-lab && sha256sum -c lab_selection-0.1.0-ci.0.zip.sha256)
+      - name: Exercise plugin manager ZIP installation, activation and session handoff
+        env:
+          COURSE_SELECTION_ZIP: ${{ github.workspace }}/vendor-course/course_selection-0.1.0-ci.0.zip
+          LAB_SELECTION_ZIP: ${{ github.workspace }}/vendor-lab/lab_selection-0.1.0-ci.0.zip
+        run: python -m unittest tests.test_webvpn_external_zips -v
