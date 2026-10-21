@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -144,6 +145,8 @@ class ReloadableApplicationTests(unittest.TestCase):
             def factory(_reload_callback, _reload_status):
                 version = version_path.read_text(encoding="utf-8")
                 app = FastAPI()
+                app.state.plugin_registry = SimpleNamespace(plugin_ids=("demo",))
+                app.state.plugin_manager = SimpleNamespace(desired_enabled=lambda: {"demo"})
                 @app.get("/version")
                 def get_version():
                     return {"version": version}
@@ -188,6 +191,8 @@ class ReloadableApplicationTests(unittest.TestCase):
                 if version == "broken":
                     raise RuntimeError("new plugin startup failed")
                 app = FastAPI()
+                app.state.plugin_registry = SimpleNamespace(plugin_ids=("demo",))
+                app.state.plugin_manager = SimpleNamespace(desired_enabled=lambda: {"demo"})
                 @app.get("/version")
                 def get_version():
                     return {"version": version}
@@ -231,6 +236,8 @@ class ReloadableApplicationTests(unittest.TestCase):
             def factory(_reload_callback, _reload_status):
                 version = original.read_text(encoding="utf-8")
                 app = FastAPI()
+                app.state.plugin_registry = SimpleNamespace(plugin_ids=("demo",))
+                app.state.plugin_manager = SimpleNamespace(desired_enabled=lambda: {"demo"})
                 @app.get("/version")
                 def version_route():
                     return {"version": version}
