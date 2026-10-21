@@ -447,9 +447,16 @@ class PluginRuntime:
             if plugin.clear_session is None:
                 continue
             try:
-                result = plugin.clear_session(self._context(plugin.id))
-                if inspect.isawaitable(result):
-                    await result
+                if inspect.iscoroutinefunction(plugin.clear_session):
+                    await plugin.clear_session(self._context(plugin.id))
+                else:
+                    # A sync plugin hook may wait for CAS/login locks. Never
+                    # block the ASGI event loop while clearing sessions.
+                    result = await asyncio.to_thread(
+                        plugin.clear_session, self._context(plugin.id)
+                    )
+                    if inspect.isawaitable(result):
+                        await result
             except Exception as exc:  # noqa: BLE001 - continue clearing other sessions.
                 self.logger.warning("插件 %s 清除会话失败：%s", plugin.id, exc)
                 errors.append(f"{plugin.name}: {exc}")
