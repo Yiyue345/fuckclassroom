@@ -135,7 +135,11 @@ class WebVpnRouteEventLoopTests(unittest.IsolatedAsyncioTestCase):
                 release.set()
                 worker.join(timeout=3)
 
-            begin_session(broker.storage_path)
+            generation = begin_session(broker.storage_path)
+            save_storage_state(broker.storage_path, {"cookies": [
+                {"name": "new-login", "domain": ".v.guet.edu.cn",
+                 "path": "/", "value": "new"}
+            ], "origins": []}, expected_generation=generation)
             rotated = session_generation(broker.storage_path)
             await asyncio.sleep(.15)
             self.assertEqual(session_generation(broker.storage_path), rotated)
@@ -172,7 +176,11 @@ class WebVpnRouteEventLoopTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 unlock.set()
                 thread.join(timeout=3)
-            begin_session(broker.storage_path)
+            generation = begin_session(broker.storage_path)
+            save_storage_state(broker.storage_path, {"cookies": [
+                {"name": "new-login", "domain": ".v.guet.edu.cn",
+                 "path": "/", "value": "new"}
+            ], "origins": []}, expected_generation=generation)
             current = session_generation(broker.storage_path)
             await asyncio.sleep(.12)
             self.assertEqual(session_generation(broker.storage_path), current)
