@@ -646,7 +646,7 @@ def build_router(context: PluginContext) -> APIRouter:
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    async def _clear_gateway_session() -> None:
+    async def _clear_gateway_session(*, account_switch: bool = False) -> None:
         # A CAS/SMS challenge holds the global login lock: signal cancellation
         # before waiting for it. The blocking lock acquisition runs off-loop.
         challenge = verification_broker.current()
@@ -658,7 +658,12 @@ def build_router(context: PluginContext) -> APIRouter:
         # No wait_for(to_thread): cancelling an await does not stop the worker.
         # Broker enforces its own finite lock deadline and raises *before*
         # making any session changes on timeout. Await the worker to completion.
-        await asyncio.to_thread(services.get("webvpn_session").clear_session)
+        if account_switch:
+            await asyncio.to_thread(
+                services.get("webvpn_session").clear_session, account_switch=True,
+            )
+        else:
+            await asyncio.to_thread(services.get("webvpn_session").clear_session)
 
     @router.post("/settings")
     async def save_settings(request: Request) -> RedirectResponse:
@@ -684,7 +689,7 @@ def build_router(context: PluginContext) -> APIRouter:
                 form.get("account_username", ""), form.get("account_password", "")
             )
             if previous_credentials != saved_credentials:
-                await _clear_gateway_session()
+                await _clear_gateway_session(account_switch=True)
         except (CredentialStoreError, OSError, TimeoutError) as exc:
             rollback_errors: list[str] = []
             for path, snapshot in (
