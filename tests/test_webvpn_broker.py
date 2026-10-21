@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -49,6 +51,31 @@ class WebVpnBrokerTests(unittest.TestCase):
         ], "origins": []})
         data = read_storage_state(self.service.storage_path)
         self.assertEqual({c["name"] for c in data["cookies"]}, {"webvpn", "jw"})
+
+    def test_atomic_merge_across_processes(self):
+        script = """
+import sys
+from pathlib import Path
+from fuckclassroom.auth.webvpn import save_storage_state
+path = Path(sys.argv[1])
+name = sys.argv[2]
+for i in range(30):
+    save_storage_state(path, {"cookies": [
+        {"name": name, "domain": ".v.guet.edu.cn", "path": "/", "value": str(i)}
+    ], "origins": []})
+"""
+        processes = [
+            subprocess.Popen([sys.executable, "-c", script,
+                              str(self.service.storage_path), name])
+            for name in ("p1", "p2")
+        ]
+        for process in processes:
+            self.assertEqual(process.wait(timeout=20), 0)
+        state = read_storage_state(self.service.storage_path)
+        self.assertEqual(
+            {cookie["name"] for cookie in state["cookies"]},
+            {"webvpn", "p1", "p2"},
+        )
 
     def test_expired_parallel_requests_single_flight(self):
         calls = []
