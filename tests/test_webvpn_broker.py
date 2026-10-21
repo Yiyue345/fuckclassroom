@@ -92,6 +92,15 @@ for i in range(30):
             {"webvpn", "p1", "p2"},
         )
 
+    def test_cross_process_account_rotation_invalidates_cached_auth_status(self):
+        self.service._set("authenticated", "ready", checked=True)
+        self.service._last_verified = time.monotonic()
+        begin_session(self.service.storage_path)
+        self.assertEqual(self.service.get_status().state, "unknown")
+        self.service._probe = Mock(return_value=self.service._set("unknown", "revalidate"))
+        self.service.ensure_authenticated(interactive_allowed=False)
+        self.service._probe.assert_called_once()
+
     def test_generation_fences_stale_context_after_account_switch(self):
         class Context:
             def __init__(self, state):
