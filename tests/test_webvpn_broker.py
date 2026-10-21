@@ -223,6 +223,56 @@ with _locked_storage_file(storage):
             release.touch()
             self.assertEqual(proc.wait(timeout=5),0)
 
+    def test_cross_process_old_http_snapshot_must_not_write_after_switch(self):
+        ready = Path(self.tmp.name) / "old-http-ready"
+        proceed = Path(self.tmp.name) / "old-http-proceed"
+        code = """
+import sys,time
+from pathlib import Path
+from fuckclassroom.auth.webvpn_storage import (
+    read_session_snapshot, save_storage_state, WebVpnSessionError
+)
+path, ready, proceed = map(Path, sys.argv[1:])
+previous, generation = read_session_snapshot(path)
+ready.touch()
+deadline = time.monotonic() + 8
+while not proceed.exists() and time.monotonic() < deadline:
+    time.sleep(.025)
+try:
+    save_storage_state(path, {"cookies": [
+        {"name": "gateway", "domain": ".v.guet.edu.cn",
+         "path": "/", "value": "stale-worker"}
+    ], "origins": []}, expected_generation=generation, previous_state=previous)
+except WebVpnSessionError:
+    sys.exit(0)
+sys.exit(3)
+"""
+        worker = subprocess.Popen([
+            sys.executable, "-c", code, str(self.service.storage_path),
+            str(ready), str(proceed),
+        ])
+        try:
+            deadline = time.monotonic() + 4
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(.025)
+            self.assertTrue(ready.exists(), "HTTP worker failed to read old generation")
+            invalidate_session(self.service.storage_path)
+            new_gen = begin_session(self.service.storage_path)
+            save_storage_state(self.service.storage_path, {"cookies": [
+                {"name": "gateway", "domain": ".v.guet.edu.cn",
+                 "path": "/", "value": "new-user"}
+            ], "origins": []}, expected_generation=new_gen)
+            proceed.touch()
+            self.assertEqual(worker.wait(timeout=8), 0)
+            cookies = read_storage_state(self.service.storage_path)["cookies"]
+            self.assertEqual(len(cookies), 1)
+            self.assertEqual(cookies[0]["value"], "new-user")
+        finally:
+            proceed.touch()
+            if worker.poll() is None:
+                worker.kill()
+                worker.wait()
+
     def test_process_b_cannot_resurrect_a_context_after_logout(self):
         signal_path = Path(self.tmp.name) / "start"
         ready_path = Path(self.tmp.name) / "ready"
