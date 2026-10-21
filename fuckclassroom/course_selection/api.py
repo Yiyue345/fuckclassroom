@@ -494,10 +494,8 @@ class SelectionApiMixin:
             )
         state["cookies"] = rows
         try:
-            atomic_write_text(
-                self.storage_state_path,
-                json.dumps(state, ensure_ascii=False, indent=2),
-            )
+            from ..auth.webvpn import save_storage_state
+            save_storage_state(self.storage_state_path, state)
         except OSError:
             pass
 
