@@ -155,7 +155,9 @@ class SelectionSessionMixin:
         self._ensure_session_dir()
         with self._playwright() as playwright:
             browser = playwright.chromium.launch(headless=False)
-            context = browser.new_context()
+            from ..auth.webvpn_storage import begin_session, new_browser_context
+            begin_session(self.storage_state_path)
+            context = new_browser_context(browser, self.storage_state_path, reuse_saved_session=False)
             page = context.new_page()
             page.goto(WEBVPN_URL, wait_until="domcontentloaded", timeout=timeout_ms)
             print("请在弹出的浏览器中完成 WebVPN 登录。")
@@ -186,6 +188,14 @@ class SelectionSessionMixin:
         force_interactive: bool = False,
     ) -> str:
         self._ensure_session_dir()
+        # A user-initiated login may resume an explicitly logged-out gateway.
+        if force_interactive:
+            broker = getattr(self, "_webvpn_session", None)
+            if broker is not None:
+                broker.authorize_login()
+            else:
+                from ..auth.webvpn_storage import begin_session
+                begin_session(self.storage_state_path)
         _report(progress, 1, "正在等待其他登录流程结束")
         with self._login_lock:
             try:
@@ -397,12 +407,10 @@ class SelectionSessionMixin:
                 browser.close()
 
     def _new_login_context(self, browser: Any, *, reuse_saved_session: bool = True) -> Any:
-        if reuse_saved_session and self.storage_state_path.exists():
-            try:
-                return browser.new_context(storage_state=str(self.storage_state_path))
-            except Exception:
-                pass
-        return browser.new_context()
+        from ..auth.webvpn_storage import new_browser_context
+        return new_browser_context(
+            browser, self.storage_state_path, reuse_saved_session=reuse_saved_session
+        )
 
     @staticmethod
     def _fill_public_credentials(page: Any, credentials: SelectionCredentials) -> bool:
