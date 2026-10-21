@@ -19,6 +19,7 @@ def get_academic_session(context):
         verification_broker=services.get("verification_broker"),
         login_lock=services.get("login_lock"),
     )
+    session._webvpn_session = services.maybe("webvpn_session")
     services.add("hy2_proxy", proxy)
     services.add("academic_session", session)
     return session

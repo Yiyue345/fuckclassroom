@@ -1660,3 +1660,152 @@ requires 对应内置插件暴露的 service
 ```
 
 如果一个能力只能通过最后两层实现，优先提交新的 Plugin API，而不是让第三方插件直接耦合内部实现。
+
+
+---
+
+## 25. WebVPN 网关会话服务（Issue #89）
+
+核心模块始终注册 `context.services.get("webvpn_session")`，无需启用
+`course_selection` 或 `lab_selection`。这是一项稳定的服务端
+Plugin API，仅供受信任的 `in_process` 插件使用。**禁止**通过任意
+HTTP API 或 Plugin RPC 将 Playwright BrowserContext、Cookie、账号密码、
+storage_state 路径等返回给前端或隔离进程。
+
+### 最小使用示例
+
+```python
+import asyncio
+from playwright.sync_api import sync_playwright
+from fuckclassroom.auth.webvpn import safe_history_url, validate_webvpn_url
+
+webvpn = context.services.get("webvpn_session")
+
+# 在 async 端点或任务中调用同步服务时，放到工作线程。
+status = await asyncio.to_thread(webvpn.ensure_authenticated, False)
+if status.state == "verification_required":
+    # 引导用户到学校已有的 CAS / 短信验证交互
+    return
+if not status.is_authenticated:
+    return
+
+def open_gateway():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        try:
+            browser_context = webvpn.new_browser_context(browser)
+            page = browser_context.new_page()
+            target = validate_webvpn_url("https://v.guet.edu.cn/")
+            page.goto(target, wait_until="domcontentloaded")
+            # 将同一会话保存回主程序（原子合并，不覆盖其他系统 Cookie）
+            webvpn.save_browser_state(browser_context)
+            return safe_history_url(page.url)
+        finally:
+            browser.close()
+
+url_for_history = await asyncio.to_thread(open_gateway)
+```
+
+### API 与生命周期
+
+| 接口 | 说明 |
+| --- | --- |
+| `get_status() -> WebVpnStatus` | 无网络请求、无文件写入；包含状态、原因和上次验证时间 |
+| `verify() -> WebVpnStatus` | 只探测 `https://v.guet.edu.cn/` 网关，不判断教务页面 |
+| `ensure_authenticated(interactive_allowed=True)` | 单飞恢复，复用统一账号、短信协调器与共享登录锁 |
+| `reconnect(interactive_allowed=True)` | **明确的用户动作**，解除主动登出的自动恢复禁令 |
+| `new_browser_context(browser)` | 在可信服务端进程中创建使用共享 storage_state 的浏览器 Context |
+| `save_browser_state(browser_context)` | 对 Cookie / localStorage 状态进行合并、原子写入 |
+| `logout()/clear_session()` | 删除网关会话，保留凭据；阻止隐式自动重登 |
+
+`WebVpnStatus.state`：
+`unknown`、`authenticated`、`expired`、
+`login_required`、`verification_required`、
+`unreachable`、`recovering`、`failed`、`logged_out`。
+UI 可以将 `recovering` 显示为“恢复中”、`authenticated` 显示为“就绪”，
+验证状态不明确时必须向用户明确提示，不能假设登录成功。
+`WebVpnSessionError`（继承 `PluginServiceError`）是公开异常类型。
+网络和浏览器启动失败返回安全的状态说明，不包含会话敏感数据。
+
+`verify()` 是主动联网验证，`get_status()` 是只读快照。
+自动恢复使用进程内 single-flight 与共享登录锁，并配置恢复超时、
+失败冷却和成功状态短期缓存；不会无限重新尝试。动态短信挑战由现有
+`verification_broker` 处理，人工取消可以中止流程。需要图形验证码、
+短信等人工操作时不得绕过学校认证。
+
+通过 `asyncio.to_thread` 或同步后台任务使用 Playwright 的同步 API；
+不允许在运行中的 asyncio 事件循环内直接使用
+`playwright.sync_api`。浏览器及其 Context 生命周期归调用方，
+Runtime 热重载后服务实例会重新创建，持久会话仍在
+`data/webvpn/storage_state.json`。首版**不开放跨进程的会话 RPC**。
+
+### URL、历史记录和重放安全
+
+`validate_webvpn_url(url, allowed_origins=())` 默认只允许
+`https://v.guet.edu.cn/` 的 HTTPS Origin。可为单个受信任的学校
+`*.guet.edu.cn` Origin 增加显式白名单；不能接受任意外网、内网 IP、
+本机服务及 HTTP 明文 URL。学校 WebVPN 门户返回的资源路径可以在
+网关 Origin 内继续导航，**不能**把教务专用的
+`JW_WEBVPN_BASE_URL` 当作所有网站的地址转换公式。
+
+`safe_history_url(url, allowed_origins=())` 额外删除 query/fragment
+（其中可能携带 CAS ticket 或短期 token），并拒绝登录、登出页面。
+浏览器插件不得保存原始敏感 URL，也不得在日志中记录凭据或 Cookie。
+
+只能从**网关登录/门户**判定 WebVPN 是否过期。普通目标站点 403、
+资源无权限、目标网络故障不能触发自动重登。网关状态不明确时返回
+`unknown`，而非强行判为失效；网络不可达为 `unreachable`。
+会话恢复后，仅允许浏览器插件**最多重试一次安全的 GET 页面导航**，
+绝不能自动重放 POST、选课、评价、报名、上传等带副作用操作。
+
+
+### WebVPN Session Generation 与跨进程持久化（#96）
+
+浏览器状态和账号生命周期通过主仓
+`fuckclassroom.auth.webvpn_storage` 统一管理，外部插件不得直接使用
+`context.storage_state(path=".../storage_state.json")` 或不带 CAS 校验的
+`atomic_write_text` 覆盖共享文件。
+
+- `new_browser_context(browser, path)` 配置并登记 BrowserContext 与创建时的
+  session generation（以及初始 Cookie/localStorage 快照）。
+- `save_browser_context(path, context)` 执行 **generation compare-and-swap**
+  和三方差量合并；登出、账号切换前打开的页面不能保存旧 Cookie。
+- HTTP-only 集成必须先用 `read_session_snapshot(path)` 获取
+  `(state, generation)`，操作完成后以
+  `save_storage_state(path, updated, expected_generation=generation,
+  previous_state=state)` 保存，不能在网络操作结束时才重新取得 generation。
+- `invalidate_session(path)` 原子地轮换 generation、标记显式退出并删除
+  Cookie；`begin_session(path)` 只应在**用户显式重新连接/登录**时调用。
+- 合并只传播本次上下文真正改变/删除的 Cookie 与 localStorage 项，
+  保留其他并发上下文写入的不同域和键，淘汰已明确过期的 Cookie；
+  不允许“简单并集”重新复活已删除的旧 Cookie。
+
+`webvpn_session.authorize_login()` 为用户明确登录动作准备新 generation，
+由已有的统一账号登录流程在**交互式重新连接**前调用；它不代替 CAS 身份认证。
+跨进程登录锁仍需服务端集中管理；本机制只保障 shared-state 的持久化并发安全，
+并非对插件进程开放任意 Cookie/账号 RPC 权限。
+
+`get_status()` 只读取当前状态；显式退出会跨进程即时可见。
+同步登录与会话清除不得在 FastAPI async handler 的事件循环线程里等待锁，
+应通过 `asyncio.to_thread`；CAS/SMS 挑战需要先发出取消信号。
+
+
+### Session Clear/Account Switch 操作超时语义（#96）
+
+`WebVpnSessionService.clear_session(timeout_seconds=25)` 对共享的
+recovery/login 锁以及跨进程存储锁实施有界等待。超时会在修改 generation、
+Cookie 文件或会话状态前抛出 `TimeoutError`；不存在“HTTP 已报告超时，
+原来的工作线程稍后仍注销新账号”的待执行任务。调用方应**直接等待**
+`await asyncio.to_thread(webvpn.clear_session)` 返回或抛异常，不能再使用
+`await asyncio.wait_for(asyncio.to_thread(...))` 模拟线程取消。
+
+配置提交因清除超时失败时，原设置及凭据通过已有快照回滚；
+单独“清除统一凭据”先完成会话清除再删除凭据，避免锁超时后
+密码已被擦除。登录过程中已有的 CAS/SMS challenge 会先收到取消信号，
+以协助及时释放登录锁；若没有及时退出则报明确的超时信息，不会后台补登出。
+
+持续集成另外运行 `WebVPN external plugin integration`，从外部选课
+与实验课仓库 checkout 源代码，**构造 Registry v1 ZIP、验证 SHA-256、
+通过 PluginManager 安装并启用**，测试真实安装插件的会话 Broker、
+Playwright BrowserContext 和 CookieJar 保存协议。该工作流不访问学校
+认证服务、也不使用真实账号，不能替代 GUET/CAS/SMS 线下验收。
