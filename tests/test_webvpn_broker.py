@@ -132,6 +132,122 @@ for i in range(30):
             {"new-account"},
         )
 
+    def test_same_account_renewal_preserves_generation_and_all_plugin_cookies(self):
+        from fuckclassroom.auth.webvpn_storage import save_storage_state
+        original, generation = read_session_snapshot(self.service.storage_path)
+        browser = type("Browser", (), {"new_context": lambda self, storage_state=None:
+            type("Context", (), {"storage_state": lambda self: storage_state})()})()
+        old_context = new_browser_context(browser, self.service.storage_path)
+        self.assertEqual(begin_session(self.service.storage_path, mode="renewal"), generation)
+        self.assertEqual(read_session_snapshot(self.service.storage_path)[0], original)
+        save_browser_context(self.service.storage_path, old_context)
+        self.assertEqual(session_generation(self.service.storage_path), (generation, False))
+
+    def test_explicit_relogin_purges_only_owned_cookies_and_origins(self):
+        state = {
+            "cookies": [
+                {"name": "vpn", "domain": ".v.guet.edu.cn", "path": "/", "value": "old"},
+                {"name": "cas", "domain": "cas.guet.edu.cn", "path": "/", "value": "old"},
+                {"name": "jw", "domain": "bkjwtest.guet.edu.cn", "path": "/", "value": "old"},
+                {"name": "domain", "domain": ".guet.edu.cn", "path": "/", "value": "shared-old"},
+                {"name": "library", "domain": "library.guet.edu.cn", "path": "/", "value": "keep"},
+                {"name": "external", "domain": "service.example.org", "path": "/", "value": "keep"},
+            ],
+            "origins": [
+                {"origin": "https://v.guet.edu.cn", "localStorage": [{"name": "session", "value": "old"}]},
+                {"origin": "https://bkjwtest.guet.edu.cn", "localStorage": [{"name": "token", "value": "old"}]},
+                {"origin": "https://library.guet.edu.cn", "localStorage": [{"name": "keep", "value": "yes"}]},
+                {"origin": "https://service.example.org", "localStorage": [{"name": "keep", "value": "yes"}]},
+            ],
+        }
+        self.service.storage_path.write_text(json.dumps(state), encoding="utf-8")
+        old, previous_generation = read_session_snapshot(self.service.storage_path)
+        new_generation = begin_session(self.service.storage_path, mode="relogin")
+        self.assertNotEqual(previous_generation, new_generation)
+        after = read_storage_state(self.service.storage_path)
+        self.assertEqual({c["name"] for c in after["cookies"]}, {"library", "external"})
+        self.assertEqual({o["origin"] for o in after["origins"]},
+                         {"https://library.guet.edu.cn", "https://service.example.org"})
+        with self.assertRaises(GenerationError):
+            save_storage_state(self.service.storage_path, old,
+                               expected_generation=previous_generation, previous_state=old)
+
+        class Context:
+            def __init__(self):
+                self.state = {"cookies": [], "origins": []}
+            def storage_state(self):
+                return self.state
+        class Browser:
+            def new_context(self, **kwargs):
+                return Context()
+        fresh = new_browser_context(Browser(), self.service.storage_path,
+                                    reuse_saved_session=False)
+        fresh.state["cookies"].append({
+            "name": "vpn", "domain": ".v.guet.edu.cn", "path": "/", "value": "new"
+        })
+        save_browser_context(self.service.storage_path, fresh)
+        final = {c["name"]: c["value"] for c in
+                 read_storage_state(self.service.storage_path)["cookies"]}
+        self.assertEqual(final, {"library": "keep", "external": "keep", "vpn": "new"})
+
+    def test_account_switch_removes_all_campus_cookies_but_not_external_plugins(self):
+        path = self.service.storage_path
+        path.write_text(json.dumps({
+            "cookies": [
+                {"name": "a", "domain": ".v.guet.edu.cn", "value": "old", "path": "/"},
+                {"name": "b", "domain": ".library.guet.edu.cn", "value": "old", "path": "/"},
+                {"name": "c", "domain": ".guet.edu.cn", "value": "old", "path": "/"},
+                {"name": "d", "domain": "service.example.org", "value": "safe", "path": "/"},
+                {"name": "e", "domain": "guet.edu.cn.evil.test", "value": "safe", "path": "/"},
+            ],
+            "origins": [
+                {"origin": "https://library.guet.edu.cn", "localStorage": [{"name": "x", "value": "a"}]},
+                {"origin": "https://service.example.org", "localStorage": [{"name": "x", "value": "b"}]},
+            ],
+        }), encoding="utf-8")
+        before = session_generation(path)[0]
+        after = begin_session(path, mode="account_switch")
+        self.assertNotEqual(before, after)
+        saved = read_storage_state(path)
+        self.assertEqual({c["name"] for c in saved["cookies"]}, {"d", "e"})
+        self.assertEqual([o["origin"] for o in saved["origins"]], ["https://service.example.org"])
+
+    def test_fresh_browser_without_begin_still_deletes_old_owned_cookie_only(self):
+        path = self.service.storage_path
+        path.write_text(json.dumps({
+            "cookies": [
+                {"name": "oldvpn", "domain": "v.guet.edu.cn", "path": "/", "value": "stale"},
+                {"name": "oldcas", "domain": "cas.guet.edu.cn", "path": "/", "value": "stale"},
+                {"name": "plugin", "domain": "library.guet.edu.cn", "path": "/", "value": "keep"},
+            ],
+            "origins": [
+                {"origin": "https://v.guet.edu.cn", "localStorage": [{"name": "oldtoken", "value": "secret"}]},
+                {"origin": "https://library.guet.edu.cn", "localStorage": [{"name": "keep", "value": "data"}]},
+            ],
+        }), encoding="utf-8")
+        class Context:
+            def __init__(self):
+                self.state = {"cookies": [], "origins": []}
+            def storage_state(self):
+                return self.state
+        class Browser:
+            def new_context(self, **kwargs):
+                return Context()
+        context = new_browser_context(Browser(), path, reuse_saved_session=False)
+        context.state["cookies"].append({
+            "name": "fresh", "domain": ".v.guet.edu.cn", "path": "/", "value": "NEW"
+        })
+        save_browser_context(path, context)
+        after = read_storage_state(path)
+        self.assertEqual({c["name"] for c in after["cookies"]}, {"fresh", "plugin"})
+        self.assertEqual([o["origin"] for o in after["origins"]], ["https://library.guet.edu.cn"])
+
+    def test_renewal_cannot_implicitly_reconnect_after_logout(self):
+        self.service.clear_session()
+        with self.assertRaises(GenerationError):
+            begin_session(self.service.storage_path, mode="renewal")
+        self.assertTrue(session_generation(self.service.storage_path)[1])
+
     def test_browser_delta_deletes_removed_cookies_and_local_storage(self):
         initial = {"cookies": [
             {"name": "session_a", "domain": ".v.guet.edu.cn", "path": "/", "value": "old"},
