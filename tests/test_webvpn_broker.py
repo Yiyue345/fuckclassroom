@@ -298,12 +298,18 @@ for i in range(30):
         finally:
             release.set()
             busy.join(timeout=2)
-        # A later user connection must not be wiped by a timed-out waiter.
-        begin_session(self.service.storage_path)
+        # A fresh user connection deliberately clears the old SSO Cookie;
+        # the timed-out logout must not invalidate the replacement session.
+        new_generation = begin_session(self.service.storage_path, mode="relogin")
+        save_storage_state(self.service.storage_path, {"cookies": [
+            {"name": "replacement", "domain": ".v.guet.edu.cn",
+             "path": "/", "value": "new"}
+        ], "origins": []}, expected_generation=new_generation)
         after_generation = session_generation(self.service.storage_path)
         time.sleep(0.08)
         self.assertEqual(session_generation(self.service.storage_path), after_generation)
-        self.assertTrue(self.service.storage_path.exists())
+        self.assertEqual(read_storage_state(self.service.storage_path)["cookies"][0]["name"],
+                         "replacement")
 
     def test_timeout_with_storage_file_lock_leaves_session_untouched(self):
         import multiprocessing
