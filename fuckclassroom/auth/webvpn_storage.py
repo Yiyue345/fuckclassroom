@@ -37,8 +37,15 @@ def _lock(path: Path) -> threading.RLock:
 
 
 @contextmanager
-def _locked_storage_file(path: Path):
-    with _lock(path):
+def _locked_storage_file(path: Path, *, timeout_seconds: float | None = None):
+    """Bounded cross-process file locking; no mutation on lock timeout."""
+    deadline = None if timeout_seconds is None else time.monotonic() + max(timeout_seconds, 0.0)
+    lock = _lock(path)
+    if deadline is None:
+        lock.acquire()
+    elif not lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        raise TimeoutError("等待共享会话文件锁超时")
+    try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.with_name(path.name + ".lock").open("a+b") as handle:
             if os.name == "nt":
@@ -50,12 +57,25 @@ def _locked_storage_file(path: Path):
                     handle.write(b"0")
                     handle.flush()
                 handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
             else:
                 import fcntl
 
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            while True:
+                try:
+                    if os.name == "nt":
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except (OSError, BlockingIOError):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise TimeoutError("等待共享会话文件锁超时") from None
+                    time.sleep(0.04)
             try:
+                # Even if the file lock was just acquired, an operation already
+                # past its deadline must not commit a late logout.
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError("共享会话操作超时，尚未执行")
                 yield
             finally:
                 if os.name == "nt":
@@ -63,6 +83,8 @@ def _locked_storage_file(path: Path):
                     msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
                 else:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock.release()
 
 
 def _generation_path(path: Path) -> Path:
@@ -102,9 +124,9 @@ def begin_session(path: Path) -> str:
         return _rotate_generation_unlocked(path, logged_out=False)
 
 
-def invalidate_session(path: Path) -> None:
+def invalidate_session(path: Path, *, timeout_seconds: float | None = None) -> None:
     """Block stale saves *before* removing cookies, all under the same OS lock."""
-    with _locked_storage_file(path):
+    with _locked_storage_file(path, timeout_seconds=timeout_seconds):
         _rotate_generation_unlocked(path, logged_out=True)
         path.unlink(missing_ok=True)
 
