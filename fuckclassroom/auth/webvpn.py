@@ -355,15 +355,33 @@ class WebVpnSessionService:
         """Trusted in_process browser handoff; cookies stay server-side."""
         save_browser_context(self.storage_path, browser_context)
 
-    def clear_session(self) -> None:
-        """Explicit logout, preserving user credentials but preventing auto-relogin."""
-        with self._recovery_lock:
-            with self._login_lock:
+    def clear_session(self, *, timeout_seconds: float = 25.0) -> None:
+        """Bounded, atomic logout: a timeout never leaves a pending late logout.
+
+        The caller waits for this method to finish. If a CAS/login lock remains
+        busy, fail *before* touching generation, cookies or account credentials.
+        """
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        if not self._recovery_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+            raise TimeoutError("等待 WebVPN 恢复流程结束超时，登录状态未清除")
+        try:
+            if not self._login_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+                raise TimeoutError("等待统一认证结束超时，登录状态未清除")
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("登录状态清除已超时，未执行注销")
+                # Storage invalidation and the durable generation marker are
+                # committed together under the cross-process lock.
+                invalidate_session(self.storage_path, timeout_seconds=remaining)
                 self._logged_out = True
                 self._last_verified = 0.0
-                invalidate_session(self.storage_path)
                 self.meta_path.unlink(missing_ok=True)
                 self._set("logged_out", "已主动退出，请手动重新连接", checked=True)
+            finally:
+                self._login_lock.release()
+        finally:
+            self._recovery_lock.release()
 
     logout = clear_session
 
