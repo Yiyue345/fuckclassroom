@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import threading
 import unittest
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -121,6 +124,137 @@ class ReloadableApplicationTests(unittest.TestCase):
             self.assertFalse(thread.is_alive())
             self.assertIn("Runtime 热重载失败", outcome.get("error", ""))
             self.assertIn("new runtime refused", outcome["error"])
+
+    def test_running_plugin_updates_without_changing_enabled_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin_dir = root / "plugins"
+            target = plugin_dir / "demo"
+            target.mkdir(parents=True)
+            version_path = target / "version.txt"
+            version_path.write_text("v1", encoding="utf-8")
+            selection = root / "plugin_state.json"
+            selection.write_text(
+                json.dumps({"selected": ["core_ui", "demo", "dependent"]}),
+                encoding="utf-8",
+            )
+            original_selection = selection.read_bytes()
+            events: list[str] = []
+
+            def factory(_reload_callback, _reload_status):
+                version = version_path.read_text(encoding="utf-8")
+                app = FastAPI()
+                @app.get("/version")
+                def get_version():
+                    return {"version": version}
+                @app.on_event("shutdown")
+                def shutdown():
+                    events.append("stop-" + version)
+                return app
+
+            shell = ReloadableApplication(factory, plugin_dir=plugin_dir)
+            with TestClient(shell) as client:
+                self.assertEqual(client.get("/version").json()["version"], "v1")
+                result: dict[str, object] = {}
+
+                def installer():
+                    self.assertIn("stop-v1", events)
+                    version_path.write_text("v2", encoding="utf-8")
+                    return "updated"
+
+                def worker():
+                    result["value"] = shell.update_plugin_from_worker("demo", installer)
+
+                thread = threading.Thread(target=worker)
+                thread.start()
+                thread.join(timeout=8)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(result["value"], "updated")
+                self.assertEqual(client.get("/version").json()["version"], "v2")
+                self.assertEqual(selection.read_bytes(), original_selection)
+                self.assertFalse(any(plugin_dir.glob(".demo.rollback-*")))
+
+    def test_failed_plugin_startup_rolls_back_old_version_and_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plugin_dir = Path(directory) / "plugins"
+            target = plugin_dir / "demo"
+            target.mkdir(parents=True)
+            version_path = target / "version.txt"
+            version_path.write_text("v1", encoding="utf-8")
+            events = []
+
+            def factory(_reload_callback, _reload_status):
+                version = version_path.read_text(encoding="utf-8")
+                if version == "broken":
+                    raise RuntimeError("new plugin startup failed")
+                app = FastAPI()
+                @app.get("/version")
+                def get_version():
+                    return {"version": version}
+                @app.on_event("shutdown")
+                def shutdown():
+                    events.append("stop-" + version)
+                return app
+
+            shell = ReloadableApplication(factory, plugin_dir=plugin_dir)
+            with TestClient(shell) as client:
+                outcome: dict[str, object] = {}
+
+                def worker():
+                    def installer():
+                        self.assertIn("stop-v1", events)
+                        version_path.write_text("broken", encoding="utf-8")
+                        return "updated"
+                    try:
+                        shell.update_plugin_from_worker("demo", installer)
+                    except RuntimeError as exc:
+                        outcome["error"] = str(exc)
+
+                thread = threading.Thread(target=worker)
+                thread.start()
+                thread.join(timeout=8)
+                self.assertFalse(thread.is_alive())
+                self.assertIn("旧版本已恢复", outcome.get("error", ""))
+                self.assertEqual(version_path.read_text(encoding="utf-8"), "v1")
+                self.assertEqual(client.get("/version").json()["version"], "v1")
+                self.assertFalse(any(plugin_dir.glob(".demo.rollback-*")))
+
+    def test_failed_plugin_install_restores_runtime_without_changing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plugin_dir = Path(directory) / "plugins"
+            plugin_dir.mkdir()
+            target = plugin_dir / "demo"
+            target.mkdir()
+            original = target / "version.txt"
+            original.write_text("v1", encoding="utf-8")
+
+            def factory(_reload_callback, _reload_status):
+                version = original.read_text(encoding="utf-8")
+                app = FastAPI()
+                @app.get("/version")
+                def version_route():
+                    return {"version": version}
+                return app
+
+            shell = ReloadableApplication(factory, plugin_dir=plugin_dir)
+            with TestClient(shell) as client:
+                outcome = []
+
+                def worker():
+                    def installer():
+                        original.write_text("partial", encoding="utf-8")
+                        raise OSError("disk full")
+                    try:
+                        shell.update_plugin_from_worker("demo", installer)
+                    except RuntimeError as exc:
+                        outcome.append(str(exc))
+
+                thread = threading.Thread(target=worker)
+                thread.start()
+                thread.join(timeout=8)
+                self.assertFalse(thread.is_alive())
+                self.assertIn("旧版本已恢复", outcome[0])
+                self.assertEqual(client.get("/version").json()["version"], "v1")
 
     def test_failed_reload_keeps_previous_generation(self) -> None:
         builds = {"count": 0}
