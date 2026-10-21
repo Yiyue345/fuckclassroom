@@ -1660,3 +1660,100 @@ requires 对应内置插件暴露的 service
 ```
 
 如果一个能力只能通过最后两层实现，优先提交新的 Plugin API，而不是让第三方插件直接耦合内部实现。
+
+
+---
+
+## 25. WebVPN 网关会话服务（Issue #89）
+
+核心模块始终注册 `context.services.get("webvpn_session")`，无需启用
+`course_selection` 或 `lab_selection`。这是一项稳定的服务端
+Plugin API，仅供受信任的 `in_process` 插件使用。**禁止**通过任意
+HTTP API 或 Plugin RPC 将 Playwright BrowserContext、Cookie、账号密码、
+storage_state 路径等返回给前端或隔离进程。
+
+### 最小使用示例
+
+```python
+import asyncio
+from playwright.sync_api import sync_playwright
+from fuckclassroom.auth.webvpn import safe_history_url, validate_webvpn_url
+
+webvpn = context.services.get("webvpn_session")
+
+# 在 async 端点或任务中调用同步服务时，放到工作线程。
+status = await asyncio.to_thread(webvpn.ensure_authenticated, False)
+if status.state == "verification_required":
+    # 引导用户到学校已有的 CAS / 短信验证交互
+    return
+if not status.is_authenticated:
+    return
+
+def open_gateway():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        try:
+            browser_context = webvpn.new_browser_context(browser)
+            page = browser_context.new_page()
+            target = validate_webvpn_url("https://v.guet.edu.cn/")
+            page.goto(target, wait_until="domcontentloaded")
+            # 将同一会话保存回主程序（原子合并，不覆盖其他系统 Cookie）
+            webvpn.save_browser_state(browser_context)
+            return safe_history_url(page.url)
+        finally:
+            browser.close()
+
+url_for_history = await asyncio.to_thread(open_gateway)
+```
+
+### API 与生命周期
+
+| 接口 | 说明 |
+| --- | --- |
+| `get_status() -> WebVpnStatus` | 无网络请求、无文件写入；包含状态、原因和上次验证时间 |
+| `verify() -> WebVpnStatus` | 只探测 `https://v.guet.edu.cn/` 网关，不判断教务页面 |
+| `ensure_authenticated(interactive_allowed=True)` | 单飞恢复，复用统一账号、短信协调器与共享登录锁 |
+| `reconnect(interactive_allowed=True)` | **明确的用户动作**，解除主动登出的自动恢复禁令 |
+| `new_browser_context(browser)` | 在可信服务端进程中创建使用共享 storage_state 的浏览器 Context |
+| `save_browser_state(browser_context)` | 对 Cookie / localStorage 状态进行合并、原子写入 |
+| `logout()/clear_session()` | 删除网关会话，保留凭据；阻止隐式自动重登 |
+
+`WebVpnStatus.state`：
+`unknown`、`authenticated`、`expired`、
+`login_required`、`verification_required`、
+`unreachable`、`recovering`、`failed`、`logged_out`。
+UI 可以将 `recovering` 显示为“恢复中”、`authenticated` 显示为“就绪”，
+验证状态不明确时必须向用户明确提示，不能假设登录成功。
+`WebVpnSessionError`（继承 `PluginServiceError`）是公开异常类型。
+网络和浏览器启动失败返回安全的状态说明，不包含会话敏感数据。
+
+`verify()` 是主动联网验证，`get_status()` 是只读快照。
+自动恢复使用进程内 single-flight 与共享登录锁，并配置恢复超时、
+失败冷却和成功状态短期缓存；不会无限重新尝试。动态短信挑战由现有
+`verification_broker` 处理，人工取消可以中止流程。需要图形验证码、
+短信等人工操作时不得绕过学校认证。
+
+通过 `asyncio.to_thread` 或同步后台任务使用 Playwright 的同步 API；
+不允许在运行中的 asyncio 事件循环内直接使用
+`playwright.sync_api`。浏览器及其 Context 生命周期归调用方，
+Runtime 热重载后服务实例会重新创建，持久会话仍在
+`data/webvpn/storage_state.json`。首版**不开放跨进程的会话 RPC**。
+
+### URL、历史记录和重放安全
+
+`validate_webvpn_url(url, allowed_origins=())` 默认只允许
+`https://v.guet.edu.cn/` 的 HTTPS Origin。可为单个受信任的学校
+`*.guet.edu.cn` Origin 增加显式白名单；不能接受任意外网、内网 IP、
+本机服务及 HTTP 明文 URL。学校 WebVPN 门户返回的资源路径可以在
+网关 Origin 内继续导航，**不能**把教务专用的
+`JW_WEBVPN_BASE_URL` 当作所有网站的地址转换公式。
+
+`safe_history_url(url, allowed_origins=())` 额外删除 query/fragment
+（其中可能携带 CAS ticket 或短期 token），并拒绝登录、登出页面。
+浏览器插件不得保存原始敏感 URL，也不得在日志中记录凭据或 Cookie。
+
+只能从**网关登录/门户**判定 WebVPN 是否过期。普通目标站点 403、
+资源无权限、目标网络故障不能触发自动重登。网关状态不明确时返回
+`unknown`，而非强行判为失效；网络不可达为 `unreachable`。
+会话恢复后，仅允许浏览器插件**最多重试一次安全的 GET 页面导航**，
+绝不能自动重放 POST、选课、评价、报名、上传等带副作用操作。
