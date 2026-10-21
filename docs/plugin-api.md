@@ -1790,6 +1790,34 @@ Runtime 热重载后服务实例会重新创建，持久会话仍在
 应通过 `asyncio.to_thread`；CAS/SMS 挑战需要先发出取消信号。
 
 
+### 共享登录会话轮换与 Cookie 作用域
+
+`begin_session(path, *, mode="relogin", cookie_domains=())` 在**同一个跨进程锁内**
+处理 generation 与持久化浏览器状态，避免旧 BrowserContext / HTTP CookieJar 回写。
+调用方必须根据业务意图明确选择模式：
+
+| 场景 | `mode` | generation | Cookie / localStorage 策略 |
+|---|---|---|---|
+| 同账号自动续期 | `renewal` | 保持原值 | 原样保留所有插件状态，禁止在已明确退出的会话上隐式续期 |
+| 用户主动全新登录 | `relogin`（默认） | 轮换 | 清除 WebVPN、CAS、本科教务 SSO 域和共享的 `.guet.edu.cn` 顶级域 Cookie、对应 Origin；保留其他插件所属域的状态 |
+| 切换统一账号 | `account_switch` | 轮换 | 清除全部桂电子域名及其顶级域的 Cookie / Origin，保留外部系统插件的会话 |
+
+受信任的进程内插件可以在 `relogin` 时提供 `cookie_domains=("other.guet.edu.cn",)`
+追加自身**明确拥有**的学校域名；禁止传入校外域名。三个模式均不允许未经授权
+通过 Plugin RPC/HTTP 读取原始 Cookie 或凭据。
+
+对 `new_browser_context(..., reuse_saved_session=False)`，即使调用者未先执行
+`begin_session`，保存时也会把旧 SSO 作用域作为三方合并的删除基线：
+清除旧授权 Cookie 与 localStorage，保留其他插件并发写入的不同域数据。
+对常规复用的 Context 保持完整原始快照，允许同账号续期时的正常差异合并。
+
+`account_switch` 作用域也用于设置页切换统一账号：
+`clear_session(account_switch=True)` 在 generation 失效并设置显式登出标志后，
+只清理校园认证状态，保留其他插件拥有的校外 Cookie/Origin。由于切换后
+`logged_out=True`，新凭据不会触发隐式重登，必须用户明确授权。
+设置页“清除全部登录态”仍使用默认 `clear_session()`，删除全部共享状态。
+调用者不要把 `renewal` 当作显式重新登录。
+
 ### Session Clear/Account Switch 操作超时语义（#96）
 
 `WebVpnSessionService.clear_session(timeout_seconds=25)` 对共享的

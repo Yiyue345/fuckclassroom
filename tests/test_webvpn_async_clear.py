@@ -56,11 +56,11 @@ class WebVpnRouteEventLoopTests(unittest.IsolatedAsyncioTestCase):
             release = threading.Event()
             original = broker.clear_session
 
-            def blocked():
+            def blocked(**kwargs):
                 entered.set()
                 if not release.wait(timeout=5):
                     raise TimeoutError("test switch was never released")
-                original()
+                original(**kwargs)
 
             broker.clear_session = blocked
             async def receive():
@@ -114,7 +114,7 @@ class WebVpnRouteEventLoopTests(unittest.IsolatedAsyncioTestCase):
             worker.start()
             self.assertTrue(await asyncio.to_thread(login_held.wait, 2))
             original_clear = broker.clear_session
-            broker.clear_session = lambda: original_clear(timeout_seconds=0.12)
+            broker.clear_session = lambda **kwargs: original_clear(timeout_seconds=0.12, **kwargs)
 
             async def receive():
                 return {"type": "http.request", "body": b"account_username=next", "more_body": False}
@@ -135,7 +135,11 @@ class WebVpnRouteEventLoopTests(unittest.IsolatedAsyncioTestCase):
                 release.set()
                 worker.join(timeout=3)
 
-            begin_session(broker.storage_path)
+            generation = begin_session(broker.storage_path)
+            save_storage_state(broker.storage_path, {"cookies": [
+                {"name": "new-login", "domain": ".v.guet.edu.cn",
+                 "path": "/", "value": "new"}
+            ], "origins": []}, expected_generation=generation)
             rotated = session_generation(broker.storage_path)
             await asyncio.sleep(.15)
             self.assertEqual(session_generation(broker.storage_path), rotated)
@@ -172,11 +176,64 @@ class WebVpnRouteEventLoopTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 unlock.set()
                 thread.join(timeout=3)
-            begin_session(broker.storage_path)
+            generation = begin_session(broker.storage_path)
+            save_storage_state(broker.storage_path, {"cookies": [
+                {"name": "new-login", "domain": ".v.guet.edu.cn",
+                 "path": "/", "value": "new"}
+            ], "origins": []}, expected_generation=generation)
             current = session_generation(broker.storage_path)
             await asyncio.sleep(.12)
             self.assertEqual(session_generation(broker.storage_path), current)
             self.assertTrue(broker.storage_path.exists())
+
+    async def test_switch_credentials_preserves_external_state_but_revokes_campus(self):
+        import json
+        from fuckclassroom.auth.webvpn_storage import session_generation, read_storage_state
+
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(AppConfig(data_dir=Path(directory)))
+            services = app.state.plugin_runtime.services
+            broker = services.get("webvpn_session")
+            store = services.get("credential_store")
+            store.load = lambda: SelectionCredentials("first", "secret")
+            store.update_from_form = lambda username, password: SelectionCredentials(
+                "second", "new-secret"
+            )
+            broker.storage_path.parent.mkdir(parents=True, exist_ok=True)
+            broker.storage_path.write_text(json.dumps({
+                "cookies": [
+                    {"name": "vpn", "domain": ".v.guet.edu.cn", "path": "/", "value": "old"},
+                    {"name": "ext", "domain": "other.example.org", "path": "/", "value": "keep"},
+                ],
+                "origins": [
+                    {"origin": "https://bkjwtest.guet.edu.cn", "localStorage": [
+                        {"name": "old", "value": "session"}]},
+                    {"origin": "https://other.example.org", "localStorage": [
+                        {"name": "plugin", "value": "keep"}]},
+                ],
+            }), encoding="utf-8")
+            old_generation = session_generation(broker.storage_path)[0]
+            async def receive():
+                return {"type": "http.request", "body": b"account_username=second", "more_body": False}
+            request = Request(
+                {"type": "http", "method": "POST", "path": "/settings", "headers": []},
+                receive,
+            )
+            route = next(
+                r for r in app.routes
+                if getattr(r, "path", "") == "/settings"
+                and "POST" in getattr(r, "methods", set())
+            )
+            response = await asyncio.wait_for(route.endpoint(request), timeout=5)
+            self.assertIn("saved=1", response.headers["location"])
+            new_generation, logged_out = session_generation(broker.storage_path)
+            self.assertNotEqual(new_generation, old_generation)
+            self.assertTrue(logged_out)
+            self.assertEqual(broker.get_status().state, "logged_out")
+            saved = read_storage_state(broker.storage_path)
+            self.assertEqual([x["name"] for x in saved["cookies"]], ["ext"])
+            self.assertEqual([x["origin"] for x in saved["origins"]],
+                             ["https://other.example.org"])
 
     async def test_manual_verification_is_cancelled_before_waiting_for_login_lock(self):
         with tempfile.TemporaryDirectory() as directory:

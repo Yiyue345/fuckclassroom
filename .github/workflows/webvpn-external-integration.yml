@@ -3,6 +3,20 @@ name: WebVPN external plugin integration
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      course_selection_ref:
+        description: "Optional plugin ref for compatibility preflight (branch, tag or commit SHA)"
+        required: false
+        type: string
+        default: main
+      lab_selection_ref:
+        description: "Optional lab plugin ref for compatibility preflight"
+        required: false
+        type: string
+        default: main
 
 permissions:
   contents: read
@@ -14,18 +28,19 @@ jobs:
     steps:
       - name: Checkout host PR
         uses: actions/checkout@v4
-      - name: Checkout actual standalone course selection PR
+      - name: Checkout published standalone course selection source
         uses: actions/checkout@v4
         with:
           repository: Yiyue345/fuckclassroom-plugin-course-selection
-          ref: fix/webvpn-session-generation
+          # Track the maintained branch; dispatch input allows an explicit PR/SHA preflight.
+          ref: ${{ inputs.course_selection_ref || 'main' }}
           path: vendor-course
           persist-credentials: false
       - name: Checkout standalone lab selection
         uses: actions/checkout@v4
         with:
           repository: Yiyue345/fuckclassroom-plugin-lab-selection
-          ref: main
+          ref: ${{ inputs.lab_selection_ref || 'main' }}
           path: vendor-lab
           persist-credentials: false
       - uses: actions/setup-python@v5
