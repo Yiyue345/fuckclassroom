@@ -192,11 +192,27 @@ def begin_session(
         return generation
 
 
-def invalidate_session(path: Path, *, timeout_seconds: float | None = None) -> None:
-    """Block stale saves *before* removing cookies, all under the same OS lock."""
+def invalidate_session(
+    path: Path, *, timeout_seconds: float | None = None,
+    account_switch: bool = False,
+) -> None:
+    """Log out with generation fencing; account switch keeps external plugins.
+
+    Full logout removes the entire shared state. A credential/account switch
+    revokes every campus-domain Cookie/Origin while preserving unrelated
+    external plugin state. Both remain logged_out until explicit authorization.
+    """
     with _locked_storage_file(path, timeout_seconds=timeout_seconds):
+        retained = (
+            _purge_login_scope(_read_unlocked(path), mode="account_switch",
+                               domains=_DEFAULT_LOGIN_DOMAINS)
+            if account_switch else {"cookies": [], "origins": []}
+        )
         _rotate_generation_unlocked(path, logged_out=True)
-        path.unlink(missing_ok=True)
+        if retained["cookies"] or retained["origins"]:
+            atomic_write_text(path, json.dumps(retained, ensure_ascii=False))
+        else:
+            path.unlink(missing_ok=True)
 
 
 def _read_unlocked(path: Path) -> dict[str, Any]:
