@@ -32,6 +32,15 @@ class WebVpnBrokerTests(unittest.TestCase):
                          "path": "/", "value": "redacted"}], "origins": [],
         })
 
+    def test_status_read_does_not_write_lockfile(self):
+        self.service.storage_path.unlink()
+        lockfile = self.service.storage_path.with_name(
+            self.service.storage_path.name + ".lock"
+        )
+        lockfile.unlink(missing_ok=True)
+        self.assertEqual(self.service.get_status().state, "login_required")
+        self.assertFalse(lockfile.exists())
+
     def test_gateway_login_not_academic_home(self):
         page = Mock(url="https://v.guet.edu.cn/login?local_login=true")
         self.assertEqual(_classify_gateway_page(page, None), "expired")
