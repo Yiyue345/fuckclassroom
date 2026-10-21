@@ -17,4 +17,4 @@ jobs:
         with:
           python-version: '3.11'
       - name: Test WebVPN generation fencing and storage merge
-        run: python -m unittest tests.test_webvpn_broker -v
+        run: python -m unittest tests.test_webvpn_broker tests.test_webvpn_async_clear -v
