@@ -8,7 +8,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from fuckclassroom.auth.webvpn_storage import (
     WebVpnSessionError as GenerationError,
@@ -37,6 +37,54 @@ class WebVpnBrokerTests(unittest.TestCase):
             "cookies": [{"name": "webvpn", "domain": ".v.guet.edu.cn",
                          "path": "/", "value": "redacted"}], "origins": [],
         })
+
+    def test_visible_cas_auto_login_uses_broker_credentials_only(self):
+        page = Mock(url="https://cas.guet.edu.cn/authserver/login")
+        page.locator.return_value.count.return_value = 1
+        page.locator.return_value.is_visible.return_value = True
+        credentials = object()
+        self.store.load.return_value = credentials
+        with patch("fuckclassroom.auth.webvpn.is_sms_verification_page", return_value=False), \
+             patch("fuckclassroom.auth.webvpn.login_interaction_reason", return_value=""), \
+             patch("fuckclassroom.auth.webvpn.submit_saved_credentials", return_value=True) as submit:
+            result = self.service.submit_saved_login(page)
+        self.assertEqual(result, "submitted")
+        self.store.load.assert_called()
+        submit.assert_called_once_with(page, credentials)
+        self.assertIsInstance(result, str)
+
+    def test_saved_auto_login_rejects_untrusted_hosts_without_reading_secrets(self):
+        self.store.load.reset_mock()
+        page = Mock(url="https://attacker.example/login")
+        self.assertEqual(self.service.submit_saved_login(page), "not_cas")
+        page.url = "http://cas.guet.edu.cn/authserver/login"
+        self.assertEqual(self.service.submit_saved_login(page), "not_cas")
+        page.url = "https://v.guet.edu.cn/https/unsafe-app/login"
+        self.assertEqual(self.service.submit_saved_login(page), "not_cas")
+        self.store.load.assert_not_called()
+
+    def test_saved_auto_login_respects_otp_logout_and_missing_credentials(self):
+        page = Mock(url="https://cas.guet.edu.cn/authserver/login")
+        page.locator.return_value.count.return_value = 1
+        page.locator.return_value.is_visible.return_value = True
+        with patch("fuckclassroom.auth.webvpn.is_sms_verification_page", return_value=True):
+            self.assertEqual(self.service.submit_saved_login(page), "verification_required")
+        self.store.load.reset_mock()
+        with patch("fuckclassroom.auth.webvpn.is_sms_verification_page", return_value=False), \
+             patch("fuckclassroom.auth.webvpn.login_interaction_reason", return_value=""):
+            self.store.load.return_value = None
+            self.assertEqual(self.service.submit_saved_login(page), "no_credentials")
+            self.service.clear_session()
+            self.assertEqual(self.service.submit_saved_login(page), "logged_out")
+        self.store.load.assert_called_once()
+
+    def test_unready_login_form_never_reads_credentials(self):
+        page = Mock(url="https://cas.guet.edu.cn/authserver/login")
+        page.locator.return_value.count.return_value = 0
+        with patch("fuckclassroom.auth.webvpn.is_sms_verification_page", return_value=False), \
+             patch("fuckclassroom.auth.webvpn.login_interaction_reason", return_value=""):
+            self.assertEqual(self.service.submit_saved_login(page), "not_ready")
+        self.store.load.assert_not_called()
 
     def test_status_read_does_not_write_lockfile(self):
         self.service.storage_path.unlink()
