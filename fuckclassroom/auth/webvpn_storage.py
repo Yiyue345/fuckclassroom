@@ -14,7 +14,8 @@ import uuid
 import weakref
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from ..core.atomic import atomic_write_text
 from ..core.plugins import PluginServiceError
@@ -118,10 +119,77 @@ def _rotate_generation_unlocked(path: Path, *, logged_out: bool) -> str:
     return token
 
 
-def begin_session(path: Path) -> str:
-    """User-initiated connection/account authorization; invalidates old contexts."""
+# Shared SSO authentication scope; other plugins own their own origin cookies.
+# The parent-domain cookie is also shared by campus SSO and must not survive
+# an explicit relogin. Do not use guet.edu.cn as a wildcard for relogin.
+_DEFAULT_LOGIN_DOMAINS = ("v.guet.edu.cn", "cas.guet.edu.cn", "bkjwtest.guet.edu.cn")
+SessionStartMode = Literal["renewal", "relogin", "account_switch"]
+
+
+def _auth_scope(domain: str, *, mode: SessionStartMode, domains: tuple[str, ...]) -> bool:
+    host = domain.lower().lstrip(".").rstrip(".")
+    if mode == "account_switch":
+        return host == "guet.edu.cn" or host.endswith(".guet.edu.cn")
+    return host == "guet.edu.cn" or any(
+        host == owned or host.endswith("." + owned) for owned in domains
+    )
+
+
+def _purge_login_scope(state: dict[str, Any], *, mode: SessionStartMode,
+                       domains: tuple[str, ...]) -> dict[str, Any]:
+    """Drop owned login state, preserving unrelated plugin cookies/origins."""
+    cookies = [
+        item for item in state.get("cookies", [])
+        if not (isinstance(item, dict) and
+                _auth_scope(str(item.get("domain") or ""), mode=mode, domains=domains))
+    ]
+    origins = [
+        item for item in state.get("origins", [])
+        if not (isinstance(item, dict) and
+                _auth_scope(urlsplit(str(item.get("origin") or "")).hostname or "",
+                            mode=mode, domains=domains))
+    ]
+    return {"cookies": cookies, "origins": origins}
+
+
+def begin_session(
+    path: Path, *, mode: SessionStartMode = "relogin",
+    cookie_domains: tuple[str, ...] = (),
+) -> str:
+    """Enter a session using an explicit cookie ownership policy.
+
+    renewal: same account, no generation change or cookie removal; never
+        overrides a prior explicit logout.
+    relogin (default): rotate generation and remove gateway/CAS/undergrad
+        authentication state plus caller-owned domains.
+    account_switch: rotate generation and drop all campus .guet.edu.cn
+        state, preserving truly unrelated external plugin origins.
+
+    Both destructive policies run inside the same cross-process file lock as
+    generation fencing. Existing BrowserContexts and HTTP snapshots are stale.
+    """
+    if mode not in ("renewal", "relogin", "account_switch"):
+        raise ValueError(f"不支持的会话开始模式：{mode}")
+    domains = (*_DEFAULT_LOGIN_DOMAINS, *(str(d).lower().lstrip(".") for d in cookie_domains))
+    if any(not d or d == "guet.edu.cn" or not d.endswith(".guet.edu.cn")
+           or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789-." for c in d)
+           for d in domains):
+        raise WebVpnSessionError("登录 Cookie 所属域必须是明确的桂电子域名")
     with _locked_storage_file(path):
-        return _rotate_generation_unlocked(path, logged_out=False)
+        current, logged_out = _read_generation_unlocked(path)
+        if mode == "renewal":
+            if logged_out:
+                raise WebVpnSessionError("WebVPN 已主动退出，必须由用户明确重新登录")
+            return current
+        state = _purge_login_scope(_read_unlocked(path), mode=mode, domains=domains)
+        # Rotate generation BEFORE storing the filtered state. The storage
+        # lock prevents stale writes between rotation and removal.
+        generation = _rotate_generation_unlocked(path, logged_out=False)
+        if state["cookies"] or state["origins"]:
+            atomic_write_text(path, json.dumps(state, ensure_ascii=False))
+        else:
+            path.unlink(missing_ok=True)
+        return generation
 
 
 def invalidate_session(path: Path, *, timeout_seconds: float | None = None) -> None:
@@ -267,15 +335,24 @@ def new_browser_context(browser: Any, path: Path, *, reuse_saved_session: bool =
     state, generation = read_session_snapshot(path)
     context = (
         browser.new_context(storage_state=state)
-        if reuse_saved_session and state.get("cookies")
+        if reuse_saved_session and (state.get("cookies") or state.get("origins"))
         else browser.new_context()
     )
+    # A fresh login intentionally starts with an empty browser. Track only
+    # the former SSO-owned state as the deletion baseline; unrelated plugin
+    # state must survive the subsequent three-way merge.
+    before = state if reuse_saved_session else {
+        "cookies": [c for c in state.get("cookies", [])
+                    if isinstance(c, dict) and _auth_scope(
+                        str(c.get("domain") or ""), mode="relogin",
+                        domains=_DEFAULT_LOGIN_DOMAINS)],
+        "origins": [o for o in state.get("origins", [])
+                    if isinstance(o, dict) and _auth_scope(
+                        urlsplit(str(o.get("origin") or "")).hostname or "",
+                        mode="relogin", domains=_DEFAULT_LOGIN_DOMAINS)],
+    }
     with _context_guard:
-        _context_snapshots[context] = (
-            path.resolve(),
-            generation,
-            state if reuse_saved_session else {"cookies": [], "origins": []},
-        )
+        _context_snapshots[context] = (path.resolve(), generation, before)
     return context
 
 
@@ -299,7 +376,7 @@ def save_browser_context(path: Path, context: Any) -> None:
 
 
 __all__ = [
-    "WebVpnSessionError", "begin_session", "invalidate_session",
+    "WebVpnSessionError", "SessionStartMode", "begin_session", "invalidate_session",
     "session_generation", "read_storage_state", "read_session_snapshot",
     "save_storage_state", "new_browser_context", "save_browser_context",
 ]
