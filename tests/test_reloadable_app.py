@@ -326,6 +326,68 @@ class ReloadableApplicationTests(unittest.TestCase):
                 self.assertEqual(stops, [])
             self.assertEqual(stops, ["stop"])
 
+    def test_enable_requested_during_inactive_update_runs_after_file_swap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plugin_dir = Path(directory) / "plugins"
+            target = plugin_dir / "demo"
+            target.mkdir(parents=True)
+            version = target / "version.txt"
+            version.write_text("v1", encoding="utf-8")
+            enabled: set[str] = set()
+            builds: list[str] = []
+            install_started = threading.Event()
+            install_release = threading.Event()
+            result = {}
+
+            def factory(reload_callback, _reload_status):
+                revision = version.read_text(encoding="utf-8")
+                builds.append(revision)
+                app = FastAPI()
+                app.state.plugin_registry = SimpleNamespace(plugin_ids=tuple(enabled))
+                app.state.plugin_manager = SimpleNamespace(
+                    desired_enabled=lambda: set(enabled),
+                )
+                @app.get("/revision")
+                def revision_route():
+                    return {"revision": revision}
+                @app.post("/enable-demo")
+                async def enable_demo():
+                    enabled.add("demo")
+                    return {"scheduled": await reload_callback()}
+                return app
+
+            shell = ReloadableApplication(factory, plugin_dir=plugin_dir)
+            with TestClient(shell) as client:
+                self.assertEqual(client.get("/revision").json()["revision"], "v1")
+                def installer():
+                    install_started.set()
+                    if not install_release.wait(timeout=5):
+                        raise RuntimeError("installer timed out")
+                    version.write_text("v2", encoding="utf-8")
+                    return "v2"
+
+                worker = threading.Thread(
+                    target=lambda: result.setdefault(
+                        "value", shell.update_plugin_from_worker("demo", installer)
+                    )
+                )
+                worker.start()
+                try:
+                    self.assertTrue(install_started.wait(timeout=3))
+                    response = client.post("/enable-demo")
+                    self.assertEqual(response.status_code, 200)
+                    self.assertTrue(response.json()["scheduled"])
+                    # No competing rebuild while the inactive package is
+                    # being replaced; the reload request is held for later.
+                    self.assertEqual(builds, ["v1"])
+                finally:
+                    install_release.set()
+                    worker.join(timeout=5)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(result["value"], "v2")
+                self.assertEqual(client.get("/revision").json()["revision"], "v2")
+                self.assertEqual(builds, ["v1", "v2"])
+
     def test_shutdown_waits_until_plugin_update_finishes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plugin_dir = Path(directory) / "plugins"
