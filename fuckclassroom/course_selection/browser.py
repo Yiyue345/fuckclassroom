@@ -481,7 +481,7 @@ class SelectionBrowserMixin:
             return _ManagedContext(
                 playwright,
                 browser,
-                browser.new_context(storage_state=str(self.storage_state_path)),
+                self._new_login_context(browser),
                 timeout_ms,
             )
         except Exception:
