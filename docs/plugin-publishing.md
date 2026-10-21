@@ -166,12 +166,17 @@ pnpm build
 
 使用者：
 
-1. 刷新在线插件列表查看已安装版本及可安装版本。
-2. **先停用要更新的插件，以及依赖它且仍在运行的插件**。
-3. 点击更新。安装器使用临时目录和同文件系统替换，并在失败时尽量保留旧版本。
-4. 更新成功后手动重新启用，启用流程会请求现有 Runtime 热重载。当前不承诺“运行中的插件自动无感升级”。
+1. 在插件管理 → 在线插件查看本地版本、可安装版本、兼容状态，并通过「更新说明」打开对应的 GitHub Release Changelog。
+2. 直接点击「更新」，**不需要先手动停用插件或它的依赖者**。下载、版本匹配与 SHA-256（及可选 Ed25519）校验在后台执行。
+3. 若插件已加载到当前 Runtime，应用会暂时阻止**所有新请求**，等待在途请求完成（最多 60 秒），停止旧 generation，备份旧插件文件，原子安装新版本并启动新 generation。原有启用选择不会被清空，也不需要用户手动重新启用。
+4. 如果安装或新 Runtime 启动失败，应用尝试恢复插件目录备份并重启旧 generation；任务会明确报告结果。长连接／WebSocket／长任务可能导致 drain 超时并阻止本次更新，旧 Runtime 会继续运行，**不能承诺零停顿或完全无感更新**。
+5. **仅安装但未运行、也未配置启用的插件**可直接原子更新文件，不会因此停止或重建正在运行的其他插件。若更新期间用户同时更改插件启停，相关重载会等更新结束再执行。
 
-此阶段版本详情的 Changelog 在 Registry 中链接到 GitHub Release 页面；应用内尚不保证完整展示更新说明，具体内容请查看 Release。
+**运行环境限制：** 运行中插件的一键安全更新需要通过支持 generation swap 的 `create_reloadable_app()` 启动。单独 `create_app()` 或不可变插件配置不支持运行中热更新；此时请使用支持热重载的入口，不要强行覆盖正在执行的插件目录。
+
+**恢复建议：** 若任务报告回滚或旧 Runtime 恢复失败，请停止程序，备份 `data/plugins/`，检查同目录的 `.<id>.rollback-<uuid>` 备份，再在确认目标插件未运行的情况下恢复旧版本，检查日志并重新启动。**不要在程序仍运行时手动覆盖插件文件**。
+
+版本 Changelog 由 Registry 版本详情的 `changelog.url` 指向对应 GitHub Release；在线插件卡片提供查看链接。
 
 ## 8. 常见发布失败及排查
 
@@ -185,7 +190,9 @@ pnpm build
 | signature references unknown publisher key | 注册 Publisher signing_keys，检查 key_id 和签名格式 |
 | CI rejected immutable Release | 不可修改既有版本身份；请发布新 SemVer |
 | 插件市场找不到 Beta | 开启 Beta 渠道，并确认 Registry 已成功部署 |
-| 更新按钮不可用 | 先停用目标插件及其运行中依赖者 |
+| 更新按钮不可用 | 检查 Registry 兼容性、插件配置是否只读，或当前是否已有同插件安装任务；不需要先手动停用 |
+| 运行中更新等待很久 / drain timeout | 检查是否有在途 HTTP 长请求、WebSocket 或任务阻止旧 generation 安全退出；稍后再试 |
+| Runtime 更新失败或回滚失败 | 查看任务日志及 `data/plugins/.<id>.rollback-*` 备份，停止程序后再按上述步骤恢复 |
 | 安装成功但功能不可用 | 检查是否已启用、必需依赖、Runtime 日志与 Plugin API / RPC API 兼容性 |
 
 不要把 GitHub Token、登录 Cookie、私钥或任何用户数据打入插件 ZIP、公开 Release 或 Registry。

@@ -157,7 +157,7 @@ core_ui/static/task_status.js
 - 启用插件时会自动补齐 `requires` 依赖。
 - 停用基础依赖时，会同时停用所有依赖它的插件。
 - 插件配置保存到 `data/plugin_state.json`。
-- 插件路由、服务、静态挂载和 lifecycle 在应用启动时完成，因此启停变更保存后需要重启应用。
+- 插件路由、服务、静态挂载和 lifecycle 在 Runtime generation 启动时完成。使用 `create_reloadable_app()` 时启停变更可自动热重载；单独 `create_app()` 则需重启应用才能应用配置。
 - 若设置了 `FUCKCLASSROOM_PLUGINS`，或代码通过 `create_app(enabled_plugins=...)` 显式指定插件，管理页会进入只读模式，避免网页配置与启动参数互相覆盖。
 
 外部插件安装到 `data/plugins/<plugin_id>/`。管理页既支持填写本机插件目录/ZIP 路径，也支持直接选择 ZIP 文件上传安装。新安装的外部插件默认保持停用。
@@ -320,7 +320,7 @@ https://classroom.yiyuemeow.com/api/v1/registry.json
 3. 严格核对 Registry 声明的文件名、字节数与 SHA-256；
 4. Artifact 含 `ed25519-sha256-v1` 签名时，从 Publisher API 取得登记公钥并强制验签；
 5. 解压后再次核对 `plugin.json` 的 ID、版本和 runtime 声明与 Registry 记录一致；
-6. 新插件默认保持停用；更新已有插件时要求先停用插件及依赖它的插件，再进行同文件系统原子替换。
+6. 新插件默认保持停用；更新已有插件时无需先手动停用。运行中目标采用 Runtime 请求 drain → 停止旧 generation → 备份与原子替换 → 启动新 generation（失败尝试回滚）；完全未启用目标只做原子文件更新，不停机。
 
 下载与校验在任务中心执行，因此进度和错误会同时进入任务日志、控制台和本次启动日志文件。
 
