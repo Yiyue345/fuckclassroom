@@ -355,8 +355,11 @@ class WebVpnSessionService:
         """Trusted in_process browser handoff; cookies stay server-side."""
         save_browser_context(self.storage_path, browser_context)
 
-    def clear_session(self, *, timeout_seconds: float = 25.0) -> None:
-        """Bounded, atomic logout: a timeout never leaves a pending late logout.
+    def clear_session(
+        self, *, timeout_seconds: float = 25.0,
+        account_switch: bool = False,
+    ) -> None:
+        """Bounded, atomic logout or account switch; no delayed mutation.
 
         The caller waits for this method to finish. If a CAS/login lock remains
         busy, fail *before* touching generation, cookies or account credentials.
@@ -373,11 +376,17 @@ class WebVpnSessionService:
                     raise TimeoutError("登录状态清除已超时，未执行注销")
                 # Storage invalidation and the durable generation marker are
                 # committed together under the cross-process lock.
-                invalidate_session(self.storage_path, timeout_seconds=remaining)
+                invalidate_session(self.storage_path, timeout_seconds=remaining,
+                                   account_switch=account_switch)
                 self._logged_out = True
                 self._last_verified = 0.0
                 self.meta_path.unlink(missing_ok=True)
-                self._set("logged_out", "已主动退出，请手动重新连接", checked=True)
+                self._set(
+                    "logged_out",
+                    "统一账号已切换，请手动重新连接" if account_switch
+                    else "已主动退出，请手动重新连接",
+                    checked=True,
+                )
             finally:
                 self._login_lock.release()
         finally:
