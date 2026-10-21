@@ -114,7 +114,7 @@ class WebVpnRouteEventLoopTests(unittest.IsolatedAsyncioTestCase):
             worker.start()
             self.assertTrue(await asyncio.to_thread(login_held.wait, 2))
             original_clear = broker.clear_session
-            broker.clear_session = lambda: original_clear(timeout_seconds=0.12)
+            broker.clear_session = lambda **kwargs: original_clear(timeout_seconds=0.12, **kwargs)
 
             async def receive():
                 return {"type": "http.request", "body": b"account_username=next", "more_body": False}
