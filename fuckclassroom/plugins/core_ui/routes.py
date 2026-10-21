@@ -283,9 +283,12 @@ def build_router(context: PluginContext) -> APIRouter:
             note = f"{descriptor.name} v{descriptor.version} 已{action_text}"
             if action == "update":
                 if callable(transaction):
-                    # Transaction waited for drain, restart and rollback before
-                    # reporting completion; original enabled state is intact.
-                    note += "，Runtime 已自动恢复，原有启用状态保持不变"
+                    # The coordinator restarts active plugins but intentionally
+                    # only swaps files for inactive plugins (no global drain).
+                    if plugin_id in current_enabled or plugin_id in plugin_manager.desired_enabled():
+                        note += "，Runtime 已自动恢复，原有启用状态保持不变"
+                    else:
+                        note += "，未启用插件已更新，其他运行中插件不受影响"
                 else:
                     progress(96, "正在将插件更新应用到 Runtime")
                     callback = services.maybe("plugin_reload_wait")
