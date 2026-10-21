@@ -1307,9 +1307,24 @@ class PluginManager:
         if descriptor.root is None:
             raise PluginManagerError(f"外部插件 {descriptor.id} 缺少安装目录")
         entry = descriptor.root / descriptor.entry
-        module_suffix = hashlib.sha256(descriptor.id.encode("utf-8")).hexdigest()[:10]
+        # Every generation needs an isolated Python package namespace.
+        # Reloading only plugin.py under a stable name would reuse cached
+        # .services/.routes submodules from the previous plugin release.
+        module_suffix = uuid.uuid4().hex
         safe_id = descriptor.id.replace("-", "_")
         module_name = f"fuckclassroom_external_{safe_id}_{module_suffix}"
+        # Timestamp-based .pyc validation can falsely accept stale bytecode
+        # when two releases are written within one second at equal file size.
+        # Only remove this plugin's caches; do not touch other packages.
+        for cache_dir in descriptor.root.rglob("__pycache__"):
+            if cache_dir.is_dir() and not cache_dir.is_symlink():
+                try:
+                    shutil.rmtree(cache_dir)
+                except OSError as exc:
+                    raise PluginManagerError(
+                        f"无法清理插件 {descriptor.id} 的旧 Python 字节码缓存：{exc}"
+                    ) from exc
+        importlib.invalidate_caches()
         spec = importlib.util.spec_from_file_location(
             module_name,
             entry,
@@ -1322,7 +1337,9 @@ class PluginManager:
         try:
             spec.loader.exec_module(module)
         except Exception:
-            sys.modules.pop(module_name, None)
+            for name in tuple(sys.modules):
+                if name == module_name or name.startswith(module_name + "."):
+                    sys.modules.pop(name, None)
             raise
         return module
 
