@@ -239,6 +239,7 @@ class WebVpnSessionService:
                     context = self.new_browser_context(browser)
                     page = context.new_page()
                     response = page.goto(GATEWAY_URL, wait_until="domcontentloaded", timeout=15_000)
+                    page.wait_for_timeout(900)
                     classification = _classify_gateway_page(page, response)
                     if classification == "authenticated":
                         self.save_browser_state(context)
@@ -310,7 +311,8 @@ class WebVpnSessionService:
                     page = context.new_page()
                     response = page.goto(GATEWAY_URL, wait_until="domcontentloaded", timeout=15_000)
                     submitted = bool(credentials and submit_saved_credentials(page, credentials))
-                    deadline = time.monotonic() + min(self._recovery_timeout, self.config.login_timeout_seconds)
+                    submitted_at = time.monotonic()
+                    deadline = submitted_at + min(self._recovery_timeout, self.config.login_timeout_seconds)
                     while time.monotonic() < deadline:
                         outcome = _classify_gateway_page(page, response)
                         if outcome == "authenticated":
@@ -327,7 +329,7 @@ class WebVpnSessionService:
                         if reason:
                             if not interactive_allowed:
                                 return self._set("verification_required", "统一认证需要人工验证")
-                        if not interactive_allowed and (not submitted or outcome == "expired"):
+                        if not interactive_allowed and (not submitted or (outcome == "expired" and time.monotonic() - submitted_at >= 8)):
                             return self._set("verification_required" if credentials else "login_required",
                                              "需要在浏览器中完成学校统一身份认证")
                         page.wait_for_timeout(500)
@@ -355,7 +357,7 @@ class WebVpnSessionService:
 
     def save_browser_state(self, browser_context: Any) -> None:
         """Trusted in_process browser handoff; cookies stay server-side."""
-        with self._login_lock:
+        with _state_lock(self.storage_path):
             if self._logged_out:
                 raise WebVpnSessionError("用户已主动退出，禁止保存旧会话")
             save_storage_state(self.storage_path, browser_context.storage_state())
