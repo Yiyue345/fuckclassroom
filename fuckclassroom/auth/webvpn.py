@@ -171,6 +171,7 @@ class WebVpnSessionService:
         self._last_verified = 0.0
         self._status = WebVpnStatus("unknown", "尚未验证 WebVPN 网关")
         self._logged_out = False
+        self._known_generation = session_generation(self.storage_path)[0]
         try:
             payload = json.loads(self.status_path.read_text(encoding="utf-8"))
             self._logged_out = payload.get("state") == "logged_out"
@@ -181,14 +182,18 @@ class WebVpnSessionService:
 
     def _set(self, state: WebVpnState, reason: str, *, checked: bool = False) -> WebVpnStatus:
         status = WebVpnStatus(state, reason, _now() if checked else self._status.checked_at)
+        self._known_generation = session_generation(self.storage_path)[0]
         self._status = status
         atomic_write_text(self.status_path, json.dumps(asdict(status), ensure_ascii=False))
         return status
 
     def get_status(self) -> WebVpnStatus:
         """Side-effect-free snapshot: no HTTP requests and no cookie disclosure."""
-        if session_generation(self.storage_path)[1]:
+        generation, logged_out = session_generation(self.storage_path)
+        if logged_out:
             return WebVpnStatus("logged_out", "已主动退出，请手动重新连接", self._status.checked_at)
+        if generation != self._known_generation:
+            return WebVpnStatus("unknown", "WebVPN 登录会话已在其他进程中更新，请重新验证", self._status.checked_at)
         if not _has_gateway_cookie(read_storage_state(self.storage_path)):
             if self._status.state == "authenticated":
                 return WebVpnStatus("unknown", "未找到网关 Cookie", self._status.checked_at)
@@ -241,7 +246,8 @@ class WebVpnSessionService:
     def ensure_authenticated(self, interactive_allowed: bool = True) -> WebVpnStatus:
         if session_generation(self.storage_path)[1]:
             return self.get_status()
-        if self._status.is_authenticated and time.monotonic() - self._last_verified < 30:
+        if (session_generation(self.storage_path)[0] == self._known_generation
+                and self._status.is_authenticated and time.monotonic() - self._last_verified < 30):
             return self.get_status()
         # All concurrent callers use this single flight; the second entrant
         # observes its result rather than launching another Chromium/login.
@@ -250,7 +256,8 @@ class WebVpnSessionService:
         try:
             if session_generation(self.storage_path)[1]:
                 return self.get_status()
-            if self._status.is_authenticated and time.monotonic() - self._last_verified < 30:
+            if (session_generation(self.storage_path)[0] == self._known_generation
+                    and self._status.is_authenticated and time.monotonic() - self._last_verified < 30):
                 return self.get_status()
             now = time.monotonic()
             if self._last_attempt and now - self._last_attempt < self._cooldown:
