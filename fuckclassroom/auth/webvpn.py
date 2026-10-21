@@ -6,8 +6,10 @@ No browser cookie, credential, CAS ticket or Playwright state is exposed by stat
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,7 +34,7 @@ WebVpnState = Literal[
     "verification_required", "unreachable", "recovering", "failed", "logged_out",
 ]
 
-# Lock the session file, not each browser context. Shared by the academic plugin.
+# Shared by academic and browser plugins, including their isolated worker processes.
 _state_locks_guard = threading.Lock()
 _state_locks: dict[str, threading.RLock] = {}
 
@@ -41,6 +43,37 @@ def _state_lock(path: Path) -> threading.RLock:
     key = str(path.resolve())
     with _state_locks_guard:
         return _state_locks.setdefault(key, threading.RLock())
+
+
+@contextmanager
+def _locked_storage_file(path: Path):
+    """An advisory lock for atomic cross-process read/merge/write on Win/POSIX."""
+    with _state_lock(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = path.with_name(path.name + ".lock")
+        with lock_path.open("a+b") as lock_file:
+            if os.name == "nt":
+                import msvcrt
+
+                lock_file.seek(0)
+                if not lock_file.read(1):
+                    lock_file.seek(0)
+                    lock_file.write(b"0")
+                    lock_file.flush()
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if os.name == "nt":
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 class WebVpnSessionError(PluginServiceError):
@@ -106,15 +139,19 @@ def _has_gateway_cookie(state: dict[str, Any]) -> bool:
     )
 
 
-def read_storage_state(path: Path) -> dict[str, Any]:
-    with _state_lock(path):
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict) or not isinstance(raw.get("cookies", []), list):
-                return {"cookies": [], "origins": []}
-            return raw
-        except (OSError, ValueError, TypeError):
+def _read_storage_unlocked(path: Path) -> dict[str, Any]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict) or not isinstance(raw.get("cookies", []), list):
             return {"cookies": [], "origins": []}
+        return raw
+    except (OSError, ValueError, TypeError):
+        return {"cookies": [], "origins": []}
+
+
+def read_storage_state(path: Path) -> dict[str, Any]:
+    with _locked_storage_file(path):
+        return _read_storage_unlocked(path)
 
 
 def save_storage_state(path: Path, state: dict[str, Any]) -> None:
@@ -126,8 +163,8 @@ def save_storage_state(path: Path, state: dict[str, Any]) -> None:
     """
     if not isinstance(state, dict) or not isinstance(state.get("cookies"), list):
         raise WebVpnSessionError("无效的浏览器会话结构")
-    with _state_lock(path):
-        old = read_storage_state(path)
+    with _locked_storage_file(path):
+        old = _read_storage_unlocked(path)
         cookies: dict[tuple[str, str, str], dict[str, Any]] = {}
         for entry in [*old.get("cookies", []), *state.get("cookies", [])]:
             if not isinstance(entry, dict):
@@ -368,8 +405,8 @@ class WebVpnSessionService:
             with self._login_lock:
                 self._logged_out = True
                 self._last_verified = 0.0
-                for path in (self.storage_path, self.meta_path):
-                    with _state_lock(self.storage_path):
+                with _locked_storage_file(self.storage_path):
+                    for path in (self.storage_path, self.meta_path):
                         path.unlink(missing_ok=True)
                 self._set("logged_out", "已主动退出，请手动重新连接", checked=True)
 
