@@ -664,10 +664,13 @@ def build_router(context: PluginContext) -> APIRouter:
             )
 
         try:
+            previous_credentials = credential_store.load()
             updated = settings_store.update_from_form(form)
-            credential_store.update_from_form(
+            saved_credentials = credential_store.update_from_form(
                 form.get("account_username", ""), form.get("account_password", "")
             )
+            if previous_credentials != saved_credentials:
+                services.get("webvpn_session").clear_session()
         except (CredentialStoreError, OSError) as exc:
             rollback_errors: list[str] = []
             for path, snapshot in (
@@ -703,12 +706,14 @@ def build_router(context: PluginContext) -> APIRouter:
     def clear_selection_credentials() -> RedirectResponse:
         try:
             credential_store.clear()
-        except CredentialStoreError as exc:
+            services.get("webvpn_session").clear_session()
+        except (CredentialStoreError, OSError) as exc:
             return RedirectResponse(f"/settings?credential_error={quote(str(exc))}", status_code=303)
         return RedirectResponse("/settings?credentials_cleared=1", status_code=303)
 
     @router.post("/settings/login-state/clear")
     async def clear_login_state() -> RedirectResponse:
+        services.get("webvpn_session").clear_session()
         errors = await context.clear_plugin_sessions()
         if errors:
             return RedirectResponse(
