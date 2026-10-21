@@ -71,7 +71,7 @@ class RealPluginZipIntegrationTests(unittest.TestCase):
             fresh, generation = read_session_snapshot(broker.storage_path)
             save_storage_state(
                 broker.storage_path, {"cookies": [
-                    {"name": "other", "domain": "bkjwtest.guet.edu.cn", "path": "/", "value": "keep"}
+                    {"name": "other", "domain": "library.guet.edu.cn", "path": "/", "value": "keep"}
                 ], "origins": []},
                 expected_generation=generation,
             )
