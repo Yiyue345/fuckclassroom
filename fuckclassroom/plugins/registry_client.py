@@ -242,6 +242,7 @@ class PluginRegistryClient:
         current_enabled: tuple[str, ...] | list[str] | set[str] = (),
         channels: tuple[str, ...] = ("stable",),
         progress=None,
+        update_transaction: Callable[[str, Callable[[], PluginDescriptor]], PluginDescriptor] | None = None,
     ) -> tuple[PluginDescriptor, str, bool]:
         plan = self.resolve_install_plan(
             plugin_id,
@@ -255,8 +256,11 @@ class PluginRegistryClient:
             raise PluginRegistryError(
                 plan.compatibility_message or f"插件 {plan.name} 没有可安装版本"
             )
-        if plan.update_blocked:
-            raise PluginRegistryError("更新插件前请先停用该插件及依赖它的插件")
+        if plan.update_blocked and update_transaction is None:
+            raise PluginRegistryError(
+                "当前运行模式不支持自动卸载并更新运行中的插件；"
+                "请使用支持 Runtime 热重载的应用入口"
+            )
 
         record = plan.version_record
         runtime = record.get("runtime")
@@ -283,13 +287,28 @@ class PluginRegistryClient:
             self._download_slots.release()
         try:
             self._report(progress, 82, "正在验证插件包声明")
-            descriptor = self.manager.install_from_path(
-                str(zip_path),
-                replace=plan.action == "update",
-                expected_id=plan.plugin_id,
-                expected_version=plan.target_version,
-                expected_runtime=runtime,
-            )
+            if plan.action == "update" and update_transaction is not None:
+                # The runtime coordinator drains and stops the previous
+                # generation BEFORE the manager is permitted to replace files.
+                descriptor = update_transaction(
+                    plan.plugin_id,
+                    lambda: self.manager.install_from_path(
+                        str(zip_path),
+                        replace=True,
+                        expected_id=plan.plugin_id,
+                        expected_version=plan.target_version,
+                        expected_runtime=runtime,
+                        allow_stopped_runtime_replace=True,
+                    ),
+                )
+            else:
+                descriptor = self.manager.install_from_path(
+                    str(zip_path),
+                    replace=plan.action == "update",
+                    expected_id=plan.plugin_id,
+                    expected_version=plan.target_version,
+                    expected_runtime=runtime,
+                )
         finally:
             zip_path.unlink(missing_ok=True)
 
@@ -364,7 +383,9 @@ class PluginRegistryClient:
                 comparison = self._compare_versions(target_version, installed_version)
                 if comparison > 0:
                     action = "update"
-                    update_blocked = plugin_id in desired or plugin_id in current
+                    # The updater coordinates suspension and restart for
+                    # active plugins; never disable the UI action here.
+                    update_blocked = False
                 else:
                     action = "installed"
         elif chosen is not None:
