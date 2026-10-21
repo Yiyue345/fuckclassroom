@@ -35,62 +35,11 @@ WebVpnState = Literal[
     "verification_required", "unreachable", "recovering", "failed", "logged_out",
 ]
 
-# Shared by academic and browser plugins, including their isolated worker processes.
-_state_locks_guard = threading.Lock()
-_state_locks: dict[str, threading.RLock] = {}
-
-
-def _state_lock(path: Path) -> threading.RLock:
-    key = str(path.resolve())
-    with _state_locks_guard:
-        return _state_locks.setdefault(key, threading.RLock())
-
-
-@contextmanager
-def _locked_storage_file(path: Path):
-    """An advisory lock for atomic cross-process read/merge/write on Win/POSIX."""
-    with _state_lock(path):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = path.with_name(path.name + ".lock")
-        with lock_path.open("a+b") as lock_file:
-            if os.name == "nt":
-                import msvcrt
-
-                lock_file.seek(0)
-                if not lock_file.read(1):
-                    lock_file.seek(0)
-                    lock_file.write(b"0")
-                    lock_file.flush()
-                lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                if os.name == "nt":
-                    lock_file.seek(0)
-                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-
-
-class WebVpnSessionError(PluginServiceError):
-    """Invalid browser handoff or unsafe URL, without private session data."""
-
-
-@dataclass(frozen=True)
-class WebVpnStatus:
-    state: WebVpnState
-    reason: str
-    checked_at: str | None = None
-    retry_after: int = 0
-
-    @property
-    def is_authenticated(self) -> bool:
-        return self.state == "authenticated"
+from .webvpn_storage import (
+    WebVpnSessionError, begin_session, invalidate_session, session_generation,
+    read_storage_state, save_storage_state, new_browser_context, save_browser_context,
+    read_session_snapshot,
+)
 
 
 def validate_webvpn_url(url: str, *, allowed_origins: tuple[str, ...] = ()) -> str:
@@ -148,38 +97,6 @@ def _read_storage_unlocked(path: Path) -> dict[str, Any]:
         return raw
     except (OSError, ValueError, TypeError):
         return {"cookies": [], "origins": []}
-
-
-def read_storage_state(path: Path) -> dict[str, Any]:
-    """Atomic rename makes lock-free cross-process reads safe and side-effect-free."""
-    with _state_lock(path):
-        return _read_storage_unlocked(path)
-
-
-def save_storage_state(path: Path, state: dict[str, Any]) -> None:
-    """Merge session domains and atomically replace storage_state.json.
-
-    This prevents the gateway browser from dropping unrelated JW cookies, and
-    the academic browser from dropping gateway cookies. Caller must not persist
-    after an explicit logout. Only trusted server-side code may call this.
-    """
-    if not isinstance(state, dict) or not isinstance(state.get("cookies"), list):
-        raise WebVpnSessionError("无效的浏览器会话结构")
-    with _locked_storage_file(path):
-        old = _read_storage_unlocked(path)
-        cookies: dict[tuple[str, str, str], dict[str, Any]] = {}
-        for entry in [*old.get("cookies", []), *state.get("cookies", [])]:
-            if not isinstance(entry, dict):
-                continue
-            name, domain, cookie_path = entry.get("name"), entry.get("domain"), entry.get("path", "/")
-            if isinstance(name, str) and isinstance(domain, str):
-                cookies[(name, domain.lower(), str(cookie_path))] = entry
-        origins = {}
-        for entry in [*old.get("origins", []), *state.get("origins", [])]:
-            if isinstance(entry, dict) and isinstance(entry.get("origin"), str):
-                origins[entry["origin"]] = entry
-        merged = {"cookies": list(cookies.values()), "origins": list(origins.values())}
-        atomic_write_text(path, json.dumps(merged, ensure_ascii=False))
 
 
 def _classify_gateway_page(page: Any, response: Any) -> WebVpnState:
@@ -258,7 +175,7 @@ class WebVpnSessionService:
 
     def get_status(self) -> WebVpnStatus:
         """Side-effect-free snapshot: no HTTP requests and no cookie disclosure."""
-        if self._logged_out:
+        if session_generation(self.storage_path)[1]:
             return WebVpnStatus("logged_out", "已主动退出，请手动重新连接", self._status.checked_at)
         if not _has_gateway_cookie(read_storage_state(self.storage_path)):
             if self._status.state == "authenticated":
@@ -300,7 +217,7 @@ class WebVpnSessionService:
         return self._set("unknown", "无法确认网关登录状态，未触发自动重登", checked=True)
 
     def verify(self) -> WebVpnStatus:
-        if self._logged_out:
+        if session_generation(self.storage_path)[1]:
             return self.get_status()
         if not self._login_lock.acquire(timeout=self._recovery_timeout):
             return self._set("recovering", "其他登录流程仍在进行中")
@@ -310,7 +227,7 @@ class WebVpnSessionService:
             self._login_lock.release()
 
     def ensure_authenticated(self, interactive_allowed: bool = True) -> WebVpnStatus:
-        if self._logged_out:
+        if session_generation(self.storage_path)[1]:
             return self.get_status()
         if self._status.is_authenticated and time.monotonic() - self._last_verified < 30:
             return self.get_status()
@@ -319,7 +236,7 @@ class WebVpnSessionService:
         if not self._recovery_lock.acquire(timeout=self._recovery_timeout):
             return WebVpnStatus("recovering", "等待 WebVPN 会话恢复超时")
         try:
-            if self._logged_out:
+            if session_generation(self.storage_path)[1]:
                 return self.get_status()
             if self._status.is_authenticated and time.monotonic() - self._last_verified < 30:
                 return self.get_status()
@@ -397,25 +314,27 @@ class WebVpnSessionService:
         except Exception:
             return self._set("unreachable", "登录流程无法启动或网关连接失败")
 
-    def reconnect(self, *, interactive_allowed: bool = True) -> WebVpnStatus:
-        """Explicit user action after logout; never called by automatic recovery."""
+    def authorize_login(self) -> None:
+        """Explicit user action only. Mint a new generation before a fresh login."""
         with self._recovery_lock:
-            self._logged_out = False
-            self._last_attempt = 0.0
-            self._set("login_required", "用户请求重新连接 WebVPN")
+            with self._login_lock:
+                begin_session(self.storage_path)
+                self._logged_out = False
+                self._last_attempt = 0.0
+                self._last_verified = 0.0
+                self._set("login_required", "用户请求重新连接 WebVPN")
+
+    def reconnect(self, *, interactive_allowed: bool = True) -> WebVpnStatus:
+        self.authorize_login()
         return self.ensure_authenticated(interactive_allowed=interactive_allowed)
 
     def new_browser_context(self, browser: Any) -> Any:
         """Trusted in_process plugin only. Do not return this context via RPC."""
-        state = read_storage_state(self.storage_path)
-        return browser.new_context(storage_state=state) if state.get("cookies") else browser.new_context()
+        return new_browser_context(browser, self.storage_path)
 
     def save_browser_state(self, browser_context: Any) -> None:
         """Trusted in_process browser handoff; cookies stay server-side."""
-        with _state_lock(self.storage_path):
-            if self._logged_out:
-                raise WebVpnSessionError("用户已主动退出，禁止保存旧会话")
-            save_storage_state(self.storage_path, browser_context.storage_state())
+        save_browser_context(self.storage_path, browser_context)
 
     def clear_session(self) -> None:
         """Explicit logout, preserving user credentials but preventing auto-relogin."""
@@ -423,9 +342,8 @@ class WebVpnSessionService:
             with self._login_lock:
                 self._logged_out = True
                 self._last_verified = 0.0
-                with _locked_storage_file(self.storage_path):
-                    for path in (self.storage_path, self.meta_path):
-                        path.unlink(missing_ok=True)
+                invalidate_session(self.storage_path)
+                self.meta_path.unlink(missing_ok=True)
                 self._set("logged_out", "已主动退出，请手动重新连接", checked=True)
 
     logout = clear_session
@@ -434,4 +352,5 @@ class WebVpnSessionService:
 __all__ = [
     "GATEWAY_URL", "WebVpnStatus", "WebVpnSessionService", "WebVpnSessionError",
     "validate_webvpn_url", "safe_history_url", "save_storage_state", "read_storage_state",
+    "new_browser_context", "save_browser_context", "read_session_snapshot",
 ]
