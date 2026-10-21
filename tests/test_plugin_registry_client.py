@@ -615,7 +615,7 @@ class PluginRegistryClientTests(unittest.TestCase):
             record.pop("changelog", None)
             self.assertEqual(FakeRegistryClient(manager, responses).catalog()[0]["changelog_url"], "")
 
-    def test_update_is_blocked_while_installed_plugin_is_active(self) -> None:
+    def test_active_plugin_updates_are_available_without_manual_disable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             plugin = root / "plugins" / "demo"
@@ -647,7 +647,7 @@ class PluginRegistryClientTests(unittest.TestCase):
             rows = client.catalog(current_enabled={"demo"})
 
             self.assertEqual(rows[0]["action"], "update")
-            self.assertTrue(rows[0]["update_blocked"])
+            self.assertFalse(rows[0]["update_blocked"])
 
     def test_ed25519_signature_verification_uses_registry_domain_payload(self) -> None:
         private_key = Ed25519PrivateKey.generate()
