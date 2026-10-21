@@ -35,7 +35,17 @@ def setup_services(context: PluginContext) -> None:
         SelectionCredentialStore(_credential_path(config)),
     )
     context.services.add("verification_broker", LoginVerificationBroker())
-    context.services.add("login_lock", threading.Lock())
+    context.services.add("login_lock", threading.RLock())
+    from ...auth.webvpn import WebVpnSessionService
+    context.services.add(
+        "webvpn_session",
+        WebVpnSessionService(
+            config,
+            credential_store=context.services.get("credential_store"),
+            verification_broker=context.services.get("verification_broker"),
+            login_lock=context.services.get("login_lock"),
+        ),
+    )
 
 
 __all__ = ["setup_services"]
