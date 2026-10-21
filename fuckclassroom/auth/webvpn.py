@@ -362,6 +362,13 @@ class WebVpnSessionService:
                     submitted_at = time.monotonic()
                     deadline = submitted_at + min(self._recovery_timeout, self.config.login_timeout_seconds)
                     while time.monotonic() < deadline:
+                        # CAS can render the credential form only *after* its SSO
+                        # redirect, so a single submission immediately after goto
+                        # is insufficient. Never submit more than once per attempt.
+                        if credentials and not submitted:
+                            submitted = bool(submit_saved_credentials(page, credentials))
+                            if submitted:
+                                submitted_at = time.monotonic()
                         outcome = _classify_gateway_page(page, response)
                         if outcome == "authenticated":
                             self.save_browser_state(context)
