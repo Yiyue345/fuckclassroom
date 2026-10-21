@@ -161,6 +161,68 @@ for i in range(30):
         self.assertEqual(local["https://v.guet.edu.cn"], {"keep": "same"})
         self.assertEqual(local["https://other.guet.edu.cn"], {"unrelated": "1"})
 
+    def test_timeout_with_login_lock_never_performs_late_logout(self):
+        holding = threading.Event()
+        release = threading.Event()
+
+        def login_in_progress():
+            with self.service._login_lock:
+                holding.set()
+                release.wait(timeout=4)
+
+        busy = threading.Thread(target=login_in_progress)
+        busy.start()
+        try:
+            self.assertTrue(holding.wait(timeout=1))
+            before_generation = session_generation(self.service.storage_path)
+            with self.assertRaisesRegex(TimeoutError, "超时"):
+                self.service.clear_session(timeout_seconds=0.12)
+            self.assertEqual(session_generation(self.service.storage_path), before_generation)
+            self.assertTrue(self.service.storage_path.exists())
+        finally:
+            release.set()
+            busy.join(timeout=2)
+        # A later user connection must not be wiped by a timed-out waiter.
+        begin_session(self.service.storage_path)
+        after_generation = session_generation(self.service.storage_path)
+        time.sleep(0.08)
+        self.assertEqual(session_generation(self.service.storage_path), after_generation)
+        self.assertTrue(self.service.storage_path.exists())
+
+    def test_timeout_with_storage_file_lock_leaves_session_untouched(self):
+        import multiprocessing
+        from fuckclassroom.auth.webvpn_storage import _locked_storage_file
+
+        with _locked_storage_file(self.service.storage_path):
+            # The OS file lock is per process; a different process must hold it
+            # for this boundary to be meaningful. Use a child that holds it.
+            pass
+        ready = Path(self.tmp.name) / "ready.lock"
+        release = Path(self.tmp.name) / "release.lock"
+        code = """
+import sys,time
+from pathlib import Path
+from fuckclassroom.auth.webvpn_storage import _locked_storage_file
+storage,ready,release = map(Path, sys.argv[1:])
+with _locked_storage_file(storage):
+    ready.touch()
+    while not release.exists():
+        time.sleep(.025)
+"""
+        proc = subprocess.Popen([sys.executable,"-c",code,str(self.service.storage_path),str(ready),str(release)])
+        try:
+            deadline=time.monotonic()+3
+            while not ready.exists() and time.monotonic()<deadline:
+                time.sleep(.025)
+            self.assertTrue(ready.exists())
+            with self.assertRaises(TimeoutError):
+                self.service.clear_session(timeout_seconds=0.15)
+            self.assertTrue(self.service.storage_path.exists())
+            self.assertFalse(session_generation(self.service.storage_path)[1])
+        finally:
+            release.touch()
+            self.assertEqual(proc.wait(timeout=5),0)
+
     def test_process_b_cannot_resurrect_a_context_after_logout(self):
         signal_path = Path(self.tmp.name) / "start"
         ready_path = Path(self.tmp.name) / "ready"
