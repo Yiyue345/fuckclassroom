@@ -30,6 +30,24 @@ from ..core.plugins import PluginServiceError
 GATEWAY_URL = "https://v.guet.edu.cn/"
 GATEWAY_HOST = "v.guet.edu.cn"
 CAS_HOST = "cas.guet.edu.cn"
+# Verified gateway-rewritten GUET CAS endpoint; do not widen this to arbitrary
+# gateway /https/ paths, which might host unrelated login forms.
+CAS_GATEWAY_PATH = (
+    "/https/"
+    "77726476706e69737468656265737421f3f652d220256d44300d8db9d6562d"
+    "/authserver/login"
+)
+
+
+def _trusted_gateway_cas(url: str) -> bool:
+    parts = urlsplit(url)
+    return bool(
+        parts.scheme == "https"
+        and parts.hostname == GATEWAY_HOST
+        and parts.port in (None, 443)
+        and not parts.username and not parts.password
+        and parts.path.lower().rstrip("/") == CAS_GATEWAY_PATH
+    )
 WebVpnState = Literal[
     "unknown", "authenticated", "expired", "login_required",
     "verification_required", "unreachable", "recovering", "failed", "logged_out",
@@ -120,9 +138,10 @@ def _classify_gateway_page(page: Any, response: Any) -> WebVpnState:
     url = str(page.url)
     parts = urlsplit(url)
     host, path = (parts.hostname or "").lower(), parts.path.lower()
-    if host == CAS_HOST or (host == GATEWAY_HOST and (
-        path.startswith("/login") or path.startswith("/wengine-auth/login")
-    )):
+    if (host == CAS_HOST or _trusted_gateway_cas(url)
+            or (host == GATEWAY_HOST and (
+                path.startswith("/login") or path.startswith("/wengine-auth/login")
+            ))):
         return "expired"
     if host != GATEWAY_HOST:
         return "unknown"
@@ -130,15 +149,15 @@ def _classify_gateway_page(page: Any, response: Any) -> WebVpnState:
     if code in (401, 403):
         return "expired" if path.startswith("/login") else "unknown"
     try:
+        # Login pages can show WebVPN links for school help, activation,
+        # announcements, and QR login. Such links are never proof of auth.
+        if page.locator('#pwdFromId #password, input[type="password"]').count():
+            return "expired"
         marker = page.evaluate("""() => !!(
           document.querySelector('a[href*="logout"], a[href*="Logout"], [data-action="logout"]')
-          || document.querySelector('a[href^="/https/"], a[href^="/http/"]')
-          || document.querySelector('a[href*="/https/777"], a[href*="/http/777"]')
         )""")
         if marker:
             return "authenticated"
-        if page.locator('#pwdFromId #password, input[type="password"]').count():
-            return "expired"
     except Exception:
         pass
     return "unknown"
@@ -349,11 +368,14 @@ class WebVpnSessionService:
             host = (parsed.hostname or "").lower()
             path = parsed.path.lower()
             if parsed.scheme != "https" or not (
-                host == CAS_HOST or
+                (host == CAS_HOST and parsed.port in (None, 443)
+                 and not parsed.username and not parsed.password) or
+                _trusted_gateway_cas(str(page.url)) or
                 (host == GATEWAY_HOST and (
                     path.startswith("/authserver/") or
                     path.startswith("/wengine-auth/login")
-                ))
+                ) and parsed.port in (None, 443)
+                 and not parsed.username and not parsed.password)
             ):
                 return "not_cas"
             if is_sms_verification_page(page) or login_interaction_reason(page):
