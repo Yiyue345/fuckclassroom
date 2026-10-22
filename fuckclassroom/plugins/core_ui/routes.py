@@ -796,6 +796,12 @@ def build_router(context: PluginContext) -> APIRouter:
             },
         )
 
+    @router.get("/api/tasks")
+    def api_tasks_overview() -> JSONResponse:
+        response = JSONResponse({"tasks": task_manager.list_recent_summaries()})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     @router.get("/api/tasks/{task_id}")
     def api_task_status(task_id: str) -> dict[str, object]:
         task = task_manager.as_dict(task_id)
