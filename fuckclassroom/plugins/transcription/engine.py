@@ -4,7 +4,7 @@ import gc
 import shutil
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +51,8 @@ _OPENCC_LOCK = threading.Lock()
 _PREPARATION_HEARTBEAT_SECONDS = 10.0
 _REMOTE_CHUNK_SECONDS = 10 * 60.0
 _REMOTE_DECODE_WORKERS = 2
+_REMOTE_OPEN_TIMEOUT_SECONDS = 10.0
+_REMOTE_READ_TIMEOUT_SECONDS = 15.0
 _REMOTE_CHUNK_OVERLAP_SECONDS = 1.5
 _RANGE_PROBE_TIMEOUT_SECONDS = 8.0
 _RANGE_SUPPORT_CACHE: dict[str, bool] = {}
@@ -305,6 +307,13 @@ class LocalTranscriptionService:
         prefetch_limit = min(len(chunks), prefetch_queue_size + 1)
 
         executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="asr-audio-decode")
+        stop_decode = threading.Event()
+
+        def check_decode_stopped() -> None:
+            # Only the task thread may use the progress RPC connection. Decode
+            # workers observe a local flag, including while the task unwinds.
+            if stop_decode.is_set():
+                raise _ChunkedDecodeError("音频预取已停止")
 
         def submit_one() -> None:
             nonlocal next_submit
@@ -317,47 +326,54 @@ class LocalTranscriptionService:
                 chunk.decode_start,
                 chunk.decode_end,
                 16000,
-                _cancel_check(progress),
+                check_decode_stopped,
             )
             next_submit += 1
 
-        for _ in range(prefetch_limit):
-            submit_one()
-
-        _log(
-            progress,
-            f"音频预取队列 {max(0, len(future_by_index) - 1)}/{prefetch_queue_size}"
-            f"（解码 Worker {workers}）",
-            "debug",
-        )
-
         try:
+            for _ in range(prefetch_limit):
+                submit_one()
+
+            _log(
+                progress,
+                f"音频预取队列 {max(0, len(future_by_index) - 1)}/{prefetch_queue_size}"
+                f"（解码 Worker {workers}）",
+                "debug",
+            )
             for chunk in chunks:
                 _raise_if_cancelled(progress)
                 future = future_by_index.pop(chunk.index)
                 wait_started = time.monotonic()
-                while True:
-                    try:
-                        audio = future.result(timeout=5.0)
-                        break
-                    except FutureTimeoutError:
-                        _raise_if_cancelled(progress)
-                        elapsed = time.monotonic() - wait_started
-                        media_percent = int((chunk.start / duration) * 100)
-                        _report(
-                            progress,
-                            12 + min(78, int(media_percent * 0.78)),
-                            f"正在并行预取音频块 {chunk.index + 1}/{len(chunks)}："
-                            f"{_timestamp(chunk.start)} - {_timestamp(chunk.end)}；"
-                            f"已等待 {_timestamp(elapsed)}；"
-                            f"预取队列 {len(future_by_index)}/{prefetch_queue_size}"
-                            f"（已就绪 {sum(item.done() for item in future_by_index.values())}）",
-                        )
-                    except Exception as exc:
-                        _raise_if_cancelled(progress)
-                        raise _ChunkedDecodeError(
-                            f"第 {chunk.index + 1}/{len(chunks)} 块解码失败：{exc}"
-                        ) from exc
+                while not wait((future,), timeout=5.0).done:
+                    _raise_if_cancelled(progress)
+                    elapsed = time.monotonic() - wait_started
+                    media_percent = int((chunk.start / duration) * 100)
+                    _report(
+                        progress,
+                        12 + min(78, int(media_percent * 0.78)),
+                        f"正在并行预取音频块 {chunk.index + 1}/{len(chunks)}："
+                        f"{_timestamp(chunk.start)} - {_timestamp(chunk.end)}；"
+                        f"已等待 {_timestamp(elapsed)}；"
+                        f"预取队列 {len(future_by_index)}/{prefetch_queue_size}"
+                        f"（已就绪 {sum(item.done() for item in future_by_index.values())}）",
+                    )
+                try:
+                    audio = future.result()
+                except TimeoutError as exc:
+                    _raise_if_cancelled(progress)
+                    raise LocalTranscriptionError(
+                        f"第 {chunk.index + 1}/{len(chunks)} 块读取录像超时，请稍后重试"
+                    ) from exc
+                except LocalTranscriptionError:
+                    # A timed-out media connection must not be retried through
+                    # faster-whisper's whole-stream path, which has no timeout.
+                    _raise_if_cancelled(progress)
+                    raise
+                except Exception as exc:
+                    _raise_if_cancelled(progress)
+                    raise _ChunkedDecodeError(
+                        f"第 {chunk.index + 1}/{len(chunks)} 块解码失败：{exc}"
+                    ) from exc
 
                 submit_one()
                 _raise_if_cancelled(progress)
@@ -410,6 +426,7 @@ class LocalTranscriptionService:
                     "debug",
                 )
         finally:
+            stop_decode.set()
             for future in future_by_index.values():
                 future.cancel()
             executor.shutdown(wait=True, cancel_futures=True)
@@ -1032,7 +1049,17 @@ def _decode_audio_chunk(
     )
 
     try:
-        with av.open(video_url, mode="r", metadata_errors="ignore") as container:
+        if cancel_check is not None:
+            cancel_check()
+        with av.open(
+            video_url,
+            mode="r",
+            metadata_errors="ignore",
+            timeout=(_REMOTE_OPEN_TIMEOUT_SECONDS, _REMOTE_READ_TIMEOUT_SECONDS),
+            # PyAV's timeout callback is inactive during seek(). FFmpeg's
+            # protocol timeout also bounds the HTTP Range request made there.
+            options={"rw_timeout": str(int(_REMOTE_READ_TIMEOUT_SECONDS * 1_000_000))},
+        ) as container:
             if not container.streams.audio:
                 raise _ChunkedDecodeError("录像中没有音频轨")
             stream = container.streams.audio[0]
@@ -1043,10 +1070,8 @@ def _decode_audio_chunk(
                 else:
                     container.seek(int(start * 1_000_000), backward=True, any_frame=False)
 
-            frame_counter = 0
             for frame in container.decode(stream):
-                frame_counter += 1
-                if cancel_check is not None and frame_counter % 32 == 0:
+                if cancel_check is not None:
                     cancel_check()
 
                 frame_start = _audio_frame_time(frame, stream)
@@ -1065,6 +1090,8 @@ def _decode_audio_chunk(
 
             for converted in resampler.resample(None):
                 arrays.append(converted.to_ndarray().reshape(-1))
+    except (TimeoutError, av.error.ExitError) as exc:
+        raise LocalTranscriptionError("读取课堂录像超时，请稍后重试") from exc
     finally:
         del resampler
 

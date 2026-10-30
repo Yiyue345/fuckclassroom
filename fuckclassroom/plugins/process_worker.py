@@ -58,23 +58,27 @@ class _ProcessCallCancelled(RuntimeError):
 class _CallProgress:
     def __init__(self, handler: "_Handler") -> None:
         self._handler = handler
+        self._event_lock = threading.Lock()
 
     def _event(self, kind: str, **payload: object) -> None:
-        self._handler._write(
-            {
-                "type": "event",
-                "event": {"kind": kind, **payload},
-            }
-        )
-        raw = self._handler.rfile.readline(_MAX_MESSAGE_BYTES + 1)
-        if not raw or len(raw) > _MAX_MESSAGE_BYTES:
-            raise RuntimeError("主进程未确认进度事件")
-        try:
-            acknowledgement = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RuntimeError("主进程返回了无效进度确认") from exc
-        if acknowledgement.get("cancel_requested"):
-            raise _ProcessCallCancelled("主进程请求取消任务")
+        # Progress, heartbeat and cancellation checks can originate on different
+        # threads. Keep each event paired with its own acknowledgement.
+        with self._event_lock:
+            self._handler._write(
+                {
+                    "type": "event",
+                    "event": {"kind": kind, **payload},
+                }
+            )
+            raw = self._handler.rfile.readline(_MAX_MESSAGE_BYTES + 1)
+            if not raw or len(raw) > _MAX_MESSAGE_BYTES:
+                raise RuntimeError("主进程未确认进度事件")
+            try:
+                acknowledgement = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError("主进程返回了无效进度确认") from exc
+            if acknowledgement.get("cancel_requested"):
+                raise _ProcessCallCancelled("主进程请求取消任务")
 
     def __call__(self, progress: int, message: str) -> None:
         self._event("progress", progress=int(progress), message=str(message))
