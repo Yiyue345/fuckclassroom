@@ -108,6 +108,40 @@ class WebVpnBrokerTests(unittest.TestCase):
         page.evaluate.return_value = True
         self.assertEqual(_classify_gateway_page(page, Mock(status=200)), "authenticated")
 
+    def test_forwarded_guet_cas_login_needs_auth_not_help_links(self):
+        forwarded = (
+            "https://v.guet.edu.cn/https/"
+            "77726476706e69737468656265737421f3f652d220256d44300d8db9d6562d"
+            "/authserver/login"
+        )
+        page = Mock(url=forwarded + "?service=redacted")
+        page.evaluate.return_value = True  # Anonymous school portal links.
+        page.locator.return_value.count.return_value = 1
+        self.assertEqual(_classify_gateway_page(page, Mock(status=200)), "expired")
+        page.evaluate.assert_not_called()
+        with patch("fuckclassroom.auth.webvpn.is_sms_verification_page", return_value=True):
+            self.assertEqual(self.service.submit_saved_login(page), "verification_required")
+
+    def test_login_password_fields_override_help_links_on_generic_gateway(self):
+        page = Mock(url="https://v.guet.edu.cn/")
+        page.evaluate.return_value = True
+        page.locator.return_value.count.return_value = 1
+        self.assertEqual(_classify_gateway_page(page, Mock(status=200)), "expired")
+        page.evaluate.assert_not_called()
+
+    def test_untrusted_forwarded_cas_prefix_never_reads_saved_credentials(self):
+        self.store.load.reset_mock()
+        prefix = "https://v.guet.edu.cn/https/"
+        other = prefix + "77726476706e69737468656265737421f3f652d220256d44300d8db9d6562e/authserver/login"
+        for url in (
+            other,
+            "https://attacker.example/authserver/login",
+            "http://v.guet.edu.cn/https/77726476706e69737468656265737421f3f652d220256d44300d8db9d6562d/authserver/login",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(self.service.submit_saved_login(Mock(url=url)), "not_cas")
+        self.store.load.assert_not_called()
+
     def test_storage_merge_preserves_unrelated_cookies(self):
         save_storage_state(self.service.storage_path, {"cookies": [
             {"name": "jw", "domain": "bkjwtest.guet.edu.cn", "path": "/", "value": "1"},
