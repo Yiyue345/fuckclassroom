@@ -6,21 +6,35 @@
 {% block page_title %}任务中心{% endblock %}
 
 {% block content %}
-  <div class="page-head">
-    <div><h1>任务中心</h1><p class="page-description">查看当前运行期间由各插件创建的后台任务；点击任务可查看实时日志、结果或执行取消操作。</p></div>
-  </div>
+  <div data-task-overview>
+    <div class="page-head">
+      <div>
+        <h1>任务中心</h1>
+        <p class="page-description">查看当前运行期间各插件创建的后台任务；进度自动更新，点击任务可查看日志、结果或取消操作。</p>
+      </div>
+      <div class="head-actions task-overview-actions">
+        <span class="task-overview-refresh" data-task-refresh-status role="status" aria-live="polite">正在同步任务…</span>
+        <a class="btn" href="/" data-task-back><svg class="icon"><use href="/static/icons.svg#arrow-left"></use></svg>返回上一页</a>
+      </div>
+    </div>
 
-  <section class="surface task-stack">
-    {% for task in tasks %}
-      <a class="task-item" href="/tasks/{{ task.id }}">
-        <div class="task-top">
-          <div><div class="task-title">{{ task.title }}</div><div class="task-meta">{{ task.message }} · 创建于 {{ task.created_at }} · {{ task.logs|length }} 条日志</div></div>
-          {% if task.status == "succeeded" %}<span class="status green">已完成</span>{% elif task.status == "failed" %}<span class="status red">失败</span>{% elif task.status == "cancelled" %}<span class="status gray">已取消</span>{% elif task.cancel_requested %}<span class="status blue">取消中</span>{% else %}<span class="status blue">进行中 {{ task.progress }}%</span>{% endif %}
-        </div>
-        {% if task.status == "running" %}<div class="progress"><span style="width: {{ task.progress }}%"></span></div>{% endif %}
-      </a>
-    {% else %}
-      <div class="empty-state"><div><svg class="icon"><use href="/static/icons.svg#list-todo"></use></svg><p>本次运行期间还没有任务</p></div></div>
-    {% endfor %}
-  </section>
+    <section class="surface task-stack" data-task-list aria-label="任务列表">
+      {% for task in tasks %}
+        <a class="task-item" href="/tasks/{{ task.id }}" data-task-id="{{ task.id }}">
+          <div class="task-top">
+            <div>
+              <div class="task-title" data-task-title>{{ task.title }}</div>
+              <div class="task-meta"><span data-task-message>{{ task.message }}</span> · 创建于 <span data-task-created>{{ task.created_at }}</span> · <span data-task-logs-count>{{ task.logs|length }}</span> 条日志</div>
+            </div>
+            <span class="status {% if task.status == 'succeeded' %}green{% elif task.status == 'failed' %}red{% elif task.status == 'cancelled' %}gray{% else %}blue{% endif %}" data-task-badge>{% if task.status == "succeeded" %}已完成{% elif task.status == "failed" %}失败{% elif task.status == "cancelled" %}已取消{% elif task.cancel_requested %}取消中{% else %}进行中 {{ task.progress }}%{% endif %}</span>
+          </div>
+          <div class="progress{% if task.status != 'running' %} hidden{% endif %}" data-task-progress><span data-task-bar style="width: {{ task.progress }}%"></span></div>
+        </a>
+      {% else %}
+        <div class="empty-state" data-task-empty><div><svg class="icon"><use href="/static/icons.svg#list-todo"></use></svg><p>本次运行期间还没有任务</p></div></div>
+      {% endfor %}
+    </section>
+  </div>
 {% endblock %}
+
+{% block scripts %}<script src="/plugins/core_ui/static/tasks.js?v=20261022-1"></script>{% endblock %}

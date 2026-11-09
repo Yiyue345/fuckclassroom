@@ -336,6 +336,12 @@
 .about-details a:hover { text-decoration: underline; }
 
 /* Core task pages. */
+.task-overview-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.task-overview-refresh { color: var(--text-muted); font-size: var(--font-xs); }
+.task-item [data-task-badge] { flex-shrink: 0; }
+@media (max-width: 760px) {
+  .task-overview-actions { gap: 8px; }
+}
 .task-stack { display: grid; }
 .task-item { border-bottom: 1px solid var(--border); padding: 16px 18px; }
 .task-item:last-child { border-bottom: 0; }

@@ -297,6 +297,34 @@ class TaskManager:
             tasks = sorted(self._tasks.values(), key=lambda state: state.created_at, reverse=True)
             return tasks[: max(0, limit)]
 
+    def list_recent_summaries(self, limit: int = 20) -> list[dict[str, object]]:
+        """Return a compact, consistent snapshot for the live task overview.
+
+        Avoid shipping full log histories to a page that only displays the
+        latest message, percentage and log count. Copy while holding the
+        manager lock so each row represents a single state.
+        """
+        with self._lock:
+            recent = sorted(
+                self._tasks.values(),
+                key=lambda state: state.created_at,
+                reverse=True,
+            )[: max(0, limit)]
+            return [
+                {
+                    "id": state.id,
+                    "title": state.title,
+                    "status": state.status,
+                    "progress": state.progress,
+                    "message": state.message,
+                    "created_at": state.created_at,
+                    "updated_at": state.updated_at,
+                    "logs_count": len(state.logs),
+                    "cancel_requested": state.cancel_requested,
+                }
+                for state in recent
+            ]
+
     def count_by_status(self, status: str) -> int:
         with self._lock:
             if status in self._terminal_counts:
