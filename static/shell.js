@@ -417,6 +417,9 @@
     if (url.origin !== window.location.origin) return false;
     if (!['http:', 'https:'].includes(url.protocol)) return false;
     if (url.pathname.startsWith('/downloads/file/')) return false;
+    // Course resource exports respond with an attachment, never HTML.
+    // Do not initiate PJAX or its full-navigation error fallback for them.
+    if (/^\/courses\/[^/]+\/lessons\/[^/]+\/download\/(?:ppt|transcript)$/.test(url.pathname)) return false;
 
     const current = new URL(window.location.href);
     if (url.pathname === current.pathname && url.search === current.search && url.hash) return false;
